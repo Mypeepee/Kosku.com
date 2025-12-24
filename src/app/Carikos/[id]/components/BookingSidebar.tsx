@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@iconify/react";
 import { AnimatePresence, motion } from "framer-motion";
-
+// 1. IMPORT HOOK CHAT
+import { useChat } from "@/context/ChatContext";
 
 // =============================================================================
 // 1. MOCK DATA PROMO
@@ -94,40 +95,31 @@ interface BookingSidebarProps {
 }
 
 export default function BookingSidebar({ data, selectedRoom }: BookingSidebarProps) {
+  // 2. PANGGIL HOOK setIsOpen
+  const { setIsOpen } = useChat();
+  
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [duration, setDuration] = useState(1); 
   const [selectedCoupon, setSelectedCoupon] = useState<any>(null);
   const [isPromoOpen, setIsPromoOpen] = useState(false);
   const [isDateOpen, setIsDateOpen] = useState(false);
   const [isDetailExpanded, setIsDetailExpanded] = useState(false);
+  const [isMobileSheetOpen, setIsMobileSheetOpen] = useState(false);
   
   const detailsRef = useRef<HTMLDivElement>(null);
 
   const formatRupiah = (val: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(val);
   const formatDate = (date: Date | null) => date ? date.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" }) : "Pilih Tanggal";
 
-  // --- LOGIC HITUNG TANGGAL SELESAI (REVISI) ---
   const getEndDate = () => {
       if (!startDate) return "-";
-      
       const endDate = new Date(startDate.getTime());
-      
-      // Tambahkan bulan
-      // Misal: 31 Jan + 1 bulan = 28 Feb (atau 29)
       const currentDay = endDate.getDate();
       endDate.setMonth(endDate.getMonth() + duration);
-
-      // Cek apakah tanggalnya berubah (artinya bulan tujuannya lebih pendek)
-      // Contoh: 31 Jan -> setMonth(+1) -> jadi 2 Maret (karena Feb cuma 28).
-      // Kita harus balikin ke tanggal terakhir bulan sebelumnya (28 Feb).
-      if (endDate.getDate() !== currentDay) {
-          endDate.setDate(0); 
-      }
-
+      if (endDate.getDate() !== currentDay) endDate.setDate(0); 
       return endDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
   };
 
-  // --- LOGIC HARGA ---
   const monthlyPrice = selectedRoom.price || 0; 
   const deposit = data.deposit || 500000;
   const serviceFee = 10000;
@@ -136,50 +128,20 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
   const grandTotal = Math.max(0, totalRent + deposit + serviceFee - discount);
 
   useEffect(() => { setDuration(1); }, [selectedRoom.id]);
-
   const incrementDuration = () => setDuration(prev => prev + 1);
   const decrementDuration = () => setDuration(prev => Math.max(1, prev - 1));
 
-  // Auto scroll saat rincian dibuka
   useEffect(() => {
     if (isDetailExpanded && detailsRef.current) {
         detailsRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [isDetailExpanded]);
 
-  return (
-    <>
-      <PromoModal isOpen={isPromoOpen} onClose={() => setIsPromoOpen(false)} onSelect={setSelectedCoupon} selectedId={selectedCoupon?.id} />
-      <DatePickerModal isOpen={isDateOpen} onClose={() => setIsDateOpen(false)} onSelect={setStartDate} />
-
-      {/* CONTAINER UTAMA (FIT SCREEN) */}
-      <div className="hidden lg:flex flex-col w-[380px] sticky top-24 h-[calc(100vh-120px)] bg-[#1A1A1A] border border-white/10 rounded-3xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] overflow-hidden">
-          
-          {/* --- BAGIAN 1: HEADER (FIXED) --- */}
-          <div className="p-6 pb-2 shrink-0 z-10 bg-[#1A1A1A]">
-              <div className="flex justify-between items-start">
-                <div className="flex-1 pr-4">
-                    <span className="text-xs font-bold text-[#86efac] uppercase tracking-wider mb-1 block truncate">
-                        {selectedRoom.name}
-                    </span>
-                    <div className="flex items-end gap-1">
-                        <span className="text-2xl font-extrabold text-white">{formatRupiah(monthlyPrice)}</span>
-                        <span className="text-xs text-gray-400 font-medium mb-1">/ bulan</span>
-                    </div>
-                </div>
-                <div className="bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 shrink-0 h-fit">
-                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"/>
-                    <span className="text-[10px] font-bold text-red-400 uppercase tracking-wide">Sisa 2 Kamar</span>
-                </div>
-              </div>
-          </div>
-
-          {/* --- BAGIAN 2: SCROLLABLE CONTENT (TENGAH) --- */}
-          <div className="flex-1 overflow-y-auto px-6 py-2 custom-scrollbar space-y-4">
-             
+  // REUSABLE CONTENT
+  const BookingContent = () => (
+      <>
              {/* 1. TANGGAL MULAI & SELESAI */}
              <div className="bg-[#0F0F0F] border border-white/10 rounded-xl p-4">
-                 {/* Mulai */}
                  <div onClick={() => setIsDateOpen(true)} className="flex justify-between items-center cursor-pointer group mb-3">
                     <span className="text-xs font-bold text-gray-400 group-hover:text-white transition-colors">Mulai Ngekos</span>
                     <div className="flex items-center gap-2">
@@ -187,10 +149,7 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
                         <Icon icon="solar:calendar-date-bold" className="text-[#86efac] text-lg"/>
                     </div>
                  </div>
-                 
                  <div className="border-t border-dashed border-white/10 my-3"></div>
-                 
-                 {/* Selesai (Simbol ditambahkan) */}
                  <div className="flex justify-between items-center">
                     <span className="text-xs font-bold text-gray-400">Berakhir Tanggal</span>
                     <div className="flex items-center gap-2">
@@ -200,36 +159,22 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
                  </div>
              </div>
 
-             {/* 2. DURASI SEWA (Counter +/-) */}
-             <div className="flex justify-between items-center bg-[#0F0F0F] border border-white/10 rounded-xl p-3 px-4">
+             {/* 2. DURASI SEWA */}
+             <div className="flex justify-between items-center bg-[#0F0F0F] border border-white/10 rounded-xl p-3 px-4 mt-4">
                 <div className="flex items-center gap-2">
                     <Icon icon="solar:clock-circle-bold" className="text-gray-400 text-lg"/>
                     <span className="text-sm font-bold text-gray-300">Durasi (bulan)</span>
                 </div>
                 <div className="flex items-center gap-3">
-                    <button 
-                        onClick={decrementDuration}
-                        className="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center text-white hover:bg-white/20 transition-all border border-white/10 active:scale-95 hover:border-white/30"
-                    >
-                        {/* Ikon Minus Tebal */}
-                        <Icon icon="ic:round-minus" className="text-xl"/>
-                    </button>
-                    
+                    <button onClick={decrementDuration} className="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center text-white hover:bg-white/20 transition-all border border-white/10 active:scale-95 hover:border-white/30"><Icon icon="ic:round-minus" className="text-xl"/></button>
                     <span className="font-bold text-white text-lg w-6 text-center">{duration}</span>
-                    
-                    <button 
-                        onClick={incrementDuration}
-                        className="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center text-white hover:bg-white/20 transition-all border border-white/10 active:scale-95 hover:border-white/30"
-                    >
-                        {/* Ikon Plus Tebal */}
-                        <Icon icon="ic:round-plus" className="text-xl"/>
-                    </button>
+                    <button onClick={incrementDuration} className="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center text-white hover:bg-white/20 transition-all border border-white/10 active:scale-95 hover:border-white/30"><Icon icon="ic:round-plus" className="text-xl"/></button>
                 </div>
              </div>
 
-             {/* 3. PROMO SECTION (Revisi UI Hijau Compact) */}
+             {/* 3. PROMO SECTION */}
+             <div className="mt-4">
              {selectedCoupon ? (
-                 // UI PROMO TERPILIH (Compact Green)
                  <div className="relative w-full rounded-xl p-3 flex items-center justify-between border border-[#86efac]/50 bg-[#86efac]/10">
                      <div className="flex items-center gap-3">
                         <Icon icon="solar:ticket-sale-bold" className="text-[#86efac] text-xl"/>
@@ -238,16 +183,9 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
                             <p className="text-[10px] font-medium text-[#86efac]">{selectedCoupon.desc}</p>
                         </div>
                      </div>
-                     {/* Tombol X Kecil */}
-                     <button 
-                        onClick={() => setSelectedCoupon(null)} 
-                        className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-white hover:bg-white/30 transition-all"
-                     >
-                        <Icon icon="solar:close-linear" className="text-xs"/>
-                     </button>
+                     <button onClick={() => setSelectedCoupon(null)} className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-white hover:bg-white/30 transition-all"><Icon icon="solar:close-linear" className="text-xs"/></button>
                  </div>
              ) : (
-                 // UI BELUM PILIH PROMO
                  <div onClick={() => setIsPromoOpen(true)} className="relative w-full rounded-xl p-3 px-4 cursor-pointer flex items-center justify-between border border-dashed border-gray-600 bg-[#252525] hover:border-gray-400 transition-all">
                      <div className="flex items-center gap-2.5">
                         <div className="bg-pink-500 p-1 rounded-md text-white"><Icon icon="solar:ticket-sale-bold" className="text-sm"/></div>
@@ -256,58 +194,22 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
                      <Icon icon="solar:alt-arrow-right-linear" className="text-gray-500"/>
                  </div>
              )}
+             </div>
 
-             {/* 4. RINCIAN BIAYA (Didalam Scroll) */}
-             <AnimatePresence>
-                {isDetailExpanded && (
-                    <motion.div 
-                        initial={{ height: 0, opacity: 0 }} 
-                        animate={{ height: "auto", opacity: 1 }} 
-                        exit={{ height: 0, opacity: 0 }} 
-                        className="overflow-hidden bg-[#0F0F0F] rounded-xl border border-white/5 p-4"
-                    >
-                        <div ref={detailsRef} className="space-y-3 text-xs text-gray-400">
-                            <div className="flex justify-between">
-                                <span>Sewa {selectedRoom.name} ({duration}x)</span>
-                                <span>{formatRupiah(totalRent)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span>Biaya Layanan</span>
-                                <span>{formatRupiah(serviceFee)}</span>
-                            </div>
-                            <div className="flex justify-between text-white">
-                                <span className="underline decoration-dotted cursor-help">Deposit (Dikembalikan)</span>
-                                <span>{formatRupiah(deposit)}</span>
-                            </div>
-                            {selectedCoupon && (
-                                <div className="flex justify-between text-[#86efac] font-bold">
-                                    <span>Potongan Promo</span>
-                                    <span>- {formatRupiah(discount)}</span>
-                                </div>
-                            )}
-                            <div className="border-t border-dashed border-white/10 my-2"></div>
-                            <p className="text-[10px] text-gray-500 italic text-center">Biaya belum termasuk listrik (jika token).</p>
-                        </div>
-                    </motion.div>
-                )}
-             </AnimatePresence>
-          </div>
-
-          {/* --- BAGIAN 3: FOOTER (FIXED) --- */}
-          <div className="p-6 pt-4 border-t border-white/10 bg-[#1A1A1A] z-20 shrink-0 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-             
-             <div className="flex justify-between items-center cursor-pointer group mb-4" onClick={() => setIsDetailExpanded(!isDetailExpanded)}>
-                <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-gray-300 group-hover:text-white transition-colors">Total Pembayaran</span>
-                    <Icon icon="solar:info-circle-linear" className="text-gray-500 text-sm"/>
-                </div>
-                <div className="flex items-center gap-1">
-                    <span className="text-lg font-extrabold text-[#86efac]">{formatRupiah(grandTotal)}</span>
-                    <Icon icon="solar:alt-arrow-down-linear" className={`text-gray-500 transition-transform ${isDetailExpanded ? 'rotate-180' : ''}`}/>
+             {/* 4. RINCIAN BIAYA */}
+             <div className="mt-4 overflow-hidden bg-[#0F0F0F] rounded-xl border border-white/5 p-4">
+                <div className="space-y-3 text-xs text-gray-400">
+                    <div className="flex justify-between"><span>Sewa {selectedRoom.name} ({duration}x)</span><span>{formatRupiah(totalRent)}</span></div>
+                    <div className="flex justify-between"><span>Biaya Layanan</span><span>{formatRupiah(serviceFee)}</span></div>
+                    <div className="flex justify-between text-white"><span className="underline decoration-dotted cursor-help">Deposit (Dikembalikan)</span><span>{formatRupiah(deposit)}</span></div>
+                    {selectedCoupon && <div className="flex justify-between text-[#86efac] font-bold"><span>Potongan Promo</span><span>- {formatRupiah(discount)}</span></div>}
+                    <div className="border-t border-dashed border-white/10 my-2"></div>
+                    <div className="flex justify-between text-sm font-bold text-white pt-1"><span>Total Pembayaran</span><span className="text-[#86efac]">{formatRupiah(grandTotal)}</span></div>
                 </div>
              </div>
 
-             <div className="space-y-3">
+             {/* 5. TOMBOL AKSI UTAMA */}
+             <div className="space-y-3 pt-6">
                   <button disabled={!startDate} className="w-full bg-[#86efac] hover:bg-[#6ee7b7] disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-black font-extrabold text-sm py-3.5 rounded-xl shadow-[0_0_20px_rgba(134,239,172,0.1)] hover:shadow-[0_0_25px_rgba(134,239,172,0.3)] transition-all active:scale-[0.98] flex justify-center items-center gap-2">
                     Ajukan Sewa
                   </button>
@@ -316,9 +218,146 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
                     Tanya Pemilik
                   </button>
              </div>
-          </div>
+      </>
+  );
 
+  return (
+    <>
+      <PromoModal isOpen={isPromoOpen} onClose={() => setIsPromoOpen(false)} onSelect={setSelectedCoupon} selectedId={selectedCoupon?.id} />
+      <DatePickerModal isOpen={isDateOpen} onClose={() => setIsDateOpen(false)} onSelect={setStartDate} />
+
+      {/* A. DESKTOP SIDEBAR */}
+      <div className="hidden lg:flex flex-col w-[380px] sticky top-24 h-[calc(100vh-120px)] bg-[#1A1A1A] border border-white/10 rounded-3xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] overflow-hidden">
+          <div className="p-6 pb-2 shrink-0 z-10 bg-[#1A1A1A]">
+              <div className="flex justify-between items-start">
+                <div className="flex-1 pr-4">
+                    <span className="text-xs font-bold text-[#86efac] uppercase tracking-wider mb-1 block truncate">{selectedRoom.name}</span>
+                    <div className="flex items-end gap-1"><span className="text-2xl font-extrabold text-white">{formatRupiah(monthlyPrice)}</span><span className="text-xs text-gray-400 font-medium mb-1">/ bulan</span></div>
+                </div>
+                <div className="bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 shrink-0 h-fit"><div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"/><span className="text-[10px] font-bold text-red-400 uppercase tracking-wide">Sisa 2 Kamar</span></div>
+              </div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-6 py-2 custom-scrollbar space-y-4">
+             {/* 1. TANGGAL */}
+             <div className="bg-[#0F0F0F] border border-white/10 rounded-xl p-4">
+                 <div onClick={() => setIsDateOpen(true)} className="flex justify-between items-center cursor-pointer group mb-3">
+                    <span className="text-xs font-bold text-gray-400 group-hover:text-white transition-colors">Mulai Ngekos</span>
+                    <div className="flex items-center gap-2">
+                        <span className={`text-sm font-bold ${startDate ? 'text-white' : 'text-gray-500'}`}>{formatDate(startDate)}</span>
+                        <Icon icon="solar:calendar-date-bold" className="text-[#86efac] text-lg"/>
+                    </div>
+                 </div>
+                 <div className="border-t border-dashed border-white/10 my-3"></div>
+                 <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-gray-400">Berakhir Tanggal</span>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">{getEndDate()}</span>
+                        <Icon icon="solar:calendar-date-bold" className="text-gray-500 text-lg"/>
+                    </div>
+                 </div>
+             </div>
+             {/* 2. DURASI */}
+             <div className="flex justify-between items-center bg-[#0F0F0F] border border-white/10 rounded-xl p-3 px-4">
+                <div className="flex items-center gap-2"><Icon icon="solar:clock-circle-bold" className="text-gray-400 text-lg"/><span className="text-sm font-bold text-gray-300">Durasi (bulan)</span></div>
+                <div className="flex items-center gap-3">
+                    <button onClick={decrementDuration} className="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center text-white hover:bg-white/20 transition-all border border-white/10 active:scale-95 hover:border-white/30"><Icon icon="ic:round-minus" className="text-xl"/></button>
+                    <span className="font-bold text-white text-lg w-6 text-center">{duration}</span>
+                    <button onClick={incrementDuration} className="w-9 h-9 rounded-lg bg-[#252525] flex items-center justify-center text-white hover:bg-white/20 transition-all border border-white/10 active:scale-95 hover:border-white/30"><Icon icon="ic:round-plus" className="text-xl"/></button>
+                </div>
+             </div>
+             {/* 3. PROMO */}
+             {selectedCoupon ? (
+                 <div className="relative w-full rounded-xl p-3 flex items-center justify-between border border-[#86efac]/50 bg-[#86efac]/10">
+                     <div className="flex items-center gap-3"><Icon icon="solar:ticket-sale-bold" className="text-[#86efac] text-xl"/><div><p className="text-xs font-extrabold text-white uppercase tracking-wide">{selectedCoupon.code}</p><p className="text-[10px] font-medium text-[#86efac]">{selectedCoupon.desc}</p></div></div><button onClick={() => setSelectedCoupon(null)} className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-white hover:bg-white/30 transition-all"><Icon icon="solar:close-linear" className="text-xs"/></button>
+                 </div>
+             ) : (
+                 <div onClick={() => setIsPromoOpen(true)} className="relative w-full rounded-xl p-3 px-4 cursor-pointer flex items-center justify-between border border-dashed border-gray-600 bg-[#252525] hover:border-gray-400 transition-all"><div className="flex items-center gap-2.5"><div className="bg-pink-500 p-1 rounded-md text-white"><Icon icon="solar:ticket-sale-bold" className="text-sm"/></div><span className="text-xs font-bold text-gray-300">Makin hemat pakai promo</span></div><Icon icon="solar:alt-arrow-right-linear" className="text-gray-500"/></div>
+             )}
+             {/* 4. RINCIAN EXPANDABLE */}
+             <AnimatePresence>
+                {isDetailExpanded && (
+                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden bg-[#0F0F0F] rounded-xl border border-white/5 p-4">
+                        <div ref={detailsRef} className="space-y-3 text-xs text-gray-400">
+                            <div className="flex justify-between"><span>Sewa {selectedRoom.name} ({duration}x)</span><span>{formatRupiah(totalRent)}</span></div>
+                            <div className="flex justify-between"><span>Biaya Layanan</span><span>{formatRupiah(serviceFee)}</span></div>
+                            <div className="flex justify-between text-white"><span className="underline decoration-dotted cursor-help">Deposit (Dikembalikan)</span><span>{formatRupiah(deposit)}</span></div>
+                            {selectedCoupon && <div className="flex justify-between text-[#86efac] font-bold"><span>Potongan Promo</span><span>- {formatRupiah(discount)}</span></div>}
+                            <div className="border-t border-dashed border-white/10 my-2"></div><p className="text-[10px] text-gray-500 italic text-center">Biaya belum termasuk listrik (jika token).</p>
+                        </div>
+                    </motion.div>
+                )}
+             </AnimatePresence>
+          </div>
+          {/* FOOTER */}
+          <div className="p-6 pt-4 border-t border-white/10 bg-[#1A1A1A] z-20 shrink-0 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+             <div className="flex justify-between items-center cursor-pointer group mb-4" onClick={() => setIsDetailExpanded(!isDetailExpanded)}>
+                <div className="flex items-center gap-2"><span className="text-sm font-bold text-gray-300 group-hover:text-white transition-colors">Total Pembayaran</span><Icon icon="solar:info-circle-linear" className="text-gray-500 text-sm"/></div>
+                <div className="flex items-center gap-1"><span className="text-lg font-extrabold text-[#86efac]">{formatRupiah(grandTotal)}</span><Icon icon="solar:alt-arrow-down-linear" className={`text-gray-500 transition-transform ${isDetailExpanded ? 'rotate-180' : ''}`}/></div>
+             </div>
+             <div className="space-y-3">
+                  <button disabled={!startDate} className="w-full bg-[#86efac] hover:bg-[#6ee7b7] disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-black font-extrabold text-sm py-3.5 rounded-xl shadow-[0_0_20px_rgba(134,239,172,0.1)] hover:shadow-[0_0_25px_rgba(134,239,172,0.3)] transition-all active:scale-[0.98] flex justify-center items-center gap-2">Ajukan Sewa</button>
+                  <button 
+                    onClick={() => setIsOpen(true)} // <--- UPDATED: FUNGSI BUKA CHAT
+                    className="w-full bg-transparent border border-white/20 hover:bg-white/10 text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 group"
+                  >
+                    <Icon icon="solar:chat-round-dots-linear" className="text-lg group-hover:text-[#86efac] transition-colors"/>
+                    Tanya Pemilik
+                  </button>
+             </div>
+          </div>
       </div>
+
+      {/* ======================================================================
+          B. MOBILE FLOATING BAR (REVISI: CHAT BUTTON INTEGRATED)
+      ====================================================================== */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-[100] bg-[#1A1A1A] border-t border-white/10 p-4 pb-6 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] safe-area-bottom">
+         <div className="flex items-center gap-3">
+             {/* Info Harga */}
+             <div className="flex-1 min-w-0">
+                 <p className="text-[10px] text-gray-400 uppercase tracking-wide font-bold mb-0.5 truncate">Mulai dari</p>
+                 <div className="flex items-end gap-1">
+                     <span className="text-lg font-extrabold text-[#86efac] truncate">{formatRupiah(monthlyPrice)}</span>
+                     <span className="text-[10px] text-gray-400 mb-1">/ bln</span>
+                 </div>
+             </div>
+
+             {/* Wrapper Tombol Aksi */}
+             <div className="flex items-center gap-2">
+                 {/* 1. Tombol Chat Kecil (Square) */}
+                 <button 
+                    className="w-12 h-12 rounded-xl border border-white/20 bg-[#252525] flex items-center justify-center text-white active:scale-95 transition-transform"
+                    onClick={() => setIsOpen(true)} // <--- UPDATED: FUNGSI BUKA CHAT
+                 >
+                    <Icon icon="solar:chat-round-dots-linear" className="text-xl"/>
+                 </button>
+
+                 {/* 2. Tombol Ajukan Sewa Besar */}
+                 <button 
+                    onClick={() => setIsMobileSheetOpen(true)}
+                    className="bg-[#86efac] text-black font-extrabold text-sm px-5 py-3 rounded-xl shadow-lg active:scale-95 transition-transform whitespace-nowrap"
+                 >
+                    Ajukan Sewa
+                 </button>
+             </div>
+         </div>
+      </div>
+
+      {/* C. MOBILE BOTTOM SHEET */}
+      <AnimatePresence>
+        {isMobileSheetOpen && (
+            <div className="lg:hidden fixed inset-0 z-[9999] flex items-end justify-center">
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setIsMobileSheetOpen(false)} />
+                <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", damping: 25, stiffness: 300 }} className="bg-[#1A1A1A] w-full max-h-[85vh] rounded-t-3xl border-t border-white/10 relative z-10 flex flex-col shadow-2xl">
+                    <div className="w-full flex justify-center pt-3 pb-1" onClick={() => setIsMobileSheetOpen(false)}><div className="w-12 h-1.5 bg-white/20 rounded-full"/></div>
+                    <div className="px-6 py-4 border-b border-white/5 flex justify-between items-center">
+                        <div><h3 className="text-lg font-bold text-white">Rincian Sewa</h3><p className="text-xs text-gray-400 mt-0.5">{selectedRoom.name}</p></div>
+                        <button onClick={() => setIsMobileSheetOpen(false)} className="p-2 bg-white/5 rounded-full text-white hover:bg-white/10"><Icon icon="solar:close-linear"/></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar"><BookingContent /></div>
+                </motion.div>
+            </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
