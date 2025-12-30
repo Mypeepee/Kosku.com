@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Icon } from "@iconify/react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useRouter } from "next/navigation"; // 1. IMPORT ROUTER
+import { useChat } from "@/context/ChatContext"; // 2. IMPORT CHAT
 
 // =============================================================================
 // 1. MOCK DATA PROMO
@@ -93,6 +95,9 @@ interface BookingSidebarProps {
 }
 
 export default function BookingSidebar({ data, selectedRoom }: BookingSidebarProps) {
+  const router = useRouter(); // 3. INISIALISASI ROUTER
+  const { setIsOpen } = useChat(); // 4. INISIALISASI CHAT
+  
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [duration, setDuration] = useState(1); 
   const [selectedCoupon, setSelectedCoupon] = useState<any>(null);
@@ -133,6 +138,26 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
         detailsRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [isDetailExpanded]);
+
+  // --- 5. LOGIC NAVIGASI KE PAGE BOOKING ---
+  const handleBooking = () => {
+    if (!startDate) return;
+
+    // Buat URL Parameter
+    const params = new URLSearchParams({
+        roomName: selectedRoom.name,
+        price: monthlyPrice.toString(),
+        duration: duration.toString(),
+        start: formatDate(startDate),
+        end: getEndDate(),
+        deposit: deposit.toString(),
+        serviceFee: serviceFee.toString(),
+        discount: discount.toString()
+    });
+
+    // Pindah ke halaman booking
+    router.push(`/booking?${params.toString()}`);
+  };
 
   // --- REUSABLE CONTENT (Supaya bisa dipakai di Desktop & Mobile Sheet) ---
   const BookingContent = () => (
@@ -206,12 +231,19 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
                 </div>
              </div>
 
-             {/* 5. TOMBOL AKSI UTAMA */}
+             {/* 5. TOMBOL AKSI UTAMA (Di dalam sheet mobile) */}
              <div className="space-y-3 pt-6">
-                  <button disabled={!startDate} className="w-full bg-[#86efac] hover:bg-[#6ee7b7] disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-black font-extrabold text-sm py-3.5 rounded-xl shadow-[0_0_20px_rgba(134,239,172,0.1)] hover:shadow-[0_0_25px_rgba(134,239,172,0.3)] transition-all active:scale-[0.98] flex justify-center items-center gap-2">
+                  <button 
+                    disabled={!startDate} 
+                    onClick={handleBooking} // <--- 6. PASANG FUNGSI NAVIGASI DISINI
+                    className="w-full bg-[#86efac] hover:bg-[#6ee7b7] disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-black font-extrabold text-sm py-3.5 rounded-xl shadow-[0_0_20px_rgba(134,239,172,0.1)] hover:shadow-[0_0_25px_rgba(134,239,172,0.3)] transition-all active:scale-[0.98] flex justify-center items-center gap-2"
+                  >
                     Ajukan Sewa
                   </button>
-                  <button className="w-full bg-transparent border border-white/20 hover:bg-white/10 text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 group">
+                  <button 
+                    onClick={() => setIsOpen(true)} 
+                    className="w-full bg-transparent border border-white/20 hover:bg-white/10 text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 group"
+                  >
                     <Icon icon="solar:chat-round-dots-linear" className="text-lg group-hover:text-[#86efac] transition-colors"/>
                     Tanya Pemilik
                   </button>
@@ -303,8 +335,20 @@ export default function BookingSidebar({ data, selectedRoom }: BookingSidebarPro
                 <div className="flex items-center gap-1"><span className="text-lg font-extrabold text-[#86efac]">{formatRupiah(grandTotal)}</span><Icon icon="solar:alt-arrow-down-linear" className={`text-gray-500 transition-transform ${isDetailExpanded ? 'rotate-180' : ''}`}/></div>
              </div>
              <div className="space-y-3">
-                  <button disabled={!startDate} className="w-full bg-[#86efac] hover:bg-[#6ee7b7] disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-black font-extrabold text-sm py-3.5 rounded-xl shadow-[0_0_20px_rgba(134,239,172,0.1)] hover:shadow-[0_0_25px_rgba(134,239,172,0.3)] transition-all active:scale-[0.98] flex justify-center items-center gap-2">Ajukan Sewa</button>
-                  <button className="w-full bg-transparent border border-white/20 hover:bg-white/10 text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 group"><Icon icon="solar:chat-round-dots-linear" className="text-lg group-hover:text-[#86efac] transition-colors"/>Tanya Pemilik</button>
+                  <button 
+                    disabled={!startDate} 
+                    onClick={handleBooking} // <--- 7. PASANG FUNGSI NAVIGASI DISINI JUGA (Desktop Footer)
+                    className="w-full bg-[#86efac] hover:bg-[#6ee7b7] disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-black font-extrabold text-sm py-3.5 rounded-xl shadow-[0_0_20px_rgba(134,239,172,0.1)] hover:shadow-[0_0_25px_rgba(134,239,172,0.3)] transition-all active:scale-[0.98] flex justify-center items-center gap-2"
+                  >
+                    Ajukan Sewa
+                  </button>
+                  <button 
+                    onClick={() => setIsOpen(true)} 
+                    className="w-full bg-transparent border border-white/20 hover:bg-white/10 text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 group"
+                  >
+                    <Icon icon="solar:chat-round-dots-linear" className="text-lg group-hover:text-[#86efac] transition-colors"/>
+                    Tanya Pemilik
+                  </button>
              </div>
           </div>
       </div>
