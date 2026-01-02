@@ -6,6 +6,31 @@ import Image from "next/image";
 // Helper format rupiah
 const formatRupiah = (val: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(val);
 
+// Helper Hitung Tanggal Checkout (New)
+const getCheckoutDate = (startDateStr: string, durationMonths: number) => {
+    if (!startDateStr || startDateStr === "-") return "-";
+    
+    try {
+        // Parsing tanggal (Asumsi format: "20 Jan 2024")
+        const date = new Date(startDateStr);
+        
+        // Validasi jika tanggal tidak valid
+        if (isNaN(date.getTime())) return "-"; 
+
+        // Tambah Bulan sesuai durasi
+        date.setMonth(date.getMonth() + durationMonths);
+
+        // Format kembali ke Bahasa Indonesia (Contoh: 20 Apr 2024)
+        return new Intl.DateTimeFormat('id-ID', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric'
+        }).format(date);
+    } catch (e) {
+        return "-";
+    }
+};
+
 export default function BookingSummary({ 
   initialData, duration, guestCount, extraChargeAdult, 
   parking, parkingFee, totalRentCost, voucherDiscount, 
@@ -27,9 +52,21 @@ export default function BookingSummary({
 
             <div className="p-5 border-b border-white/5">
                 <div className="flex justify-between items-center bg-[#1A1A1A] p-3 rounded-xl">
-                    <div className="text-center"><p className="text-[10px] text-gray-500 font-bold uppercase">Check In</p><p className="text-sm font-bold text-white">{initialData.startDate}</p></div>
+                    <div className="text-center">
+                        <p className="text-[10px] text-gray-500 font-bold uppercase">Check In</p>
+                        <p className="text-sm font-bold text-white">{initialData.startDate}</p>
+                    </div>
+                    
+                    {/* Divider Vertical */}
                     <div className="h-8 w-[1px] bg-white/10"></div>
-                    <div className="text-center"><p className="text-[10px] text-gray-500 font-bold uppercase">Check Out</p><p className="text-sm font-bold text-white">+{duration} Bulan</p></div>
+                    
+                    <div className="text-center">
+                        <p className="text-[10px] text-gray-500 font-bold uppercase">Check Out</p>
+                        {/* UPDATE DISINI: Menampilkan Tanggal Real, bukan "+ Bulan" */}
+                        <p className="text-sm font-bold text-white">
+                            {getCheckoutDate(initialData.startDate, duration)}
+                        </p>
+                    </div>
                 </div>
             </div>
 

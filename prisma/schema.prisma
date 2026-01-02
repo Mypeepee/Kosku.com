@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client"
+  // Kita arahkan manual ke folder node_modules standar
+  output   = "../node_modules/@prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  // URL dikosongkan (Sesuai settingan Prisma 7 Anda dengan prisma.config.ts)
+}
+
+model Pengguna {
+  id_pengguna      String   @id @default(uuid()) @db.Uuid
+  
+  // Data Wajib
+  nama_lengkap     String   @db.VarChar(100)
+  email            String   @unique @db.VarChar(150)
+  nomor_telepon    String   @unique @db.VarChar(20)
+  kata_sandi       String   @db.VarChar(255)
+  
+  // Data Profil (Opsional/Boleh Kosong)
+  kota_asal        String?  @db.VarChar(50)
+  tanggal_lahir    DateTime? @db.Date
+  pekerjaan        pekerjaan_enum?
+  jenis_kelamin    gender_enum?
+  foto_profil_url  String?
+  
+  // Data System (Wajib ada nilai, tapi punya default)
+  total_poin       Int              @default(0)
+  peran            peran_enum       @default(penyewa)
+  status_akun      status_akun_enum @default(aktif)
+  wa_terverifikasi Boolean          @default(false)
+  
+  // Audit Trail
+  login_terakhir   DateTime? @db.Timestamp(6)
+  dibuat_pada      DateTime  @default(now()) @db.Timestamp(6)
+  
+  // Otomatis update waktu jika data diedit
+  diperbarui_pada  DateTime  @updatedAt @db.Timestamp(6)
+
+  // Mapping agar nama tabel di database tetap huruf kecil 'pengguna'
+  @@map("pengguna")
+}
+
+enum gender_enum {
+  pria
+  wanita
+}
+
+enum pekerjaan_enum {
+  mahasiswa
+  karyawan
+  wiraswasta
+  keluarga
+  lainnya
+}
+
+enum peran_enum {
+  super_admin
+  admin_kosku
+  pemilik
+  pengelola
+  penyewa
+}
+
+enum status_akun_enum {
+  aktif
+  nonaktif
+  dibekukan
+}
