@@ -1,75 +1,74 @@
-// src/app/api/auth/register/route.ts
-import { db } from "@/lib/db";
 import { NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
+import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcrypt";
 
-export async function POST(req: Request) {
+const prisma = new PrismaClient();
+
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const { nama_lengkap, identifier, kata_sandi } = body; 
-    // 'identifier' adalah input gabungan (bisa email / hp)
+    const body = await request.json();
+    const { name, password, email, phone, login_mode } = body;
 
-    if (!nama_lengkap || !identifier || !kata_sandi) {
-      return NextResponse.json({ message: "Data tidak lengkap" }, { status: 400 });
-    }
-
-    // --- DETEKSI TIPE INPUT ---
-    const isEmail = identifier.includes("@");
-    
-    let emailFinal = "";
-    let phoneFinal = "";
-
-    if (isEmail) {
-      // Jika user daftar pakai EMAIL
-      emailFinal = identifier;
-      // Generate HP dummy random agar unik (karena db mewajibkan unique)
-      phoneFinal = `000-${Date.now()}`; 
-    } else {
-      // Jika user daftar pakai HP
-      phoneFinal = identifier;
-      // Generate Email dummy
-      emailFinal = `${identifier}@kosku.com`;
-    }
-
-    // --- CEK DUPLIKASI ---
-    // Kita cek apakah identifier ini sudah pernah dipakai
-    const existingUser = await db.pengguna.findFirst({
-      where: {
-        OR: [
-          { email: emailFinal },
-          { nomor_telepon: phoneFinal }
-        ]
-      }
-    });
-
-    if (existingUser) {
+    // 1. Validasi Dasar
+    if (!name || !password) {
       return NextResponse.json(
-        { message: isEmail ? "Email sudah terdaftar" : "Nomor HP sudah terdaftar" },
-        { status: 409 }
+        { message: "Nama dan Password wajib diisi" },
+        { status: 400 }
       );
     }
 
-    const hashedPassword = await bcrypt.hash(kata_sandi, 10);
+    // 2. Cek apakah user sudah ada (berdasarkan mode login)
+    // Jika daftar pakai email, cek email. Jika hp, cek hp.
+    let existingUser = null;
 
-    const newUser = await db.pengguna.create({
+    if (login_mode === "email") {
+      if (!email) {
+        return NextResponse.json({ message: "Email wajib diisi" }, { status: 400 });
+      }
+      existingUser = await prisma.pengguna.findUnique({
+        where: { email: email },
+      });
+    } else if (login_mode === "phone") {
+      if (!phone) {
+        return NextResponse.json({ message: "Nomor HP wajib diisi" }, { status: 400 });
+      }
+      existingUser = await prisma.pengguna.findUnique({
+        where: { nomor_telepon: phone },
+      });
+    }
+
+    if (existingUser) {
+      return NextResponse.json(
+        { message: "User dengan data tersebut sudah terdaftar" },
+        { status: 409 } // 409 Conflict
+      );
+    }
+
+    // 3. Hash Password (Enkripsi)
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 4. Simpan ke Database
+    // Kita gunakan data yang sesuai mode, sisanya biarkan null (undefined)
+    const newUser = await prisma.pengguna.create({
       data: {
-        nama_lengkap,
-        email: emailFinal,
-        nomor_telepon: phoneFinal,
+        nama_lengkap: name,
         kata_sandi: hashedPassword,
-        peran: "penyewa", // Default
+        email: login_mode === "email" ? email : null,
+        nomor_telepon: login_mode === "phone" ? phone : null,
+        peran: "penyewa", // Default sesuai database
+        status_akun: "aktif",
       },
     });
 
     return NextResponse.json(
-      { message: "Registrasi Berhasil!", user: newUser },
+      { message: "Pendaftaran berhasil", user: newUser },
       { status: 201 }
     );
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Register Error:", error);
     return NextResponse.json(
-      { message: "Terjadi kesalahan server." },
+      { message: "Terjadi kesalahan server", error: error.message },
       { status: 500 }
     );
   }

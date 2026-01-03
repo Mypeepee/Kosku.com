@@ -1,15 +1,16 @@
 /** @type {import('next').NextConfig} */
-const isProd = process.env.NODE_ENV === "production";
-
 const nextConfig = {
-  basePath: isProd ? "/Crypgo" : "",
-  assetPrefix: isProd ? "/Crypgo/" : "",
-  output: "export",
+  // output: "export", // <--- INI SUDAH SAYA MATIKAN (Supaya Login Jalan)
+  
   images: {
-    unoptimized: true,
+    unoptimized: true, // Biarkan true dulu agar gambar aman
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**", // Mengizinkan gambar dari semua domain (untuk foto profil Google)
+      },
+    ],
   },
 };
 
 export default nextConfig;
-
- 
