@@ -26,7 +26,13 @@ model Pengguna {
   login_terakhir   DateTime?         @db.Timestamp(6)
   dibuat_pada      DateTime?         @default(now()) @db.Timestamp(6)
   diperbarui_pada  DateTime?         @default(now()) @updatedAt @db.Timestamp(6)
-
+// Field Baru
+  kode_referral     String?          @unique @db.VarChar(20)
+  direferensikan_oleh String?        @db.Uuid // ID Upline
+  
+  // Relasi Self-Relation (Optional, biar bisa query siapa mengajak siapa)
+  upline              Pengguna?        @relation("ReferralHistory", fields: [direferensikan_oleh], references: [id_pengguna])
+  downlines           Pengguna[]       @relation("ReferralHistory")
   @@map("pengguna")
 }
 
