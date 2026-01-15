@@ -60,7 +60,6 @@ const DesktopMenuItem = ({ item }: { item: any }) => {
                   href={subItem.href}
                   className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-white/5 transition-all group"
                 >
-                  {/* ✅ BAGIAN INI DIUBAH: Menggunakan icon dinamis dari data */}
                   <div className="shrink-0 w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-[#86efac] group-hover:bg-[#86efac]/10 transition-colors">
                      <Icon icon={subItem.icon || "solar:link-circle-linear"} className="text-lg"/>
                   </div>
@@ -132,7 +131,6 @@ const MobileMenuItem = ({ item, closeMenu }: { item: any, closeMenu: () => void 
                   onClick={closeMenu}
                   className="flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-all"
                 >
-                  {/* ✅ BAGIAN INI DIUBAH: Menggunakan icon dinamis di mobile juga */}
                   <Icon icon={sub.icon || "solar:arrow-right-linear"} className="text-gray-500 text-lg"/>
                   <div className="flex flex-col">
                     <span>{sub.label}</span>
@@ -211,10 +209,17 @@ const Header: React.FC = () => {
                 onMouseEnter={() => setProfileDropdownOpen(true)}
                 onMouseLeave={() => setProfileDropdownOpen(false)}
               >
-                <button className="flex items-center gap-2 py-2 group">
-                   <div className="w-10 h-10 rounded-full border border-white/10 overflow-hidden relative bg-white/5">
+                {/* ✅ REVISI 1: Desktop Profile Button (Lebih Robust) */}
+                <button className="flex items-center gap-2 py-2 group outline-none">
+                   <div className="w-10 h-10 rounded-full border border-white/10 overflow-hidden relative bg-white/5 shrink-0">
                       {session?.user?.image ? (
-                        <Image src={session.user.image} alt="Profile" fill className="object-cover" />
+                        <Image 
+                          src={session.user.image} 
+                          alt="Profile" 
+                          fill 
+                          sizes="40px" 
+                          className="object-cover" 
+                        />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400 group-hover:text-[#86efac] transition-colors">
                            <Icon icon="solar:user-circle-bold" className="text-2xl" />
@@ -316,11 +321,20 @@ const Header: React.FC = () => {
                 {status === "authenticated" ? (
                    <>
                       <div className="flex items-center gap-3 mb-4 px-2">
-                        <div className="w-10 h-10 rounded-full bg-white/10 overflow-hidden relative">
+                        {/* ✅ REVISI 2: Mobile Profile Picture (Lebih Robust) */}
+                        <div className="w-10 h-10 rounded-full bg-white/10 overflow-hidden relative shrink-0 border border-white/10">
                            {session?.user?.image ? (
-                             <Image src={session.user.image} alt="User" fill className="object-cover"/>
+                             <Image 
+                                src={session.user.image} 
+                                alt="User" 
+                                fill 
+                                sizes="40px" 
+                                className="object-cover"
+                             />
                            ) : (
-                             <Icon icon="solar:user-circle-bold" className="text-white w-full h-full p-2"/>
+                             <div className="w-full h-full flex items-center justify-center text-white">
+                                <Icon icon="solar:user-circle-bold" className="text-2xl"/>
+                             </div>
                            )}
                         </div>
                         <div>

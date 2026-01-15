@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  // HAPUS BARIS 'output'. JANGAN ADA APAPUN DISINI.
 }
 
 datasource db {
@@ -9,56 +8,50 @@ datasource db {
 }
 
 model Pengguna {
-  id_pengguna      String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  nama_lengkap     String            @db.VarChar(100)
-  email            String?           @unique @db.VarChar(150)
-  nomor_telepon    String?           @unique @db.VarChar(20)
-  kata_sandi       String            @db.VarChar(255)
-  kota_asal        String?           @db.VarChar(50)
-  tanggal_lahir    DateTime?         @db.Date
-  pekerjaan        pekerjaan_enum?
+  // Menggunakan gen_random_uuid() sesuai SQL terbaru
+  id_pengguna      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nama_lengkap     String    @db.VarChar(100)
+  email            String?   @unique @db.VarChar(150)
+  nomor_telepon    String?   @unique @db.VarChar(20)
+
+  // Auth: Password boleh kosong jika login via Google
+  kata_sandi       String?   @db.VarChar(255)
+  google_id        String?   @unique @db.VarChar(100)
+
+  // Demografi
+  kota_asal        String?   @db.VarChar(50)
+  tanggal_lahir    DateTime? @db.Date
   jenis_kelamin    gender_enum?
   foto_profil_url  String?
-  total_poin       Int?              @default(0)
-  peran            peran_enum?       @default(penyewa)
-  status_akun      status_akun_enum? @default(aktif)
+
+  // Sistem
+  peran            peran_enum?       @default(USER)
+  status_akun      status_akun_enum? @default(AKTIF)
   wa_terverifikasi Boolean?          @default(false)
-  login_terakhir   DateTime?         @db.Timestamp(6)
-  dibuat_pada      DateTime?         @default(now()) @db.Timestamp(6)
-  diperbarui_pada  DateTime?         @default(now()) @updatedAt @db.Timestamp(6)
-// Field Baru
-  kode_referral     String?          @unique @db.VarChar(20)
-  direferensikan_oleh String?        @db.Uuid // ID Upline
-  
-  // Relasi Self-Relation (Optional, biar bisa query siapa mengajak siapa)
-  upline              Pengguna?        @relation("ReferralHistory", fields: [direferensikan_oleh], references: [id_pengguna])
-  downlines           Pengguna[]       @relation("ReferralHistory")
+  kode_referral    String?           @unique @db.VarChar(20)
+
+  // Log
+  login_terakhir   DateTime? @db.Timestamp(6)
+  dibuat_pada      DateTime? @default(now()) @db.Timestamp(6)
+  diperbarui_pada  DateTime? @default(now()) @updatedAt @db.Timestamp(6)
+
   @@map("pengguna")
 }
 
-enum gender_enum {
-  pria
-  wanita
-}
-
-enum pekerjaan_enum {
-  mahasiswa
-  karyawan
-  wiraswasta
-  keluarga
-  lainnya
-}
+// --- ENUM DEFINITIONS (Sesuaikan dengan SQL) ---
 
 enum peran_enum {
-  super_admin
-  admin_kosku
-  pemilik
-  pengelola
-  penyewa
+  USER
+  AGENT
 }
 
 enum status_akun_enum {
-  aktif
-  nonaktif
-  dibekukan
+  AKTIF
+  NONAKTIF
+  DIBEKUKAN
+}
+
+enum gender_enum {
+  LAKI_LAKI
+  PEREMPUAN
 }

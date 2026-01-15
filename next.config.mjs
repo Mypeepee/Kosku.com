@@ -1,13 +1,25 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // output: "export", // <--- INI SUDAH SAYA MATIKAN (Supaya Login Jalan)
+  // output: "export", // Tetap dimatikan agar Login jalan
   
   images: {
-    unoptimized: true, // Biarkan true dulu agar gambar aman
+    // unoptimized: true, <--- HAPUS atau comment baris ini agar fitur optimasi jalan
+    
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "**", // Mengizinkan gambar dari semua domain (untuk foto profil Google)
+        hostname: "lh3.googleusercontent.com", // Server utama foto profil Google
+        pathname: "**",
+      },
+      {
+        protocol: "https",
+        hostname: "googleusercontent.com", // Cadangan domain Google
+        pathname: "**",
+      },
+      {
+        protocol: "https",
+        hostname: "avatars.githubusercontent.com", // Jaga-jaga kalau login Github nanti
+        pathname: "**",
       },
     ],
   },
