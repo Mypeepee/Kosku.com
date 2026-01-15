@@ -11,6 +11,7 @@ import ProfileHeader from "./ProfileHeader";
 import ProfileSidebar from "./ProfileSidebar";
 import ProfileForm from "./ProfileForm";
 import BookingHistory from "./BookingHistory";
+import RedeemPoints from "./RedeemPoints";
 
 const ProfilePage = () => {
   const { data: session, status } = useSession();
@@ -135,6 +136,9 @@ const ProfilePage = () => {
                 <BookingHistory />
               )}
 
+            {activeTab === "reward" && (
+                <RedeemPoints userPoints={formData.total_poin || 0} />
+            )}
             </AnimatePresence>
           </main>
         </div>

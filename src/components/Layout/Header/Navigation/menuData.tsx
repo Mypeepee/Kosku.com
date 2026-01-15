@@ -1,55 +1,70 @@
 import { HeaderItem } from "@/types/menu";
 
 export const headerData: HeaderItem[] = [
-  // 1. UTAMA: Pencarian (Bisa dipecah jika nanti ada Apartemen/Rumah)
+  // 1. CARI PROPERTI (Pintu Gerbang Utama)
   {
-    label: "Cari Sewa",
-    href: "/search", // Atau tetap /Carikos jika belum ada kategori lain
+    label: "Cari Properti",
+    href: "/search", // Fallback link
     submenu: [
       {
-        label: "Cari Kos",
-        href: "/Carikos",
+        label: "Proyek Baru (Primary)", 
+        href: "/search/primary", // ✅ Arahkan ke Landing Page Primary
+        description: "Project baru & indent dari developer",
+        icon: "solar:city-bold",
       },
       {
-        label: "Sewa Apartemen", // Persiapan masa depan
-        href: "/apartemen",
+        label: "Properti Second",
+        href: "/search/secondary", // ✅ Arahkan ke Landing Page Secondary
+        description: "Rumah siap huni & resale",
+        icon: "solar:home-2-bold", 
+      },
+      {
+        label: "Aset Lelang",
+        href: "/search/lelang", // ✅ Arahkan ke Landing Page Lelang
+        description: "Aset investasi di bawah harga pasar",
+        icon: "solar:tag-price-bold",
+      },
+      {
+        label: "Sewa & Kos",
+        href: "/sewa",
+        description: "Pilihan sewa harian hingga tahunan",
+        icon: "solar:key-minimalistic-square-bold",
       },
     ],
   },
 
-  // 3. EDUKASI & SEO: Konten menarik untuk user
+  // ... (Menu Agent, Tentang Kami, dll tetap sama)
+  {
+    label: "Agent Kami",
+    href: "/agents",
+  },
+  {
+    label: "Tentang Kami",
+    href: "/about",
+    submenu: [
+      {
+        label: "Profil Perusahaan",
+        href: "/about/profile",
+        icon: "solar:buildings-2-bold",
+      },
+      {
+        label: "Gabung Jadi Agent",
+        href: "/careers/join-agent",
+        icon: "solar:user-hand-up-bold",
+      },
+      {
+        label: "Titip Jual Properti",
+        href: "/titip-jual",
+        icon: "solar:hand-shake-bold",
+      },
+    ],
+  },
   {
     label: "Blog",
     href: "/blog",
   },
-
-  // 4. TRUST: Agar user merasa aman
   {
     label: "Bantuan",
     href: "/help",
-  },
-
-  // 5. SUPPLY SIDE: Menu untuk pemilik (Dipisah agar eksklusif)
-  {
-    label: "Jadi Juragan", // Wording lebih menarik daripada "Pemilik Kos"
-    href: "/owner",
-    submenu: [
-      {
-        label: "Sewakan Properti",
-        href: "/owner/register",
-      },
-      {
-        label: "Kenapa Kosku?",
-        href: "/kenapa-kosku",
-      },
-      {
-        label: "Manajemen Kos (AI)",
-        href: "/owner/management",
-      },
-      {
-        label: "Auto Tagih",
-        href: "/owner/billing",
-      },
-    ],
   },
 ];

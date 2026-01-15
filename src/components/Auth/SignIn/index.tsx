@@ -10,6 +10,11 @@ import Image from "next/image";
 
 type Mode = "email" | "phone";
 
+// ✅ TAMBAHAN 1: Definisikan tipe props untuk fungsi close
+interface SigninProps {
+  closeModal?: () => void;
+}
+
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
     // Eye Off (modern)
@@ -69,7 +74,8 @@ function normalizePhoneDigits(raw: string) {
   return digits;
 }
 
-const Signin = () => {
+// ✅ TAMBAHAN 2: Terima props closeModal disini
+const Signin = ({ closeModal }: SigninProps) => {
   const router = useRouter();
 
   const [mode, setMode] = useState<Mode>("email");
@@ -80,10 +86,21 @@ const Signin = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleGoogle = () => {
-    // kalau kamu pakai next-auth provider google juga bisa:
-    // signIn("google", { callbackUrl: "/" });
-    window.location.href = "/api/auth/google";
+  // --- REVISI: Handle Google Login menggunakan NextAuth ---
+  const handleGoogle = async () => {
+    setLoading(true);
+    // ✅ TAMBAHAN 3A: Tutup modal saat user klik Google (UX lebih mulus saat redirect)
+    if (closeModal) closeModal();
+    
+    try {
+      // callbackUrl: "/" artinya setelah login sukses akan diarahkan ke Home
+      await signIn("google", { callbackUrl: "/" });
+    } catch (error) {
+      console.error(error);
+      toast.error("Gagal koneksi ke Google");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const loginUser = async (e: React.FormEvent) => {
@@ -108,6 +125,7 @@ const Signin = () => {
         throw new Error("Kata sandi wajib diisi.");
       }
 
+      // Login Credentials (Manual)
       const callback = await signIn("credentials", payload);
 
       if (callback?.error) {
@@ -118,6 +136,10 @@ const Signin = () => {
 
       if (callback?.ok && !callback?.error) {
         toast.success("Berhasil masuk.");
+        
+        // ✅ TAMBAHAN 3B: Tutup modal secara manual sebelum redirect
+        if (closeModal) closeModal();
+        
         setLoading(false);
         router.push("/");
       }
@@ -160,12 +182,14 @@ const Signin = () => {
       <button
         type="button"
         onClick={handleGoogle}
+        disabled={loading}
         className="
           flex w-full items-center justify-center gap-3
           rounded-md border border-dark_border/60
           bg-transparent px-5 py-3
           text-base font-medium text-white
           transition hover:bg-white/5 hover:border-primary/60
+          disabled:opacity-50 disabled:cursor-not-allowed
         "
       >
         <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">

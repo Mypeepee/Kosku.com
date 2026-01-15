@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react"; // <--- WAJIB DITAMBAHKAN!
 import toast from "react-hot-toast";
 import Loader from "@/components/Common/Loader";
 import { useState } from "react";
@@ -85,9 +86,18 @@ export default function SignUp() {
   const [phoneDigits, setPhoneDigits] = useState(""); // tanpa 0 depan
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleGoogle = () => {
-    // sesuaikan dengan implementasi auth kamu
-    window.location.href = "/api/auth/google";
+  const handleGoogle = async () => {
+    setLoading(true);
+    try {
+      // Ini akan memicu popup login Google
+      // Pastikan Google Client ID sudah benar di .env
+      await signIn("google", { callbackUrl: "/profile" }); 
+    } catch (error) {
+      console.error(error); // Cek console browser untuk error detail
+      toast.error("Gagal koneksi ke Google");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

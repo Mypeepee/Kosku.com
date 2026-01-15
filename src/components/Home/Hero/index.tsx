@@ -68,24 +68,24 @@ const Hero = () => {
             className="max-w-4xl mx-auto flex flex-col items-center"
           >
             {/* Badge Kecil */}
-            <div className="inline-flex items-center gap-2 mb-6 bg-white/10 backdrop-blur-md border border-white/20 px-5 py-2 rounded-full shadow-lg">
-               <Icon icon="solar:home-smile-bold" className="text-primary text-xl" />
-               <span className="text-white font-bold text-sm tracking-widest uppercase">
-                 Solusi Hunian Masa Kini
+            <div className="inline-flex items-center gap-2 mb-4 bg-white/10 backdrop-blur-md border border-white/20 px-5 py-1.5 rounded-full shadow-lg hover:bg-white/15 transition-all cursor-default">
+               <Icon icon="solar:crown-star-bold" className="text-[#86efac] text-lg" />
+               <span className="text-white font-bold text-xs md:text-sm tracking-widest uppercase">
+                 Platform Properti No.1 Terlengkap
                </span>
             </div>
             
             {/* Judul Besar */}
             <h1 className="text-white font-extrabold lg:text-7xl md:text-6xl text-4xl leading-tight mb-6 drop-shadow-2xl">
-              Cari Kos Impian <br/>
+                Satu Akses, <br/>
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-green-300 to-primary">
-                Tanpa Drama.
+                Ribuan Aset.
               </span>
             </h1>
             
             {/* Deskripsi */}
             <p className="text-gray-200 text-lg md:text-xl mb-10 leading-relaxed max-w-2xl drop-shadow-md">
-              Ribuan pilihan kos eksklusif yang terverifikasi. Booking aman, bayar mudah, langsung pindahan.
+            Temukan <b className="text-white">Hunian Sewa</b>, beli <b className="text-white">Rumah Baru & Second</b>, hingga investasi <b className="text-white">Aset Lelang</b>. Semua kebutuhan properti Anda ada di sini.
             </p>
 
             {/* Tombol CTA */}

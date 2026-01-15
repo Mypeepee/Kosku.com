@@ -19,6 +19,7 @@ const ProfileSidebar = ({ activeTab, setActiveTab, onSignOut }: Props) => {
           {[
             { id: "profile", label: "Profil", icon: "solar:user-id-bold" },
             { id: "booking", label: "Sewa", icon: "solar:history-bold" },
+            { id: "reward", label: "Reward Zone", icon: "solar:gift-bold" },
             { id: "security", label: "Keamanan", icon: "solar:shield-keyhole-bold" },
           ].map((tab) => (
             <button

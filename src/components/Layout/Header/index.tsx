@@ -5,40 +5,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSession, signOut } from "next-auth/react"; // ✅ IMPORT PENTING
+import { useSession, signOut } from "next-auth/react";
 import Image from "next/image";
 
 import Logo from "./Logo";
 import Signin from "@/components/Auth/SignIn";
 import SignUp from "@/components/Auth/SignUp";
 
-// =============================================================================
-// 1. DATA MENU
-// =============================================================================
-const NAV_ITEMS = [
-  {
-    id: 1,
-    title: "Cari Sewa",
-    path: "#",
-    newTab: false,
-    submenu: [
-      { id: 11, title: "Cari Kos", path: "/Carikos", icon: "solar:home-smile-bold" },
-      { id: 12, title: "Sewa Apartemen", path: "/apartemen", icon: "solar:buildings-bold" },
-    ],
-  },
-  { id: 2, title: "Blog", path: "/blog", newTab: false },
-  { id: 3, title: "Bantuan", path: "/help", newTab: false },
-  {
-    id: 4,
-    title: "Jadi Juragan",
-    path: "#",
-    newTab: false,
-    submenu: [
-      { id: 41, title: "Daftarkan Kos", path: "/daftar-kos", icon: "solar:key-minimalistic-square-bold" },
-      { id: 42, title: "Panduan Pemilik", path: "/kenapa-kosku", icon: "solar:book-bookmark-bold" },
-    ],
-  },
-];
+import { headerData } from "./Navigation/menuData";
 
 // =============================================================================
 // 2. COMPONENT: DESKTOP MENU ITEM
@@ -46,7 +20,8 @@ const NAV_ITEMS = [
 const DesktopMenuItem = ({ item }: { item: any }) => {
   const [isHovered, setIsHovered] = useState(false);
   const pathUrl = usePathname();
-  const isActive = item.path === pathUrl;
+  
+  const isActive = item.href === pathUrl || item.submenu?.some((sub: any) => sub.href === pathUrl);
 
   return (
     <div 
@@ -55,12 +30,12 @@ const DesktopMenuItem = ({ item }: { item: any }) => {
       onMouseLeave={() => setIsHovered(false)}
     >
       <Link
-        href={item.submenu ? "#" : item.path}
+        href={item.submenu ? "#" : item.href}
         className={`flex items-center gap-1 text-sm font-bold transition-colors py-2 ${
           isActive || isHovered ? "text-[#86efac]" : "text-white/80 hover:text-white"
         }`}
       >
-        {item.title}
+        {item.label}
         {item.submenu && (
           <Icon 
             icon="solar:alt-arrow-down-linear" 
@@ -76,21 +51,29 @@ const DesktopMenuItem = ({ item }: { item: any }) => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
             transition={{ duration: 0.2 }}
-            className="absolute top-full left-0 pt-4 w-56 z-50"
+            className="absolute top-full left-0 pt-4 w-64 z-50"
           >
             <div className="bg-[#1A1A1A] border border-white/10 rounded-xl shadow-2xl overflow-hidden p-2">
-              {item.submenu.map((subItem: any) => (
+              {item.submenu.map((subItem: any, index: number) => (
                 <Link
-                  key={subItem.id}
-                  href={subItem.path}
+                  key={index}
+                  href={subItem.href}
                   className="flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-white/5 transition-all group"
                 >
-                  <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-[#86efac] group-hover:bg-[#86efac]/10 transition-colors">
+                  {/* ✅ BAGIAN INI DIUBAH: Menggunakan icon dinamis dari data */}
+                  <div className="shrink-0 w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-[#86efac] group-hover:bg-[#86efac]/10 transition-colors">
                      <Icon icon={subItem.icon || "solar:link-circle-linear"} className="text-lg"/>
                   </div>
-                  <span className="text-sm font-medium text-gray-300 group-hover:text-white">
-                    {subItem.title}
-                  </span>
+                  <div>
+                    <span className="block text-sm font-medium text-gray-300 group-hover:text-white">
+                      {subItem.label}
+                    </span>
+                    {subItem.description && (
+                      <span className="text-[10px] text-gray-500 block leading-tight mt-0.5">
+                        {subItem.description}
+                      </span>
+                    )}
+                  </div>
                 </Link>
               ))}
             </div>
@@ -116,7 +99,7 @@ const MobileMenuItem = ({ item, closeMenu }: { item: any, closeMenu: () => void 
           className="w-full flex items-center justify-between py-4 px-2 text-left"
         >
           <span className={`text-base font-bold ${isOpen ? "text-[#86efac]" : "text-white"}`}>
-            {item.title}
+            {item.label}
           </span>
           <Icon 
             icon="solar:alt-arrow-down-linear" 
@@ -125,11 +108,11 @@ const MobileMenuItem = ({ item, closeMenu }: { item: any, closeMenu: () => void 
         </button>
       ) : (
         <Link
-          href={item.path}
+          href={item.href}
           onClick={closeMenu}
           className="block w-full py-4 px-2 text-base font-bold text-white hover:text-[#86efac] transition-colors"
         >
-          {item.title}
+          {item.label}
         </Link>
       )}
 
@@ -142,15 +125,19 @@ const MobileMenuItem = ({ item, closeMenu }: { item: any, closeMenu: () => void 
             className="overflow-hidden bg-white/5 rounded-xl mb-4"
           >
             <div className="flex flex-col py-2">
-              {item.submenu.map((sub: any) => (
+              {item.submenu.map((sub: any, index: number) => (
                 <Link
-                  key={sub.id}
-                  href={sub.path}
+                  key={index}
+                  href={sub.href}
                   onClick={closeMenu}
                   className="flex items-center gap-3 px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-all"
                 >
-                  <Icon icon={sub.icon || "solar:arrow-right-linear"} className="text-gray-500"/>
-                  {sub.title}
+                  {/* ✅ BAGIAN INI DIUBAH: Menggunakan icon dinamis di mobile juga */}
+                  <Icon icon={sub.icon || "solar:arrow-right-linear"} className="text-gray-500 text-lg"/>
+                  <div className="flex flex-col">
+                    <span>{sub.label}</span>
+                    {sub.description && <span className="text-[10px] text-gray-500">{sub.description}</span>}
+                  </div>
                 </Link>
               ))}
             </div>
@@ -165,15 +152,14 @@ const MobileMenuItem = ({ item, closeMenu }: { item: any, closeMenu: () => void 
 // 4. MAIN COMPONENT: HEADER
 // =============================================================================
 const Header: React.FC = () => {
-  const { data: session, status } = useSession(); // ✅ CEK SESSION DI SINI
+  const { data: session, status } = useSession();
   const pathUrl = usePathname();
   const isDetailPage = pathUrl?.startsWith("/Carikos/") && pathUrl.split("/").length > 2;
 
   const [navbarOpen, setNavbarOpen] = useState(false);
   const [sticky, setSticky] = useState(false);
-  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false); // ✅ State Dropdown Profil
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   
-  // Auth Modals
   const [isSignInOpen, setIsSignInOpen] = useState(false);
   const [isSignUpOpen, setIsSignUpOpen] = useState(false);
 
@@ -188,7 +174,6 @@ const Header: React.FC = () => {
     else document.body.style.overflow = "";
   }, [navbarOpen, isSignInOpen, isSignUpOpen]);
 
-  // Handle Logout
   const handleLogout = () => {
     signOut({ callbackUrl: "/" });
     setProfileDropdownOpen(false);
@@ -204,33 +189,29 @@ const Header: React.FC = () => {
       >
         <div className="container mx-auto px-4 lg:max-w-screen-xl flex items-center justify-between">
           
-          {/* 1. LOGO */}
           <div className="shrink-0 mr-8">
             <Logo />
           </div>
 
-          {/* 2. DESKTOP NAVIGATION */}
-          <nav className="hidden lg:flex flex-grow items-center gap-8">
-            {NAV_ITEMS.map((item) => (
-              <DesktopMenuItem key={item.id} item={item} />
+          {/* DESKTOP NAVIGATION */}
+          <nav className="hidden lg:flex flex-grow items-center gap-6 xl:gap-8">
+            {(headerData || []).map((item, index) => (
+              <DesktopMenuItem key={index} item={item} />
             ))}
           </nav>
 
-          {/* 3. AUTH / PROFILE BUTTONS (RIGHT) */}
+          {/* RIGHT SIDE (AUTH) */}
           <div className="flex items-center gap-4">
             
-            {/* ✅ LOGIKA: Jika Loading, tampilkan skeleton/kosong */}
             {status === "loading" ? (
               <div className="hidden lg:block w-8 h-8 rounded-full bg-white/10 animate-pulse"></div>
             ) : status === "authenticated" ? (
-              /* ✅ JIKA SUDAH LOGIN: TAMPILKAN PROFIL */
               <div 
                 className="hidden lg:block relative"
                 onMouseEnter={() => setProfileDropdownOpen(true)}
                 onMouseLeave={() => setProfileDropdownOpen(false)}
               >
                 <button className="flex items-center gap-2 py-2 group">
-                   {/* Avatar Circle */}
                    <div className="w-10 h-10 rounded-full border border-white/10 overflow-hidden relative bg-white/5">
                       {session?.user?.image ? (
                         <Image src={session.user.image} alt="Profile" fill className="object-cover" />
@@ -240,11 +221,8 @@ const Header: React.FC = () => {
                         </div>
                       )}
                    </div>
-                   {/* Nama User (Opsional, kalau mau ditampilkan sebelah foto) */}
-                   {/* <span className="text-white text-sm font-bold max-w-[100px] truncate">{session?.user?.name || "User"}</span> */}
                 </button>
 
-                {/* Dropdown Menu Profile */}
                 <AnimatePresence>
                   {profileDropdownOpen && (
                     <motion.div
@@ -278,7 +256,6 @@ const Header: React.FC = () => {
                 </AnimatePresence>
               </div>
             ) : (
-              /* ✅ JIKA BELUM LOGIN: TAMPILKAN TOMBOL MASUK/DAFTAR */
               <>
                 <button
                   onClick={() => setIsSignInOpen(true)}
@@ -295,7 +272,6 @@ const Header: React.FC = () => {
               </>
             )}
 
-            {/* MOBILE BURGER BUTTON */}
             <button
               onClick={() => setNavbarOpen(true)}
               className="lg:hidden p-2 text-white hover:bg-white/10 rounded-full transition-colors"
@@ -306,26 +282,21 @@ const Header: React.FC = () => {
         </div>
       </header>
 
-      {/* ==================================================================
-          MOBILE MENU DRAWER
-      ================================================================== */}
+      {/* MOBILE MENU DRAWER */}
       <AnimatePresence>
         {navbarOpen && (
           <>
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setNavbarOpen(false)}
               className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 lg:hidden"
             />
             
-            {/* Drawer */}
             <motion.div
               initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               className="fixed top-0 right-0 h-full w-[85%] max-w-xs bg-[#121212] border-l border-white/10 z-[51] shadow-2xl flex flex-col lg:hidden"
             >
-              {/* Drawer Header */}
               <div className="flex items-center justify-between p-5 border-b border-white/10">
                 <span className="text-lg font-bold text-white">Menu</span>
                 <button onClick={() => setNavbarOpen(false)} className="p-2 rounded-full hover:bg-white/10 text-white transition-colors">
@@ -333,19 +304,16 @@ const Header: React.FC = () => {
                 </button>
               </div>
 
-              {/* Drawer Body */}
               <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
                 <div className="flex flex-col">
-                  {NAV_ITEMS.map((item) => (
-                    <MobileMenuItem key={item.id} item={item} closeMenu={() => setNavbarOpen(false)} />
+                  {(headerData || []).map((item, index) => (
+                    <MobileMenuItem key={index} item={item} closeMenu={() => setNavbarOpen(false)} />
                   ))}
                 </div>
               </div>
 
-              {/* ✅ Drawer Footer (Mobile Auth Logic) */}
               <div className="p-5 border-t border-white/10 bg-[#0F0F0F] space-y-3">
                 {status === "authenticated" ? (
-                   // Tampilan Mobile jika SUDAH Login
                    <>
                       <div className="flex items-center gap-3 mb-4 px-2">
                         <div className="w-10 h-10 rounded-full bg-white/10 overflow-hidden relative">
@@ -379,7 +347,6 @@ const Header: React.FC = () => {
                       </button>
                    </>
                 ) : (
-                   // Tampilan Mobile jika BELUM Login
                    <>
                     <button 
                       onClick={() => { setNavbarOpen(false); setIsSignInOpen(true); }}
@@ -408,7 +375,7 @@ const Header: React.FC = () => {
           <div className="relative w-full max-w-md bg-[#181818] border border-white/10 rounded-2xl p-8 shadow-2xl">
              <button onClick={() => setIsSignInOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><Icon icon="solar:close-circle-bold" className="text-2xl"/></button>
              <h3 className="text-2xl font-bold text-white mb-6 text-center">Selamat Datang Kembali</h3>
-             <Signin />
+             <Signin closeModal={() => setIsSignInOpen(false)} />
           </div>
         </div>
       )}
