@@ -8,108 +8,96 @@ import { Icon } from "@iconify/react";
 import MobileNav from "./components/MobileNav";
 import ImageGallery from "./components/ImageGallery";
 import DetailInfo from "./components/DetailInfo";
-import BookingSidebar from "./components/BookingSidebar";
+import BookingSidebar from "./components/AgentSidebar";
 import SimilarProperties from "./components/SimilarProperties";
 
-// --- MOCK DATA DETAIL KOS (Updated Structure for UI) ---
-const kosDetailData = {
-  id: 101,
-  title: "Kosku Executive Residence Setiabudi",
-  location: "Kawasan Setiabudi Tengah, Jakarta Selatan",
-  // Harga Sewa & Deposit
-  priceRates: { 
-    monthly: 2500000, 
-    daily: 150000 
-  },
-  deposit: 500000,
-  
-  images: [
-    "/images/hero/banner.jpg", 
-    "/images/hero/banner.jpg",
-    "/images/hero/banner.jpg",
-    "/images/hero/banner.jpg",
-    "/images/hero/banner.jpg"
-  ],
-  
-  type: "Putri",
-  address: "Jl. Setiabudi Tengah No. 18, Jakarta Selatan",
-  rating: 4.8,
-  reviews: 124,
-  description: "Hunian kos premium khusus putri dengan konsep Scandinavian modern. Lokasi sangat strategis, hanya 5 menit jalan kaki ke stasiun MRT Setiabudi. Lingkungan tenang, aman, dan bebas banjir.",
-  
-  owner: { 
-    name: "Ibu Hajjah Rina", 
-    join: "2021", 
-    response: "Hitungan Menit",
-    avatar: "R"
-  },
-  
-  specs: { laundry: "Gratis (20kg)", security: "24 Jam + CCTV" },
+// --- INTERFACE SESUAI DATABASE ---
+interface ProductData {
+  id_property: string;
+  judul: string;
+  kota: string;
+  harga: number;
+  deskripsi: string;
+  alamat_lengkap: string;
+  gambar_utama_url: string;
+  kamar_tidur: number;
+  kamar_mandi: number;
+  luas_tanah: number;
+  luas_bangunan: number;
+  listrik: number;
+  agent: {
+    nama_kantor: string;
+    rating: number;
+    jumlah_closing: number;
+    nomor_whatsapp: string;
+    kota_area: string;
+    pengguna: {
+      nama_lengkap: string;
+      foto_profil_url: string;
+    }
+  };
+  kategori: string;
+  jenis_transaksi: string;
+}
 
-  // --- DATA KAMAR YANG DISESUAIKAN UI ---
-  roomTypes: [
-    { 
-        id: 1, 
-        name: "Economy Room", 
-        price: 1800000, 
-        size: "3x3 m", 
-        bedType: "Single Bed (100x200)", 
-        image: "/images/hero/banner.jpg", 
-        isPromo: true,
-        // Data untuk Grid Fasilitas (Icon + Label)
-        amenities: [
-            { icon: "solar:bath-linear", label: "KM Luar" },
-            { icon: "solar:fan-linear", label: "Kipas Angin" },
-            { icon: "solar:bolt-linear", label: "Listrik Token" },
-            { icon: "solar:user-linear", label: "Max 1 Orang" }
-        ],
-        // Badge Fasilitas Bawah
-        tags: ["WiFi", "Meja Belajar", "Lemari"]
+export default function DetailClient({ product }: { product: ProductData }) {
+  
+  // 1. DATA ADAPTER
+  const formattedData = {
+    id: product.id_property,
+    title: product.judul,
+    location: product.kota,
+    address: product.alamat_lengkap || product.kota,
+    description: product.deskripsi || "Hubungi agen untuk detail lebih lanjut.",
+    type: product.kategori, 
+    priceRates: { monthly: Number(product.harga), daily: 0 },
+    deposit: 0,
+    images: [
+      product.gambar_utama_url || "/images/placeholder.jpg",
+      "/images/placeholder.jpg", 
+      "/images/placeholder.jpg",
+    ],
+    owner: { 
+      name: product.agent?.pengguna?.nama_lengkap || "Agent Premier", 
+      avatar: product.agent?.pengguna?.foto_profil_url || "", 
+      phone: product.agent?.nomor_whatsapp, 
+      office: product.agent?.nama_kantor || "Premier Asset Office",
+      rating: product.agent?.rating || 5.0,
+      closing: product.agent?.jumlah_closing || 0,
+      area: product.agent?.kota_area || "Indonesia",
+      join: "2024", 
     },
-    { 
-        id: 2, 
-        name: "Standard AC", 
-        price: 2500000, 
-        size: "3x4 m", 
-        bedType: "Double Bed (120x200)", 
-        image: "/images/hero/banner.jpg", 
-        isPromo: false,
-        amenities: [
-            { icon: "solar:bath-bold", label: "KM Dalam" },
-            { icon: "solar:snowflake-bold", label: "AC Standard" },
-            { icon: "solar:bolt-linear", label: "Listrik Token" },
-            { icon: "solar:user-linear", label: "Max 1 Orang" }
-        ],
-        tags: ["WiFi", "Meja Kerja", "Lemari Besar", "Cermin"]
+    specs: { 
+        luas_tanah: `${product.luas_tanah} m²`,
+        luas_bangunan: `${product.luas_bangunan} m²`,
+        listrik: `${product.listrik || '-'} Watt`
     },
-    { 
-        id: 3, 
-        name: "VIP Suite", 
-        price: 3500000, 
-        size: "4x5 m", 
-        bedType: "Queen Bed (160x200)", 
-        image: "/images/hero/banner.jpg", 
-        isPromo: false,
-        amenities: [
-            { icon: "solar:bath-bold", label: "KM Dalam + Heater" },
-            { icon: "solar:snowflake-bold", label: "AC Inverter" },
-            { icon: "solar:bolt-circle-bold", label: "Free Listrik" },
-            { icon: "solar:users-group-rounded-bold", label: "Bisa Pasutri (Max 2)", highlight: true } // Highlight pink
-        ],
-        tags: ["Smart TV", "Kulkas Pribadi", "Sofa", "Balcony"]
-    },
-  ],
+    roomTypes: [
+      { 
+          id: 1, 
+          name: "Unit Properti Utama", 
+          price: Number(product.harga), 
+          size: `${product.luas_bangunan} m²`, 
+          bedType: `${product.kamar_tidur} KT / ${product.kamar_mandi} KM`, 
+          image: product.gambar_utama_url || "/images/placeholder.jpg", 
+          // PERBAIKAN: Menambahkan 'tags' agar DetailInfo tidak error
+          tags: [product.jenis_transaksi, product.kategori, "Bebas Banjir"], 
+          amenities: [
+              { icon: "solar:bed-bold", label: `${product.kamar_tidur} KT` },
+              { icon: "solar:bath-bold", label: `${product.kamar_mandi} KM` },
+              { icon: "solar:ruler-angular-bold", label: `LT ${product.luas_tanah}m²` },
+              { icon: "solar:home-bold", label: `LB ${product.luas_bangunan}m²` }
+          ],
+      }
+    ],
+    facilities: { public: ["Sertifikat Hak Milik (SHM)", "Bebas Banjir", "Akses Jalan Lebar"] },
+    rules: ["Hubungi agen untuk survei", "Harga Nego"],
+    depositInfo: { amount: 0, notes: "-" },
+    accessibility: ["Dekat Jalan Raya", "Akses Mobil"],
+    ratingDetail: { clean: 5, comfort: 5, location: 5, service: 5, value: 5 },
+  };
 
-  facilities: { public: ["Dapur Bersama", "Kulkas Umum", "Dispenser", "Ruang Tamu", "Parkir Motor"] },
-  rules: ["Tamu Pria dilarang masuk kamar", "Akses 24 Jam", "Dilarang Merokok di kamar"],
-  depositInfo: { amount: 500000, notes: "Dikembalikan utuh saat check-out jika tidak ada kerusakan." },
-  accessibility: ["Dekat MRT", "Dekat Mall", "Banyak Makanan"],
-  ratingDetail: { clean: 4.9, comfort: 4.8, location: 5.0, service: 4.7, value: 4.8 },
-};
-
-export default function DetailClient({ id }: { id: number }) {
-  // 1. LIFTING STATE UP: State ada di Parent agar bisa dishare
-  const [selectedRoom, setSelectedRoom] = useState(kosDetailData.roomTypes[0]);
+  const [selectedRoom, setSelectedRoom] = useState(formattedData.roomTypes[0]);
 
   return (
     <div className="text-white font-sans bg-[#0F0F0F]">
@@ -121,14 +109,14 @@ export default function DetailClient({ id }: { id: number }) {
          <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
             <Link href="/" className="hover:text-[#86efac] transition-colors">Home</Link> 
             <Icon icon="solar:alt-arrow-right-linear" />
-            <Link href="/Carikos" className="hover:text-[#86efac] transition-colors">Cari Kos</Link> 
+            <Link href="/Carikos" className="hover:text-[#86efac] transition-colors">Jual</Link> 
             <Icon icon="solar:alt-arrow-right-linear" />
-            <span className="text-white truncate max-w-xs">{kosDetailData.title}</span>
+            <span className="text-white truncate max-w-xs">{formattedData.title}</span>
          </div>
       </div>
 
       <div className="container mx-auto lg:px-4 mb-8">
-         <ImageGallery images={kosDetailData.images} />
+          <ImageGallery images={formattedData.images} />
       </div>
 
       <div className="container mx-auto px-4 relative">
@@ -136,15 +124,14 @@ export default function DetailClient({ id }: { id: number }) {
             
             {/* 2. PASS STATE KE DETAIL INFO */}
             <DetailInfo 
-                data={kosDetailData} 
+                data={formattedData}
                 selectedRoom={selectedRoom} 
                 setSelectedRoom={setSelectedRoom} 
             />
 
             {/* 3. PASS STATE KE BOOKING SIDEBAR */}
             <BookingSidebar 
-                data={kosDetailData} 
-                selectedRoom={selectedRoom} 
+                data={formattedData}  
             />
             
          </div>

@@ -11,16 +11,20 @@ import ChatWidget from "@/components/Chat/ChatWidget";
 
 // 2. IMPORT PROVIDERS
 import { ChatProvider } from "@/context/ChatContext"; 
-import NextAuthProvider from "@/providers/NextAuthProvider"; // 👈 IMPORT INI (Sesuaikan lokasi file Langkah 1)
-import { Toaster } from "react-hot-toast"; // (Opsional: Agar toast muncul di semua halaman)
+import NextAuthProvider from "@/providers/NextAuthProvider"; 
+import { Toaster } from "react-hot-toast"; 
 
 const font = DM_Sans({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "Kosku.com - Solusi Pencari Kos Terbaik",
-  description: "Temukan kos impian atau kelola bisnis kos Anda dengan mudah di Kosku.",
+  // REVISI: Judul Website (Akan muncul di Tab Browser & Google)
+  title: "Premier Asset - Satu Aplikasi untuk Semua Kebutuhan Properti Anda",
+  
+  // REVISI: Deskripsi Website (Untuk SEO Google)
+  description: "Platform terintegrasi untuk jual beli properti Primary, Secondary, dan Aset Lelang. Temukan investasi properti terbaik dan aman bersama Premier Asset.",
+  
   icons: {
-    icon: "/images/logo/logokosku.svg",
+    icon: "/images/logo/logopremier.svg", // Logo di Tab Browser (Favicon)
   },
 };
 
@@ -30,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="id" suppressHydrationWarning>
       <body className={`${font.className}`}>
         <ThemeProvider
           attribute="class"
@@ -43,14 +47,14 @@ export default function RootLayout({
             {/* 4. CHAT PROVIDER */}
             <ChatProvider>
               <Aoscompo>
-                <Header /> {/* Header sekarang bisa akses session login */}
+                <Header /> 
                 {children}
                 <Footer />
               </Aoscompo>
               
               <ScrollToTop />
               <ChatWidget />
-              <Toaster position="top-center" /> {/* Tambahan agar notifikasi toast muncul */}
+              <Toaster position="top-center" /> 
               
             </ChatProvider>
             
