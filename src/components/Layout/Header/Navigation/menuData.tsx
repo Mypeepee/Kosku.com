@@ -1,33 +1,27 @@
 import { HeaderItem } from "@/types/menu";
 
 export const headerData: HeaderItem[] = [
-  // 1. CARI PROPERTI (Pintu Gerbang Utama)
+  // 1. CARI PROPERTI (Revisi: 3 Kategori Utama)
   {
     label: "Cari Properti",
-    href: "/search", // Fallback link
+    href: "/PrimarySecondary", // Fallback link jika menu utama diklik
     submenu: [
       {
-        label: "Proyek Baru (Primary)", 
-        href: "/search/primary", // ✅ Arahkan ke Landing Page Primary
-        description: "Project baru & indent dari developer",
-        icon: "solar:city-bold",
-      },
-      {
-        label: "Properti Second",
-        href: "/search/secondary", // ✅ Arahkan ke Landing Page Secondary
-        description: "Rumah siap huni & resale",
-        icon: "solar:home-2-bold", 
+        label: "Jual Beli (Primary & Second)", 
+        href: "/Jual", // Mengarah ke: src/app/PrimarySecondary/page.tsx
+        description: "Proyek baru developer & rumah siap huni",
+        icon: "solar:home-smile-bold", 
       },
       {
         label: "Aset Lelang",
-        href: "/search/lelang", // ✅ Arahkan ke Landing Page Lelang
+        href: "/Lelang", // Mengarah ke: src/app/Lelang/page.tsx
         description: "Aset investasi di bawah harga pasar",
         icon: "solar:tag-price-bold",
       },
       {
-        label: "Sewa & Kos",
-        href: "/sewa",
-        description: "Pilihan sewa harian hingga tahunan",
+        label: "Sewa",
+        href: "/sewa", // Mengarah ke: src/app/sewa/page.tsx (Pastikan folder ini ada)
+        description: "Pilihan properti sewa",
         icon: "solar:key-minimalistic-square-bold",
       },
     ],
