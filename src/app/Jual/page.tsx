@@ -23,7 +23,6 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
     title: title,
     description: `Temukan properti idaman di ${kota || 'Indonesia'}. Tersedia Primary & Secondary dengan legalitas terjamin.`,
     alternates: {
-      // REVISI: Sesuaikan dengan nama folder baru Anda (/Jual)
       canonical: `/Jual${kota ? `?kota=${kota}` : ''}`,
     },
   };
@@ -36,89 +35,74 @@ export default async function SearchPage({ searchParams }: Props) {
   const kota = typeof searchParams.kota === 'string' ? searchParams.kota : undefined;
   const tipe = typeof searchParams.tipe === 'string' ? searchParams.tipe : undefined; 
   
-  // A.2. Ambil Parameter Filter Lanjutan (DARI SIDEBAR) <--- INI YANG KURANG TADI
+  // A.2. Ambil Parameter Filter Lanjutan (DARI SIDEBAR)
   const minKT = typeof searchParams.minKT === 'string' ? Number(searchParams.minKT) : undefined;
   const minKM = typeof searchParams.minKM === 'string' ? Number(searchParams.minKM) : undefined;
   const lantai = typeof searchParams.lantai === 'string' ? Number(searchParams.lantai) : undefined;
   const hadap = typeof searchParams.hadap === 'string' ? searchParams.hadap : undefined;
   const kondisi = typeof searchParams.kondisi === 'string' ? searchParams.kondisi : undefined;
   const legalitas = typeof searchParams.legalitas === 'string' ? searchParams.legalitas : undefined;
-  const sort = typeof searchParams.sort === 'string' ? searchParams.sort : 'desc'; // Default desc (Terbaru)
+  const sort = typeof searchParams.sort === 'string' ? searchParams.sort : 'desc';
 
   const limit = 15; 
   const skip = (page - 1) * limit;
 
   // B. BUILD FILTER QUERY (WHERE)
   const whereClause: Prisma.propertyWhereInput = {
-    // 1. Wajib: Hanya Primary & Secondary
     jenis_transaksi: { in: ['PRIMARY', 'SECONDARY'] },
-    
-    // 2. Wajib: Hanya yang statusnya TERSEDIA
     status_tayang: 'TERSEDIA',
 
-    // 3. Filter Kota (Search Bar)
     ...(kota && {
       kota: { contains: kota, mode: 'insensitive' },
     }),
 
-    // 4. Filter Kategori/Tipe (Search Bar)
     ...(tipe && {
       kategori: { equals: tipe.toUpperCase() as any },
     }),
 
-    // --- FILTER LANJUTAN DARI SIDEBAR ---
-    
-    // 5. Kamar Tidur (Minimal X)
     ...(minKT && { 
       kamar_tidur: { gte: minKT } 
     }),
 
-    // 6. Kamar Mandi (Minimal X)
     ...(minKM && { 
       kamar_mandi: { gte: minKM } 
     }),
 
-    // 7. Jumlah Lantai (Minimal X)
     ...(lantai && { 
       jumlah_lantai: { gte: lantai } 
     }),
 
-    // 8. Hadap Bangunan (Partial Match, Insensitive)
     ...(hadap && { 
       hadap_bangunan: { contains: hadap, mode: 'insensitive' } 
     }),
 
-    // 9. Kondisi Interior (Partial Match, Insensitive)
     ...(kondisi && { 
       kondisi_interior: { contains: kondisi, mode: 'insensitive' } 
     }),
 
-    // 10. Legalitas (Exact Enum Match)
     ...(legalitas && { 
       legalitas: { equals: legalitas as any } 
     }),
   };
 
   // C. TENTUKAN SORTING (ORDER BY)
-  let orderBy: Prisma.propertyOrderByWithRelationInput = { tanggal_dibuat: 'desc' }; // Default Terbaru
+  let orderBy: Prisma.propertyOrderByWithRelationInput = { tanggal_dibuat: 'desc' };
 
   if (sort === 'asc') {
-    orderBy = { harga: 'asc' }; // Termurah
+    orderBy = { harga: 'asc' };
   } else if (sort === 'desc') {
-    orderBy = { harga: 'desc' }; // Termahal
+    orderBy = { harga: 'desc' };
   }
 
   // D. EKSEKUSI QUERY DATABASE (TRANSACTION)
   const [totalItems, propertiesRaw] = await prisma.$transaction([
-    // Query 1: Hitung Total Data (Sesuai Filter)
     prisma.property.count({ where: whereClause }),
     
-    // Query 2: Ambil Data Properti + Join Agent
     prisma.property.findMany({
       where: whereClause,
       take: limit,
       skip: skip,
-      orderBy: orderBy, // <--- Masukkan logic sorting disini
+      orderBy: orderBy,
       include: {
         agent: {
           include: {
@@ -136,9 +120,10 @@ export default async function SearchPage({ searchParams }: Props) {
 
   const totalPages = Math.ceil(totalItems / limit);
 
-  // E. FORMAT DATA UNTUK UI
+  // E. FORMAT DATA UNTUK UI (✅ WITH SLUG!)
   const formattedData = propertiesRaw.map((item) => ({
-    id_property: item.id_property, 
+    id_property: item.id_property,
+    slug: item.slug,                    // ✅ ADDED!
     judul: item.judul,
     kota: item.kota,
     harga: Number(item.harga), 
@@ -160,7 +145,6 @@ export default async function SearchPage({ searchParams }: Props) {
     <main className="bg-[#0F0F0F] min-h-screen pb-20">
       <SearchHero />
       
-      {/* Kirim Data Asli Database ke Client Component */}
       <ProductList 
         initialData={formattedData}
         pagination={{

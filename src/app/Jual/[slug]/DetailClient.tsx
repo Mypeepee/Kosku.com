@@ -5,11 +5,11 @@ import Link from "next/link";
 import { Icon } from "@iconify/react";
 
 // --- IMPORT COMPONENTS ---
-import MobileNav from "./components/MobileNav";
-import ImageGallery from "./components/ImageGallery";
-import DetailInfo from "./components/DetailInfo";
-import BookingSidebar from "./components/AgentSidebar";
-import SimilarProperties from "./components/SimilarProperties";
+import MobileNav from "./[id]/components/MobileNav";
+import ImageGallery from "./[id]/components/ImageGallery";
+import DetailInfo from "./[id]/components/DetailInfo";
+import BookingSidebar from "./[id]/components/AgentSidebar";
+import SimilarProperties from "./[id]/components/SimilarProperties";
 
 // --- INTERFACE SESUAI DATABASE ---
 interface ProductData {

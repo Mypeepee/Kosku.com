@@ -10,6 +10,7 @@ import Sidebar from "./sidebar";
 // --- TIPE DATA ---
 interface PropertyDB {
   id_property: string;
+  slug: string;
   judul: string;
   kota: string;
   harga: number;
@@ -48,7 +49,28 @@ const formatCurrency = (value: number) => {
 const getBadgeColor = (type: string) => {
   const t = type?.toUpperCase();
   if (t === 'PRIMARY') return "bg-blue-500 shadow-blue-500/20";
-  return "bg-violet-500 shadow-violet-500/20"; 
+  if (t === 'SECONDARY') return "bg-violet-500 shadow-violet-500/20";
+  if (t === 'LELANG') return "bg-amber-500 shadow-amber-500/20";
+  if (t === 'SEWA') return "bg-emerald-500 shadow-emerald-500/20";
+  return "bg-gray-500 shadow-gray-500/20";
+};
+
+// ✅ FIXED - Generate URL 3-segment: /Jual/slug/id
+const getPropertyUrl = (property: PropertyDB): string => {
+  const transactionType = property.jenis_transaksi?.toUpperCase();
+  
+  // Tentukan path: SEWA → /Sewa, lainnya → /Jual
+  let urlPath: string;
+  if (transactionType === 'SEWA') {
+    urlPath = 'Sewa';
+  } else {
+    // PRIMARY, SECONDARY, LELANG → semua ke /Jual
+    urlPath = 'Jual';
+  }
+  
+  // Buat URL: /Jual/slug/id
+  const slug = property.slug || 'property';
+  return `/${urlPath}/${slug}/${property.id_property}`;
 };
 
 // --- SUB-COMPONENT: PROPERTY CARD ---
@@ -157,7 +179,6 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
   const searchParams = useSearchParams();
   const productListRef = useRef<HTMLDivElement>(null);
   
-  // STATE UNTUK MOBILE DRAWER
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
 
   const filterKota = searchParams.get('kota') || "";
@@ -176,18 +197,16 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
   return (
     <div className="container mx-auto px-4 mt-12 mb-24" ref={productListRef}>
       
-      {/* MOBILE FILTER DRAWER (POPUP) */}
+      {/* MOBILE FILTER DRAWER */}
       <AnimatePresence>
         {isMobileFilterOpen && (
             <>
-                {/* BACKDROP GELAP */}
                 <motion.div 
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     onClick={() => setIsMobileFilterOpen(false)}
                     className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] lg:hidden"
                 />
                 
-                {/* DRAWER CONTENT DARI KANAN */}
                 <motion.div 
                     initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
                     transition={{ type: "spring", damping: 25, stiffness: 200 }}
@@ -206,7 +225,6 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
                             </button>
                         </div>
                         
-                        {/* Render Sidebar di dalam Mobile Drawer */}
                         <div className="pb-20">
                             <Sidebar />
                         </div>
@@ -221,10 +239,7 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
         {/* AREA PRODUK */}
         <div className="w-full lg:w-3/4">
            
-           {/* === REVISI LAYOUT HEADER: SEBARIS KANAN KIRI === */}
            <div className="flex items-center justify-between mb-6">
-              
-              {/* Bagian Kiri: Judul & Jumlah */}
               <div>
                   <h2 className="text-white font-bold text-lg md:text-xl leading-tight">
                     {filterKota ? `Properti di "${filterKota}"` : "Listing Primary & Secondary"} 
@@ -234,7 +249,6 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
                   </span>
               </div>
               
-              {/* Bagian Kanan: Tombol Filter (Hanya di Mobile) */}
               <button 
                  onClick={() => setIsMobileFilterOpen(true)}
                  className="lg:hidden shrink-0 flex items-center gap-2 text-white bg-white/5 border border-white/20 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-white/10 hover:border-primary/50 transition-all active:scale-95 ml-4"
@@ -255,7 +269,7 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
                             exit={{ opacity: 0, y: -10 }}
                             transition={{ duration: 0.3 }}
                         >
-                            <Link href={`/Jual/${item.id_property}`} className="block h-full">
+                            <Link href={getPropertyUrl(item)} className="block h-full">
                                 <PropertyCard item={item} />
                             </Link>
                         </motion.div>
@@ -263,7 +277,6 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
                   </AnimatePresence>
                </div>
            ) : (
-               // EMPTY STATE
                <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/5">
                    <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Icon icon="solar:sad-square-bold-duotone" className="text-4xl text-gray-500"/>
@@ -328,7 +341,7 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
            )}
         </div>
 
-        {/* SIDEBAR DESKTOP (STICKY) */}
+        {/* SIDEBAR DESKTOP */}
         <div className="hidden lg:block w-full lg:w-1/4 sticky top-32">
            <Sidebar />
         </div>

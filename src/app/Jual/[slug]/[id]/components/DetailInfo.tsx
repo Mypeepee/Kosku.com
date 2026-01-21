@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { Icon } from "@iconify/react";
 import dynamic from "next/dynamic";
 
-const KosMap = dynamic(() => import("../../../../components/Maps/KosMap"), { 
+const KosMap = dynamic(() => import("../../../../../components/Maps/KosMap"), { 
   ssr: false, 
   loading: () => (
     <div className="w-full h-full bg-[#151515] animate-pulse flex flex-col items-center justify-center text-gray-500 gap-2">
@@ -89,7 +89,7 @@ export default function DetailInfo({ data }: DetailInfoProps) {
   const kprData = calculateKPR();
 
   const jenisUpper = data?.jenis_transaksi?.toString().toUpperCase();
-  const isJualTransaction = jenisUpper === 'JUAL' || jenisUpper === 'SECONDARY';
+  const isJualTransaction = jenisUpper === 'JUAL' || jenisUpper === 'PRIMARY' || jenisUpper === 'SECONDARY';
   const hasValidPrice = hargaFinal > 0;
   const showKPRCalculator = isJualTransaction && hasValidPrice;
 

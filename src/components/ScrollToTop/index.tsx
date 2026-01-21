@@ -6,11 +6,7 @@ export default function ScrollToTop() {
   const [isVisible, setIsVisible] = useState(false);
   const pathname = usePathname();
 
-  // ---------------------------------------------------------
-  // UPDATE LOGIKA DI SINI
-  // ---------------------------------------------------------
-  // Gunakan tanda || (artinya ATAU) untuk menambah kondisi baru.
-  // Ganti "/CariApartemen/" dengan potongan URL yang ada di halaman detail apartemenmu.
+  // Hidden pages logic
   const isHiddenPage = pathname?.includes("/Carikos/") || pathname?.includes("/CariApartemen/"); 
 
   const scrollToTop = () => {
@@ -22,7 +18,6 @@ export default function ScrollToTop() {
 
   useEffect(() => {
     const toggleVisibility = () => {
-      // Jika halaman hidden, jangan set true
       if (!isHiddenPage && window.pageYOffset > 300) {
         setIsVisible(true);
       } else {
@@ -35,13 +30,14 @@ export default function ScrollToTop() {
     return () => window.removeEventListener("scroll", toggleVisibility);
   }, [isHiddenPage]); 
 
-  // Jika halaman termasuk dalam daftar hidden, component tidak dirender
+  // Early return if hidden page
   if (isHiddenPage) {
     return null;
   }
 
   return (
-    <div className="fixed bottom-8 right-8 z-[999]">
+    // ✅ TAMBAHKAN: hidden lg:flex (hide di mobile/tablet, show di desktop)
+    <div className="fixed bottom-8 right-8 z-[999] hidden lg:flex">
       {isVisible && (
         <div
           onClick={scrollToTop}
