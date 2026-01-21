@@ -6,6 +6,9 @@ import { ThemeProvider } from "next-themes";
 import ScrollToTop from "@/components/ScrollToTop";
 import Aoscompo from "@/utils/aos";
 
+// 🔥 TAMBAHKAN INI (import Metadata type)
+import type { Metadata } from 'next';
+
 // 1. IMPORT CHAT WIDGET
 import ChatWidget from "@/components/Chat/ChatWidget";
 
@@ -16,7 +19,11 @@ import { Toaster } from "react-hot-toast";
 
 const font = DM_Sans({ subsets: ["latin"] });
 
-export const metadata = {
+// 🔥 UBAH INI - Ganti export const metadata dengan Metadata type
+export const metadata: Metadata = {
+  // 🔥 TAMBAHKAN INI (metadataBase untuk fix warning)
+  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'),
+  
   // REVISI: Judul Website (Akan muncul di Tab Browser & Google)
   title: "Premier Asset - Satu Aplikasi untuk Semua Kebutuhan Properti Anda",
   
