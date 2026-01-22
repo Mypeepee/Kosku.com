@@ -9,26 +9,26 @@ datasource db {
 
 // === MODEL PENGGUNA (ID String Manual: AC0001) ===
 model Pengguna {
-  id_pengguna     String            @id @db.VarChar(20) // Bukan UUID lagi
-  nama_lengkap    String            @db.VarChar(100)
-  email           String?           @unique @db.VarChar(150)
-  nomor_telepon   String?           @unique @db.VarChar(20)
-  kata_sandi      String?           @db.VarChar(255)
-  google_id       String?           @unique @db.VarChar(100)
-  kota_asal       String?           @db.VarChar(50)
-  tanggal_lahir   DateTime?         @db.Date
-  jenis_kelamin   gender_enum?
-  foto_profil_url String?
-  peran           peran_enum?       @default(USER)
-  status_akun     status_akun_enum? @default(AKTIF)
-  wa_terverifikasi Boolean?         @default(false)
-  kode_referral   String?           @unique @db.VarChar(20)
-  login_terakhir  DateTime?         @db.Timestamp(6)
-  dibuat_pada     DateTime?         @default(now()) @db.Timestamp(6)
-  diperbarui_pada DateTime?         @default(now()) @updatedAt @db.Timestamp(6)
+  id_pengguna      String            @id @db.VarChar(20)
+  nama_lengkap     String            @db.VarChar(100)
+  email            String?           @unique @db.VarChar(150)
+  nomor_telepon    String?           @unique @db.VarChar(20)
+  kata_sandi       String?           @db.VarChar(255)
+  google_id        String?           @unique @db.VarChar(100)
+  kota_asal        String?           @db.VarChar(50)
+  tanggal_lahir    DateTime?         @db.Date
+  jenis_kelamin    gender_enum?
+  foto_profil_url  String?
+  peran            peran_enum?       @default(USER)
+  status_akun      status_akun_enum? @default(AKTIF)
+  wa_terverifikasi Boolean?          @default(false)
+  kode_referral    String?           @unique @db.VarChar(20)
+  login_terakhir   DateTime?         @db.Timestamp(6)
+  dibuat_pada      DateTime?         @default(now()) @db.Timestamp(6)
+  diperbarui_pada  DateTime?         @default(now()) @updatedAt @db.Timestamp(6)
   
   // Relasi
-  agent           agent?
+  agent            agent?
 
   @@index([kode_referral], map: "idx_kode_referral")
   @@index([email], map: "idx_pengguna_email")
@@ -37,34 +37,32 @@ model Pengguna {
 
 // === MODEL AGENT (ID String Manual: AG0001) ===
 model agent {
-  id_agent           String             @id @db.VarChar(20)
-  id_pengguna        String             @unique(map: "agent_id_pengguna_unique") @db.VarChar(20)
-  
-  // KOLOM kode_agent SUDAH DIHAPUS DISINI
-  
-  nama_kantor        String             @db.VarChar(100)
-  kota_area          String             @db.VarChar(50)
+  id_agent           String              @id @db.VarChar(20)
+  id_pengguna        String              @unique(map: "agent_id_pengguna_unique") @db.VarChar(20)
+
+  nama_kantor        String              @db.VarChar(100)
+  kota_area          String              @db.VarChar(50)
   jabatan            jabatan_agent_enum? @default(AGENT)
-  id_upline          String?            @db.VarChar(20)
-  rating             Decimal?           @default(0.00) @db.Decimal(3, 2)
-  jumlah_closing     Int?               @default(0)
-  total_omset        Decimal?           @default(0) @db.Decimal(18, 2)
-  nomor_whatsapp     String             @db.VarChar(20)
+  id_upline          String?             @db.VarChar(20)
+  rating             Decimal?            @default(0.00) @db.Decimal(3, 2)
+  jumlah_closing     Int?                @default(0)
+  total_omset        Decimal?            @default(0) @db.Decimal(18, 2)
+  nomor_whatsapp     String              @db.VarChar(20)
   foto_ktp_url       String?
   foto_npwp_url      String?
-  nama_bank          String?            @db.VarChar(50)
-  nomor_rekening     String?            @db.VarChar(50)
-  atas_nama_rekening String?            @db.VarChar(100)
-  link_instagram     String?            @db.VarChar(100)
-  link_tiktok        String?            @db.VarChar(100)
-  status_keanggotaan status_agent_enum? @default(PENDING)
-  tanggal_gabung     DateTime?          @default(dbgenerated("CURRENT_DATE")) @db.Date
-  diperbarui_pada    DateTime?          @default(now()) @db.Timestamp(6)
+  nama_bank          String?             @db.VarChar(50)
+  nomor_rekening     String?             @db.VarChar(50)
+  atas_nama_rekening String?             @db.VarChar(100)
+  link_instagram     String?             @db.VarChar(100)
+  link_tiktok        String?             @db.VarChar(100)
+  status_keanggotaan status_agent_enum?  @default(PENDING)
+  tanggal_gabung     DateTime?           @default(dbgenerated("CURRENT_DATE")) @db.Date
+  diperbarui_pada    DateTime?           @default(now()) @db.Timestamp(6)
   
   // RELASI
-  pengguna           Pengguna           @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade, onUpdate: NoAction)
-  upline             agent?             @relation("agentToagent", fields: [id_upline], references: [id_agent], onUpdate: NoAction)
-  downlines          agent[]            @relation("agentToagent")
+  pengguna           Pengguna            @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade, onUpdate: NoAction)
+  upline             agent?              @relation("agentToagent", fields: [id_upline], references: [id_agent], onUpdate: NoAction)
+  downlines          agent[]             @relation("agentToagent")
   property           property[]
 
   @@index([jabatan], map: "idx_agent_jabatan")
@@ -74,8 +72,8 @@ model agent {
 // === MODEL PROPERTY ===
 model property {
   id_property        String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  id_agent           String                 @db.VarChar(20) // Harus match tipe data ID agent
-  
+  id_agent           String                 @db.VarChar(20)
+
   kode_properti      String                 @unique @default(dbgenerated("('LST'::text || lpad((nextval('property_code_seq'::regclass))::text, 5, '0'::text))")) @db.VarChar(20)
   judul              String                 @db.VarChar(255)
   slug               String                 @unique @db.VarChar(300)
@@ -107,7 +105,10 @@ model property {
   hadap_bangunan     String?                @db.VarChar(20)
   kondisi_interior   String?                @db.VarChar(50)
   legalitas          sertifikat_enum?
-  gambar_utama_url   String?
+
+  // kolom gambar di DB: varchar(1500)
+  gambar             String?                @db.VarChar(1500)
+
   dilihat            Int?                   @default(0)
   is_hot_deal        Boolean?               @default(false)
   tanggal_dibuat     DateTime?              @default(now()) @db.Timestamp(6)
@@ -122,7 +123,7 @@ model property {
   @@index([slug], map: "idx_property_slug")
 }
 
-// === ENUMS (Sama seperti SQL) ===
+// === ENUMS ===
 enum peran_enum {
   USER
   AGENT

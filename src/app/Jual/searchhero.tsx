@@ -208,9 +208,13 @@ const SearchHero = () => {
           <div className="absolute inset-0 bg-gradient-to-t from-darkmode via-darkmode/50 to-transparent"></div>
         </div>
         <div className="relative z-10 text-center px-4 mb-20">
-          <span className="text-primary font-bold tracking-[0.2em] text-[10px] uppercase mb-3 block bg-black/40 px-4 py-1.5 rounded-full backdrop-blur-md border border-white/5 inline-block">
-            The Best Living Experience
-          </span>
+        <span className="inline-flex items-center gap-2 text-emerald-400 font-black tracking-[0.20em] text-[10px] uppercase">
+        <Icon
+            icon="solar:home-smile-bold-duotone"
+            className="text-base md:text-lg text-emerald-400"
+        />
+        <span>Hunian Baru Berkualitas</span>
+        </span>
           <h1 className="text-white font-bold text-3xl md:text-5xl leading-relaxed drop-shadow-2xl">
             Temukan Properti Impian <br />
             Primary & Secondary

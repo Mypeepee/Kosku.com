@@ -1,25 +1,31 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // output: "export", // Tetap dimatikan agar Login jalan
-  
+  // output: "export",
+
   images: {
-    // unoptimized: true, <--- HAPUS atau comment baris ini agar fitur optimasi jalan
-    
+    // unoptimized: true,
+
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "lh3.googleusercontent.com", // Server utama foto profil Google
+        hostname: "lh3.googleusercontent.com",
         pathname: "**",
       },
       {
         protocol: "https",
-        hostname: "googleusercontent.com", // Cadangan domain Google
+        hostname: "googleusercontent.com",
         pathname: "**",
       },
       {
         protocol: "https",
-        hostname: "avatars.githubusercontent.com", // Jaga-jaga kalau login Github nanti
+        hostname: "avatars.githubusercontent.com",
         pathname: "**",
+      },
+      // ⬇️ tambahin ini buat gambar lelang
+      {
+        protocol: "https",
+        hostname: "file.lelang.go.id",
+        pathname: "/lelang/photo_barang/**",
       },
     ],
   },

@@ -20,7 +20,7 @@ export const headerData: HeaderItem[] = [
       },
       {
         label: "Sewa",
-        href: "/sewa", // Mengarah ke: src/app/sewa/page.tsx (Pastikan folder ini ada)
+        href: "/Sewa", // Mengarah ke: src/app/sewa/page.tsx (Pastikan folder ini ada)
         description: "Pilihan properti sewa",
         icon: "solar:key-minimalistic-square-bold",
       },

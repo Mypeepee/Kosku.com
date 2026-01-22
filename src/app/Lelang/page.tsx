@@ -1,51 +1,284 @@
-"use client";
-
 import React from "react";
-import Image from "next/image";
-import { motion } from "framer-motion";
+import { Metadata } from "next";
+import SearchHero from "./searchhero";
+import ProductList from "./produklist";
+import SortBar from "./sortbar";
+import prisma from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
-// Pastikan nama file sudah di-rename jadi huruf besar depannya
-import HeroFilter from "./SearchHero"; 
-import Sidebar from "./Sidebar";
-import ProductList from "./ProductList"; // Import harus sama dengan nama file
+type Props = {
+  searchParams: { [key: string]: string | string[] | undefined };
+};
 
-export default function CariApartemenPage() {
+// mapping string dari URL -> enum kategori_properti_enum di Prisma
+const KATEGORI_MAP: Record<string, Prisma.kategori_properti_enum> = {
+  RUMAH: "RUMAH",
+  TANAH: "TANAH",
+  GUDANG: "GUDANG",
+  APARTEMEN: "APARTEMEN",
+  PABRIK: "PABRIK",
+  RUKO: "RUKO",
+  TOKO: "TOKO",
+  HOTEL: "HOTEL",
+  VILLA: "VILLA",
+};
+
+export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+  const kota = typeof searchParams.kota === "string" ? searchParams.kota : undefined;
+
+  const formatText = (text?: string) =>
+    text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+
+  let title = "Lelang Properti Terpercaya | Premier";
+  if (kota) title = `Lelang Properti di ${formatText(kota)} Harga Terbaik | Premier`;
+
+  return {
+    title,
+    description: `Ikuti lelang properti di ${
+      kota || "Indonesia"
+    } dengan proses aman dan transparan. Temukan rumah, tanah, dan aset komersial dengan harga di bawah pasaran.`,
+    alternates: {
+      canonical: `/Lelang${kota ? `?kota=${kota}` : ""}`,
+    },
+  };
+}
+
+const hasToken = (parts: string[], token: string) => parts.includes(token);
+
+export default async function SearchPage({ searchParams }: Props) {
+  const page =
+    typeof searchParams.page === "string" ? Number(searchParams.page) : 1;
+  const kota =
+    typeof searchParams.kota === "string" ? searchParams.kota : undefined;
+  const tipe =
+    typeof searchParams.tipe === "string" ? searchParams.tipe : undefined;
+
+  const minKT =
+    typeof searchParams.minKT === "string"
+      ? Number(searchParams.minKT)
+      : undefined;
+  const minKM =
+    typeof searchParams.minKM === "string"
+      ? Number(searchParams.minKM)
+      : undefined;
+  const lantai =
+    typeof searchParams.lantai === "string"
+      ? Number(searchParams.lantai)
+      : undefined;
+  const hadap =
+    typeof searchParams.hadap === "string"
+      ? searchParams.hadap
+      : undefined;
+  const kondisi =
+    typeof searchParams.kondisi === "string"
+      ? searchParams.kondisi
+      : undefined;
+  const legalitas =
+    typeof searchParams.legalitas === "string"
+      ? searchParams.legalitas
+      : undefined;
+
+  // tambahan dari SearchHero
+  const minHarga =
+    typeof searchParams.minHarga === "string"
+      ? Number(searchParams.minHarga)
+      : undefined;
+  const maxHarga =
+    typeof searchParams.maxHarga === "string"
+      ? Number(searchParams.maxHarga)
+      : undefined;
+  const minLT =
+    typeof searchParams.minLT === "string"
+      ? Number(searchParams.minLT)
+      : undefined;
+  const maxLT =
+    typeof searchParams.maxLT === "string"
+      ? Number(searchParams.maxLT)
+      : undefined;
+
+  const sortRaw =
+    typeof searchParams.sort === "string"
+      ? searchParams.sort
+      : "auction_asc";
+  const sortParts = sortRaw.split("_").filter(Boolean);
+
+  const limit = 18;
+  const skip = (page - 1) * limit;
+
+  // mapping tipe -> enum kategori
+  const mappedKategori = tipe ? KATEGORI_MAP[tipe.toUpperCase()] : undefined;
+
+  const whereClause: Prisma.propertyWhereInput = {
+    jenis_transaksi: "LELANG",
+    status_tayang: "TERSEDIA",
+
+    ...(kota && {
+      kota: { contains: kota, mode: "insensitive" },
+    }),
+
+    ...(mappedKategori && {
+      kategori: { equals: mappedKategori },
+    }),
+
+    ...(minKT && {
+      kamar_tidur: { gte: minKT },
+    }),
+
+    ...(minKM && {
+      kamar_mandi: { gte: minKM },
+    }),
+
+    ...(lantai && {
+      jumlah_lantai: { gte: lantai },
+    }),
+
+    ...(hadap && {
+      hadap_bangunan: { contains: hadap, mode: "insensitive" },
+    }),
+
+    ...(kondisi && {
+      kondisi_interior: { contains: kondisi, mode: "insensitive" },
+    }),
+
+    ...(legalitas && {
+      legalitas: { equals: legalitas as any },
+    }),
+
+    ...(minHarga && {
+      harga: {
+        ...(minHarga && { gte: minHarga }),
+        ...(maxHarga && { lte: maxHarga }),
+      },
+    }),
+
+    ...(minLT && {
+      luas_tanah: {
+        ...(minLT && { gte: minLT }),
+        ...(maxLT && { lte: maxLT }),
+      },
+    }),
+  };
+
+  const orderByArray: Prisma.propertyOrderByWithRelationInput[] = [];
+
+  if (hasToken(sortParts, "auction") && hasToken(sortParts, "desc")) {
+    orderByArray.push({ tanggal_lelang: "desc" });
+  } else {
+    orderByArray.push({ tanggal_lelang: "asc" });
+  }
+
+  if (hasToken(sortParts, "price")) {
+    if (hasToken(sortParts, "asc")) {
+      orderByArray.push({ harga: "asc" });
+    } else if (hasToken(sortParts, "desc")) {
+      orderByArray.push({ harga: "desc" });
+    }
+  }
+
+  if (hasToken(sortParts, "land")) {
+    if (hasToken(sortParts, "asc")) {
+      orderByArray.push({ luas_tanah: "asc" });
+    } else if (hasToken(sortParts, "desc")) {
+      orderByArray.push({ luas_tanah: "desc" });
+    }
+  }
+
+  const orderBy:
+    | Prisma.propertyOrderByWithRelationInput
+    | Prisma.propertyOrderByWithRelationInput[] =
+    orderByArray.length > 0 ? orderByArray : [{ tanggal_lelang: "asc" }];
+
+  const [totalItems, propertiesRaw] = await prisma.$transaction([
+    prisma.property.count({ where: whereClause }),
+    prisma.property.findMany({
+      where: whereClause,
+      take: limit,
+      skip,
+      orderBy,
+      include: {
+        agent: {
+          include: {
+            pengguna: {
+              select: {
+                nama_lengkap: true,
+                foto_profil_url: true,
+              },
+            },
+          },
+        },
+      },
+    }),
+  ]);
+
+  const totalPages = Math.ceil(totalItems / limit);
+
+  const formattedData = propertiesRaw.map((item) => {
+    const rawGambar = item.gambar || "";
+    const foto_list =
+      rawGambar.trim().length > 0
+        ? rawGambar
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+        : [];
+
+    return {
+      id_property: item.id_property,
+      slug: item.slug,
+      judul: item.judul,
+      kota: item.kota,
+      alamat_lengkap: item.alamat_lengkap ?? "",
+      harga: Number(item.harga),
+      jenis_transaksi: item.jenis_transaksi,
+      kategori: item.kategori,
+
+      gambar: foto_list[0] || "/images/hero/banner.jpg",
+      foto_list,
+
+      luas_tanah: Number(item.luas_tanah ?? 0),
+      luas_bangunan: Number(item.luas_bangunan ?? 0),
+      kamar_tidur: item.kamar_tidur ?? 0,
+      kamar_mandi: item.kamar_mandi ?? 0,
+
+      agent_name: item.agent.pengguna.nama_lengkap,
+      agent_photo: item.agent.pengguna.foto_profil_url || "",
+      agent_office: item.agent.nama_kantor,
+
+      tanggal_lelang: item.tanggal_lelang
+        ? item.tanggal_lelang.toISOString()
+        : null,
+    };
+  });
+
   return (
-    <main className="bg-[#0F0F0F] min-h-screen font-sans selection:bg-primary/30 pb-20">
-      
-      {/* 1. HERO BANNER BACKGROUND */}
-      <div className="relative h-[380px] w-full bg-gray-900 overflow-hidden">
-         <Image src="/images/hero/banner.jpg" alt="Apartemen" fill className="object-cover opacity-50" />
-         <div className="absolute inset-0 bg-gradient-to-b from-[#0F0F0F]/30 via-[#0F0F0F]/60 to-[#0F0F0F]"></div>
-         <div className="absolute inset-0 flex flex-col items-center justify-center -mt-16 text-center px-4">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-               <span className="text-primary font-bold tracking-[0.2em] text-[10px] uppercase mb-3 block bg-black/40 px-4 py-1.5 rounded-full backdrop-blur-md border border-white/5 inline-block">The Best Living Experience</span>
-               <h1 className="text-4xl md:text-6xl font-black text-white leading-tight drop-shadow-2xl">
-                  Sewa Apartemen <br/> <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-emerald-300">Tanpa Ribet</span>
-               </h1>
-            </motion.div>
-         </div>
-      </div>
+    <main className="bg-[#0F0F0F] min-h-screen pb-20">
+      <SearchHero />
 
-      {/* 2. HERO FILTER */}
-      <HeroFilter />
+      <section className="container mx-auto px-4 mt-6">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-white text-2xl md:text-3xl font-black">
+              Listing Lelang Properti
+            </h2>
+            <p className="text-sm text-slate-400 mt-1">
+              {totalItems} properti ditemukan
+            </p>
+          </div>
 
-      {/* 3. CONTENT AREA */}
-      <div className="container mx-auto px-4 mt-12">
-         <div className="flex flex-col lg:flex-row gap-8 items-start">
-            
-            {/* KIRI: PRODUCT LIST */}
-            {/* Perbaikan: Panggil component sesuai nama importnya */}
-            <ProductList /> 
+          <div className="w-full md:w-auto">
+            <SortBar />
+          </div>
+        </div>
 
-            {/* KANAN: SIDEBAR FILTER */}
-            <div className="hidden lg:block w-1/4 min-w-[280px]">
-               <Sidebar />
-            </div>
-
-         </div>
-      </div>
-
+        <ProductList
+          initialData={formattedData}
+          pagination={{
+            currentPage: page,
+            totalPages,
+            totalItems,
+          }}
+        />
+      </section>
     </main>
   );
 }
