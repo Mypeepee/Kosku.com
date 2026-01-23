@@ -4,7 +4,6 @@ import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import DetailClient from "../DetailClient";
 
-// --- 1. SETUP TIPE DATA (3 PARAMS) ---
 interface Props {
   params: { 
     slug: string;
@@ -12,7 +11,6 @@ interface Props {
   };
 }
 
-// --- 2. FUNCTION UNTUK AMBIL DATA ---
 async function getProperty(id: string) {
   const product = await prisma.property.findUnique({
     where: { id_property: id },
@@ -25,7 +23,6 @@ async function getProperty(id: string) {
           nomor_whatsapp: true,
           kota_area: true,
           jabatan: true,
-          
           pengguna: {
             select: {
               nama_lengkap: true,
@@ -39,7 +36,6 @@ async function getProperty(id: string) {
     },
   });
 
-  // Filter by status
   if (product && product.status_tayang !== "TERSEDIA") {
     return null;
   }
@@ -47,7 +43,6 @@ async function getProperty(id: string) {
   return product;
 }
 
-// --- 3. GENERATE METADATA SEO ---
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const product = await getProperty(params.id);
 
@@ -77,8 +72,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     ? product.deskripsi.substring(0, 155) + '...'
     : `${product.jenis_transaksi} ${product.kategori} di ${product.kota}, ${product.provinsi}. ${specs}. Hubungi ${namaAgent} untuk info lebih lanjut.`;
 
-  // ✅ 3-SEGMENT CANONICAL URL
-  const canonicalUrl = `https://premierasset.com/Jual/${product.slug || 'property'}/${product.id_property}`;
+  // ✅ SPLIT GAMBAR UNTUK METADATA
+  const rawGambar = product.gambar || "";
+  const fotoArray = rawGambar.trim().length > 0
+    ? rawGambar.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    : [];
+  const firstImage = fotoArray[0] || "/images/hero/banner.jpg";
+
+  const canonicalUrl = `https://premierasset.com/Lelang/${product.slug || 'property'}/${product.id_property}`;
 
   return {
     title: `${product.judul} - ${hargaFormatted} | Premier Asset`,
@@ -90,7 +91,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       product.kota,
       product.kecamatan,
       product.provinsi,
-      'properti',
+      'properti lelang',
       'real estate',
       'Indonesia',
       namaAgent
@@ -105,7 +106,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description: description,
       images: [
         {
-          url: product.gambar_utama_url || "/images/placeholder.jpg",
+          url: firstImage,
           width: 1200,
           height: 630,
           alt: product.judul,
@@ -117,7 +118,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       card: 'summary_large_image',
       title: `${product.judul} - ${hargaFormatted}`,
       description: description,
-      images: [product.gambar_utama_url || "/images/placeholder.jpg"],
+      images: [firstImage],
     },
 
     robots: {
@@ -137,7 +138,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-// --- 4. KOMPONEN UTAMA ---
 export default async function DetailPage({ params }: Props) {
   const product = await getProperty(params.id);
 
@@ -145,15 +145,25 @@ export default async function DetailPage({ params }: Props) {
     notFound(); 
   }
 
-  // ✅ SLUG VALIDATION - Redirect if slug mismatch
   if (product.slug && product.slug !== params.slug) {
-    redirect(`/Jual/${product.slug}/${product.id_property}`);
+    redirect(`/Lelang/${product.slug}/${product.id_property}`);
   }
 
-  // ✅ 3-SEGMENT CANONICAL URL
-  const canonicalUrl = `https://premierasset.com/Jual/${product.slug || 'property'}/${product.id_property}`;
+  const canonicalUrl = `https://premierasset.com/Lelang/${product.slug || 'property'}/${product.id_property}`;
 
-  // JSON-LD Structured Data
+  // ✅ SPLIT KOLOM GAMBAR JADI ARRAY
+  const rawGambar = product.gambar || "";
+  const fotoArray = rawGambar.trim().length > 0
+    ? rawGambar.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    : [];
+
+  const finalFotoArray = fotoArray.length > 0 
+    ? fotoArray 
+    : ["/images/hero/banner.jpg"];
+
+  console.log("✅ page.tsx finalFotoArray:", finalFotoArray);
+
+  // JSON-LD
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "RealEstateListing",
@@ -161,7 +171,7 @@ export default async function DetailPage({ params }: Props) {
     "url": canonicalUrl,
     "name": product.judul,
     "description": product.deskripsi || `${product.kategori} ${product.jenis_transaksi} di ${product.kota}`,
-    "image": product.gambar_utama_url ? [product.gambar_utama_url] : [],
+    "image": finalFotoArray,
     
     "offers": {
       "@type": "Offer",
@@ -237,7 +247,6 @@ export default async function DetailPage({ params }: Props) {
     "category": product.kategori,
   };
 
-  // Breadcrumb JSON-LD
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -251,14 +260,14 @@ export default async function DetailPage({ params }: Props) {
       {
         "@type": "ListItem",
         "position": 2,
-        "name": "Jual",
-        "item": "https://premierasset.com/Jual"
+        "name": "Lelang",
+        "item": "https://premierasset.com/Lelang"
       },
       {
         "@type": "ListItem",
         "position": 3,
         "name": product.kota,
-        "item": `https://premierasset.com/Jual?kota=${product.kota}`
+        "item": `https://premierasset.com/Lelang?kota=${product.kota}`
       },
       {
         "@type": "ListItem",
@@ -281,7 +290,11 @@ export default async function DetailPage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
 
-      <DetailClient product={JSON.parse(JSON.stringify(product))} />
+      {/* ✅ PASS FOTO ARRAY KE DetailClient */}
+      <DetailClient 
+        product={JSON.parse(JSON.stringify(product))} 
+        fotoArray={finalFotoArray}
+      />
     </main>
   );
 }

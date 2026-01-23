@@ -1,4 +1,5 @@
 "use client";
+
 import React, { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -17,9 +18,9 @@ interface PropertyDB {
   jenis_transaksi: string;
   kategori: string;
 
-  // ⬇️ dari page.tsx
-  gambar: string;        // foto pertama / fallback
-  foto_list: string[];   // hasil split kolom gambar
+  // dari page.tsx
+  gambar: string;      // foto pertama / fallback
+  foto_list: string[]; // hasil split kolom gambar
 
   luas_tanah: number;
   luas_bangunan: number;
@@ -69,23 +70,23 @@ const daysUntil = (date?: string | null) => {
   return days;
 };
 
-// Generate URL untuk detail properti
+// --- URL DETAIL LELANG ---
+// Semua listing di halaman ini adalah LELANG,
+// jadi langsung pakai prefix /Lelang, bukan /Jual.
 const getPropertyUrl = (property: PropertyDB): string => {
-  const transactionType = property.jenis_transaksi?.toUpperCase();
-  const urlPath = transactionType === "SEWA" ? "Sewa" : "Jual";
   const slug = property.slug || "property";
-  return `/${urlPath}/${slug}/${property.id_property}`;
+  return `/Lelang/${slug}/${property.id_property}`;
 };
 
 // --- CARD LELANG ---
 const PropertyCard = ({ item }: { item: PropertyDB }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-  // ⬇️ slider dari foto_list; fallback ke gambar pertama jika kosong
+  // Slider dari foto_list; fallback ke gambar pertama jika kosong
   const images =
     item.foto_list && item.foto_list.length > 0
       ? item.foto_list
-      : [item.gambar || "/images/placeholder.jpg"];
+      : [item.gambar || "/images/hero/banner.jpg"];
 
   const nextImage = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -162,7 +163,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
           </span>
         </div>
 
-        {/* Badge kanan: SISA HARI (efek glow) */}
+        {/* Badge kanan: SISA HARI */}
         {daysLabel && (
           <div className="absolute top-4 right-4 z-10">
             <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.12em] text-white">
@@ -217,10 +218,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
         <div className="bg-white/5 rounded-xl p-3 mb-5 border border-white/5">
           <div className="flex justify-between items-center px-1">
             <div className="flex items-center gap-2">
-              <Icon
-                icon="solar:ruler-angular-bold"
-                className="text-gray-400"
-              />
+              <Icon icon="solar:ruler-angular-bold" className="text-gray-400" />
               <div className="flex flex-col">
                 <span className="text-[10px] text-gray-500 uppercase">
                   Luas Tanah

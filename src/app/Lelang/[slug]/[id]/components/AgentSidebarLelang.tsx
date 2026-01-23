@@ -68,7 +68,7 @@ export default function AgentSidebar({ data }: AgentSidebarProps) {
         <div className="p-6 pb-2 shrink-0 z-10 bg-[#1A1A1A]">
             <div className="flex justify-between items-start">
               <div className="flex-1 pr-4">
-                  <span className="text-xs font-bold text-[#86efac] uppercase tracking-wider mb-1 block truncate">Harga Penawaran</span>
+                  <span className="text-xs font-bold text-[#86efac] uppercase tracking-wider mb-1 block truncate">Harga Limit</span>
                   <div className="flex items-end gap-1">
                       <span className="text-2xl font-extrabold text-white">
                           {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(data.priceRates.monthly)}

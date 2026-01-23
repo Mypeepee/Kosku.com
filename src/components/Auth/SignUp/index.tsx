@@ -155,8 +155,8 @@ export default function SignUp() {
         <div className="flex items-center gap-3">
           <div className="relative h-12 w-12 shrink-0">
             <Image
-              src="/images/logo/logokosku.svg"
-              alt="Kosku"
+              src="/images/logo/logopremier.svg"
+              alt="Premier"
               fill
               priority
               className="object-contain"
@@ -165,7 +165,7 @@ export default function SignUp() {
 
           <div className="leading-tight text-left">
             <div className="text-white font-semibold text-xl">
-              Kos<span className="text-primary">ku</span>.com
+              Premier<span className="text-primary"> Asset</span>
             </div>
             <div className="text-white/60 text-xs">Daftar akun baru</div>
           </div>

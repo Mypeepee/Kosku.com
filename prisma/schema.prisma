@@ -9,7 +9,7 @@ datasource db {
 
 // === MODEL PENGGUNA (ID String Manual: AC0001) ===
 model Pengguna {
-  id_pengguna      String            @id @db.VarChar(20)
+  id_pengguna      String @id @default(dbgenerated("('AC'::text || lpad((nextval('pengguna_code_seq'::regclass))::text, 4, '0'::text))")) @db.VarChar(20)
   nama_lengkap     String            @db.VarChar(100)
   email            String?           @unique @db.VarChar(150)
   nomor_telepon    String?           @unique @db.VarChar(20)
@@ -27,7 +27,6 @@ model Pengguna {
   dibuat_pada      DateTime?         @default(now()) @db.Timestamp(6)
   diperbarui_pada  DateTime?         @default(now()) @updatedAt @db.Timestamp(6)
   
-  // Relasi
   agent            agent?
 
   @@index([kode_referral], map: "idx_kode_referral")

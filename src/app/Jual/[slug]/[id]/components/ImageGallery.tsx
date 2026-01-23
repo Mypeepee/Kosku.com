@@ -21,7 +21,7 @@ export default function ImageGallery({ images }: { images: string[] }) {
   // Pastikan minimal ada 5 gambar untuk Grid Desktop
   const displayImagesGrid = images.length >= 5 
     ? images.slice(0, 5) 
-    : [...images, ...Array(5 - images.length).fill(images[images.length - 1] || "/images/placeholder.jpg")];
+    : [...images, ...Array(5 - images.length).fill(images[images.length - 1] || "/images/banner.jpg")];
 
   const mobileImages = images;
 

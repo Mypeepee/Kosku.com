@@ -17,11 +17,14 @@ export default function ImageGallery({ images }: { images: string[] }) {
   // Ref
   const mobileSliderRef = useRef<HTMLDivElement>(null);
 
+  // ✅ Debug log - pastikan images diterima
+  console.log("🖼️ ImageGallery images:", images);
+
   // --- DATA SETUP ---
-  // Pastikan minimal ada 5 gambar untuk Grid Desktop
+  // ✅ Pastikan minimal ada 5 gambar untuk Grid Desktop (fallback ke banner, bukan placeholder)
   const displayImagesGrid = images.length >= 5 
     ? images.slice(0, 5) 
-    : [...images, ...Array(5 - images.length).fill(images[images.length - 1] || "/images/placeholder.jpg")];
+    : [...images, ...Array(5 - images.length).fill(images[images.length - 1] || "/images/hero/banner.jpg")];
 
   const mobileImages = images;
 
@@ -91,6 +94,11 @@ export default function ImageGallery({ images }: { images: string[] }) {
     };
   }, [isOpen, nextPhoto, prevPhoto]);
 
+  // ✅ Handler error gambar - fallback ke banner
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    e.currentTarget.src = "/images/hero/banner.jpg";
+  };
+
   return (
     <div className="w-full relative">
       
@@ -107,6 +115,7 @@ export default function ImageGallery({ images }: { images: string[] }) {
             fill 
             className="object-cover transition-transform duration-700 group-hover:scale-110" 
             priority
+            onError={handleImageError}
           />
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-500" />
         </div>
@@ -119,14 +128,19 @@ export default function ImageGallery({ images }: { images: string[] }) {
                 alt={`Gallery ${idx}`} 
                 fill 
                 className="object-cover transition-transform duration-700 group-hover:scale-110" 
+                onError={handleImageError}
             />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-500" />
             
-            {/* Tombol Lihat Semua di Gambar Terakhir */}
-            {idx === 3 && (
-              <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                 <button className="bg-white text-black px-4 py-2 rounded-lg text-xs font-bold shadow-lg flex items-center gap-2 hover:bg-gray-200 transition-colors">
-                    <Icon icon="solar:gallery-bold-duotone"/> Lihat Semua
+            {/* Tombol Lihat Semua di Gambar Terakhir (hanya muncul jika > 5 gambar) */}
+            {idx === 3 && images.length > 5 && (
+              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); openLightbox(4); }}
+                   className="bg-white text-black px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 hover:bg-gray-100 transition-colors active:scale-95"
+                 >
+                    <Icon icon="solar:gallery-bold-duotone" className="text-lg"/> 
+                    Lihat Semua ({images.length})
                  </button>
               </div>
             )}
@@ -151,7 +165,13 @@ export default function ImageGallery({ images }: { images: string[] }) {
                     className="relative h-full min-w-full snap-center bg-gray-900"
                     onClick={() => openLightbox(idx)}
                 >
-                    <Image src={img} alt={`Slide ${idx}`} fill className="object-cover" />
+                    <Image 
+                      src={img} 
+                      alt={`Slide ${idx}`} 
+                      fill 
+                      className="object-cover" 
+                      onError={handleImageError}
+                    />
                 </div>
             ))}
          </div>
@@ -178,17 +198,22 @@ export default function ImageGallery({ images }: { images: string[] }) {
 
          {/* Badge Counter */}
          <div className="absolute bottom-4 right-4 bg-black/70 px-3 py-1.5 rounded-lg text-xs font-bold text-white backdrop-blur-md border border-white/10 pointer-events-none z-10 shadow-lg">
-            {mobileActiveIndex + 1} / {images.length} Foto
+            {mobileActiveIndex + 1} / {images.length}
          </div>
 
          {/* Indikator Dots */}
          <div className="absolute bottom-4 left-4 flex gap-1.5 z-10">
-            {images.slice(0, 5).map((_, i) => (
+            {images.slice(0, Math.min(5, images.length)).map((_, i) => (
                 <div 
                     key={i} 
                     className={`h-1.5 rounded-full backdrop-blur-sm transition-all duration-300 ${i === mobileActiveIndex ? 'bg-white w-4' : 'bg-white/40 w-1.5'}`}
                 ></div>
             ))}
+            {images.length > 5 && (
+              <div className="text-white/60 text-[10px] font-bold ml-1 self-center">
+                +{images.length - 5}
+              </div>
+            )}
          </div>
       </div>
 
@@ -235,6 +260,7 @@ export default function ImageGallery({ images }: { images: string[] }) {
                     className="object-contain" 
                     priority 
                     quality={100}
+                    onError={handleImageError}
                   />
                 </motion.div>
 
@@ -255,6 +281,17 @@ export default function ImageGallery({ images }: { images: string[] }) {
         </AnimatePresence>,
         document.body
       )}
+
+      {/* CSS scrollbar-hide */}
+      <style jsx>{`
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+        }
+        .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
 
     </div>
   );
