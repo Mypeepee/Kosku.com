@@ -42,8 +42,6 @@ interface ProductData {
   is_hot_deal?: boolean | null;
   dilihat?: number | null;
   tanggal_lelang?: string | null;
-
-  // kolom lelang tambahan
   uang_jaminan?: number | string | null;
   nilai_limit_lelang?: number | string | null;
 
@@ -68,7 +66,10 @@ interface DetailClientProps {
   fotoArray: string[];
 }
 
-export default function DetailClient({ product, fotoArray }: DetailClientProps) {
+export default function DetailClient({
+  product,
+  fotoArray,
+}: DetailClientProps) {
   const convertToNumber = (value: any): number => {
     if (typeof value === "number") return value;
     if (typeof value === "string") {
@@ -95,30 +96,12 @@ export default function DetailClient({ product, fotoArray }: DetailClientProps) 
       ? convertToNumber(product.nilai_limit_lelang)
       : null;
 
-  useEffect(() => {
-    console.log("=== DetailClient Debug ===");
-    console.log("product.lokasi:", {
-      kelurahan: product.kelurahan,
-      kecamatan: product.kecamatan,
-      kota: product.kota,
-      provinsi: product.provinsi,
-    });
-    console.log("propertyData.lokasi (setelah mapping):", {
-      kelurahan: propertyData.kelurahan,
-      kecamatan: propertyData.kecamatan,
-      kota: propertyData.kota,
-      provinsi: propertyData.provinsi,
-    });
-    console.log("==========================");
-  }, [product]);
-
   const propertyData = {
     id_property: product.id_property,
     kode_properti: product.kode_properti ?? "-",
     judul: product.judul,
     title: product.judul,
 
-    // lokasi – JANGAN pakai `|| null` supaya "" tidak dipaksa jadi null
     kota: product.kota,
     alamat_lengkap: product.alamat_lengkap,
     address: product.alamat_lengkap,
@@ -138,7 +121,6 @@ export default function DetailClient({ product, fotoArray }: DetailClientProps) 
     dilihat: product.dilihat ?? 0,
     tanggal_lelang: product.tanggal_lelang ?? null,
 
-    // lelang
     uang_jaminan: uangJaminan,
     nilai_limit_lelang: nilaiLimitLelang,
 
@@ -215,28 +197,35 @@ export default function DetailClient({ product, fotoArray }: DetailClientProps) 
   return (
     <div className="text-white font-sans bg-[#0F0F0F]">
       <MobileNav />
-      <div className="hidden lg:block h-24 w-full"></div>
 
-      <div className="hidden lg:block container mx-auto px-4 mb-6">
-        <div className="flex items-center gap-2 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+      {/* Spacer untuk mobile header */}
+      <div className="lg:hidden h-[60px]" />
+
+      {/* Spacer desktop */}
+      <div className="hidden lg:block h-24 w-full" />
+
+      {/* BREADCRUMB - tampil di semua ukuran, tapi beda styling */}
+      <div className="container mx-auto px-4 mb-4 lg:mb-6">
+        <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-bold text-gray-500 uppercase tracking-wider">
           <Link href="/" className="hover:text-[#86efac] transition-colors">
             Home
           </Link>
-          <Icon icon="solar:alt-arrow-right-linear" />
+          <Icon icon="solar:alt-arrow-right-linear" className="text-sm" />
           <Link
             href="/Lelang"
             className="hover:text-[#86efac] transition-colors"
           >
             Lelang
           </Link>
-          <Icon icon="solar:alt-arrow-right-linear" />
-          <span className="text-white truncate max-w-xs">
+          <Icon icon="solar:alt-arrow-right-linear" className="text-sm" />
+          <span className="text-white truncate max-w-[150px] sm:max-w-xs">
             {product.judul}
           </span>
         </div>
       </div>
 
-      <div className="container mx-auto lg:px-4 mb-8">
+      {/* Gallery dengan margin top di mobile */}
+      <div className="container mx-auto lg:px-4 mb-8 px-4 mt-4 lg:mt-0">
         <ImageGallery images={fotoArray} />
       </div>
 
@@ -247,6 +236,7 @@ export default function DetailClient({ product, fotoArray }: DetailClientProps) 
             selectedRoom={selectedRoom}
             setSelectedRoom={setSelectedRoom}
           />
+
           <BookingSidebar data={propertyData} />
         </div>
       </div>

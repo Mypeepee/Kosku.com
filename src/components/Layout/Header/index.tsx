@@ -15,7 +15,7 @@ import SignUp from "@/components/Auth/SignUp";
 import { headerData } from "./Navigation/menuData";
 
 // =============================================================================
-// 2. COMPONENT: DESKTOP MENU ITEM
+// 2. DESKTOP MENU ITEM
 // =============================================================================
 const DesktopMenuItem = ({ item }: { item: any }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -93,8 +93,9 @@ const DesktopMenuItem = ({ item }: { item: any }) => {
 };
 
 // =============================================================================
-// 3. COMPONENT: MOBILE MENU ITEM
+// 3. (Masih ada) MOBILE MENU ITEM – TIDAK DIPAKAI LAGI SETELAH BURGER DIHAPUS
 // =============================================================================
+// Boleh kamu hapus juga kalau sudah yakin drawer tidak dipakai di manapun.
 const MobileMenuItem = ({
   item,
   closeMenu,
@@ -184,7 +185,7 @@ const Header: React.FC = () => {
     pathUrl?.startsWith("/Carikos/") && pathUrl.split("/").length > 2;
   const isDashboard = pathUrl?.startsWith("/dashboard");
 
-  const [navbarOpen, setNavbarOpen] = useState(false);
+  // navbarOpen tidak dibutuhkan lagi kalau burger & drawer dihapus
   const [sticky, setSticky] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
 
@@ -197,16 +198,15 @@ const Header: React.FC = () => {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Lock scroll hanya untuk modal auth
   useEffect(() => {
-    if (navbarOpen || isSignInOpen || isSignUpOpen)
-      document.body.style.overflow = "hidden";
+    if (isSignInOpen || isSignUpOpen) document.body.style.overflow = "hidden";
     else document.body.style.overflow = "";
-  }, [navbarOpen, isSignInOpen, isSignUpOpen]);
+  }, [isSignInOpen, isSignUpOpen]);
 
   const handleLogout = () => {
     signOut({ callbackUrl: "/" });
     setProfileDropdownOpen(false);
-    setNavbarOpen(false);
   };
 
   // ========= ROLE & MENU DINAMIS =========
@@ -264,7 +264,7 @@ const Header: React.FC = () => {
               >
                 {/* Desktop Profile Button */}
                 <button className="flex items-center gap-2 py-2 group outline-none">
-                  <div className="w-10 h-10 rounded-full border border-white/10 overflow-hidden relative bg-white/5 shrink-0">
+                  <div className="w-10 h-10 rounded-full border border-white/10 overflow-hidden relative bg:white/5 shrink-0">
                     {session?.user?.image ? (
                       <Image
                         src={session.user.image}
@@ -294,7 +294,7 @@ const Header: React.FC = () => {
                       className="absolute top-full right-0 pt-2 w-48"
                     >
                       <div className="bg-[#1A1A1A] border border-white/10 rounded-xl shadow-2xl overflow-hidden py-1">
-                        <div className="px-4 py-3 border-b border-white/5">
+                        <div className="px-4 py-3 border-b border:white/5">
                           <p className="text-xs text-gray-400">Halo,</p>
                           <p className="text-sm font-bold text-white truncate">
                             {session?.user?.name || "Pengguna"}
@@ -315,7 +315,7 @@ const Header: React.FC = () => {
                         {isAgent && (
                           <Link
                             href="/dashboard"
-                            className="flex items-center gap-2 px-4 py-3 text-sm text-gray-300 hover:bg-white/5 hover:text-[#86efac] transition-colors"
+                            className="flex items:center gap-2 px-4 py-3 text-sm text-gray-300 hover:bg:white/5 hover:text-[#86efac] transition-colors"
                           >
                             <Icon
                               icon="solar:widget-3-bold-duotone"
@@ -356,160 +356,9 @@ const Header: React.FC = () => {
                 </button>
               </>
             )}
-
-            <button
-              onClick={() => setNavbarOpen(true)}
-              className="lg:hidden p-2 text-white hover:bg-white/10 rounded-full transition-colors"
-            >
-              <Icon
-                icon="solar:hamburger-menu-linear"
-                className="text-2xl"
-              />
-            </button>
           </div>
         </div>
       </header>
-
-      {/* MOBILE MENU DRAWER */}
-      <AnimatePresence>
-        {navbarOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setNavbarOpen(false)}
-              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 lg:hidden"
-            />
-
-            <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 h-full w-[85%] max-w-xs bg-[#121212] border-l border-white/10 z-[51] shadow-2xl flex flex-col lg:hidden"
-            >
-              <div className="flex items-center justify-between p-5 border-b border-white/10">
-                <span className="text-lg font-bold text-white">Menu</span>
-                <button
-                  onClick={() => setNavbarOpen(false)}
-                  className="p-2 rounded-full hover:bg-white/10 text-white transition-colors"
-                >
-                  <Icon
-                    icon="solar:close-circle-bold"
-                    className="text-2xl"
-                  />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
-                <div className="flex flex-col">
-                  {(computedMenu || []).map((item, index) => (
-                    <MobileMenuItem
-                      key={index}
-                      item={item}
-                      closeMenu={() => setNavbarOpen(false)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-5 border-t border-white/10 bg-[#0F0F0F] space-y-3">
-                {status === "authenticated" ? (
-                  <>
-                    <div className="flex items-center gap-3 mb-4 px-2">
-                      <div className="w-10 h-10 rounded-full bg-white/10 overflow-hidden relative shrink-0 border border-white/10">
-                        {session?.user?.image ? (
-                          <Image
-                            src={session.user.image}
-                            alt="User"
-                            fill
-                            sizes="40px"
-                            className="object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-white">
-                            <Icon
-                              icon="solar:user-circle-bold"
-                              className="text-2xl"
-                            />
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-white">
-                          {session?.user?.name || "Pengguna"}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {session?.user?.email}
-                        </p>
-                      </div>
-                    </div>
-
-                    {isAgent && (
-                      <Link
-                        href="/dashboard"
-                        onClick={() => setNavbarOpen(false)}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-white/20 text-white font-bold text-sm hover:bg-white/5 transition-all"
-                      >
-                        <Icon
-                          icon="solar:widget-3-bold-duotone"
-                          className="text-lg"
-                        />
-                        Dashboard Agent
-                      </Link>
-                    )}
-
-                    <Link
-                      href="/profile"
-                      onClick={() => setNavbarOpen(false)}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-white/20 text-white font-bold text-sm hover:bg-white/5 transition-all"
-                    >
-                      <Icon
-                        icon="solar:user-id-bold"
-                        className="text-lg"
-                      />
-                      Profil Saya
-                    </Link>
-
-                    <button
-                      onClick={handleLogout}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-red-500/10 text-red-400 font-bold text-sm hover:bg-red-500/20 transition-all border border-red-500/20"
-                    >
-                      <Icon
-                        icon="solar:logout-2-bold"
-                        className="text-lg"
-                      />
-                      Keluar
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => {
-                        setNavbarOpen(false);
-                        setIsSignInOpen(true);
-                      }}
-                      className="w-full py-3 rounded-xl border border-white/20 text-white font-bold text-sm hover:bg-white/5 transition-all"
-                    >
-                      Masuk Akun
-                    </button>
-                    <button
-                      onClick={() => {
-                        setNavbarOpen(false);
-                        setIsSignUpOpen(true);
-                      }}
-                      className="w-full py-3 rounded-xl bg-[#86efac] text-black font-bold text-sm hover:bg-[#6ee7b7] shadow-lg transition-all"
-                    >
-                      Daftar Sekarang
-                    </button>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
       {/* MODALS */}
       {isSignInOpen && (
@@ -517,7 +366,7 @@ const Header: React.FC = () => {
           <div
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
             onClick={() => setIsSignInOpen(false)}
-          ></div>
+          />
           <div className="relative w-full max-w-md bg-[#181818] border border-white/10 rounded-2xl p-8 shadow-2xl">
             <button
               onClick={() => setIsSignInOpen(false)}
@@ -541,11 +390,11 @@ const Header: React.FC = () => {
           <div
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
             onClick={() => setIsSignUpOpen(false)}
-          ></div>
+          />
           <div className="relative w-full max-w-md bg-[#181818] border border-white/10 rounded-2xl p-8 shadow-2xl">
             <button
               onClick={() => setIsSignUpOpen(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-white"
+              className="absolute top-4 right-4 text-gray-400 hover:text:white"
             >
               <Icon
                 icon="solar:close-circle-bold"

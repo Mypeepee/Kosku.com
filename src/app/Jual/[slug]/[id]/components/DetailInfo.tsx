@@ -3,15 +3,21 @@ import React, { useState, useEffect } from "react";
 import { Icon } from "@iconify/react";
 import dynamic from "next/dynamic";
 
-const KosMap = dynamic(() => import("../../../../../components/Maps/KosMap"), { 
-  ssr: false, 
-  loading: () => (
-    <div className="w-full h-full bg-[#151515] animate-pulse flex flex-col items-center justify-center text-gray-500 gap-2">
-      <Icon icon="solar:map-point-bold-duotone" className="text-3xl animate-bounce"/>
-      <span className="text-xs font-bold">Memuat Peta...</span>
-    </div>
-  )
-});
+const Maps = dynamic(
+  () => import("../../../../../components/Maps/maps"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full bg-[#151515] animate-pulse flex flex-col items-center justify-center text-gray-500 gap-2">
+        <Icon
+          icon="solar:map-point-bold-duotone"
+          className="text-3xl animate-bounce"
+        />
+        <span className="text-xs font-bold">Memuat Peta...</span>
+      </div>
+    ),
+  }
+);
 
 interface DetailInfoProps {
   data: any;
@@ -343,38 +349,67 @@ export default function DetailInfo({ data }: DetailInfoProps) {
        </div>
 
        {/* 6. MAP */}
-       <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5">
-         <div className="flex justify-between items-end mb-4">
-             <h3 className="text-sm font-bold flex items-center gap-2 text-white">
-                  <div className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-                    <Icon icon="solar:map-bold-duotone" className="text-red-400"/>
-                  </div>
-                  Peta Lokasi
-             </h3>
-             
-             {data?.latitude && data?.longitude && (
-               <a 
-                 href={`https://www.google.com/maps/search/?api=1&query=${data.latitude},${data.longitude}`}
-                 target="_blank" 
-                 rel="noopener noreferrer"
-                 className="text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1">
-                   Buka di Google Maps <Icon icon="solar:arrow-right-up-linear"/>
-               </a>
-             )}
-         </div>
-         
-         {data?.latitude && data?.longitude ? (
-           <div className="relative w-full h-[400px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-xl">
-               <KosMap lat={data.latitude} lng={data.longitude} />
-           </div>
-         ) : (
-           <div className="bg-slate-900/30 border border-slate-700/30 rounded-xl p-8 flex flex-col items-center justify-center text-center">
-             <Icon icon="solar:map-point-bold-duotone" className="text-6xl text-slate-700 mb-3"/>
-             <h4 className="text-white font-bold mb-2">Lokasi Belum Tersedia</h4>
-             <p className="text-sm text-gray-400 max-w-md">Koordinat belum diinput. Hubungi agent untuk informasi lokasi.</p>
-           </div>
-         )}
-       </div>
+<div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5">
+  <div className="flex justify-between items-end mb-4">
+    <h3 className="text-sm font-bold flex items-center gap-2 text-white">
+      <div className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+        <Icon icon="solar:map-bold-duotone" className="text-red-400" />
+      </div>
+      Peta Lokasi & Fasilitas Sekitar
+    </h3>
+
+    {(data?.latitude != null && data?.longitude != null) || data?.alamat_lengkap ? (
+      <a
+        href={
+          data?.latitude != null && data?.longitude != null
+            ? `https://www.google.com/maps/search/?api=1&query=${data.latitude},${data.longitude}`
+            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                data?.alamat_lengkap || ""
+              )}`
+        }
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1"
+      >
+        Buka di Google Maps{" "}
+        <Icon icon="solar:arrow-right-up-linear" />
+      </a>
+    ) : null}
+  </div>
+
+  {data?.latitude != null && data?.longitude != null ? (
+    // PRIORITAS: koordinat kalau ada
+    <div className="relative w-full h-[500px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-xl">
+      <Maps
+        lat={data.latitude}
+        lng={data.longitude}
+        address={data.alamat_lengkap}
+      />
+    </div>
+  ) : data?.alamat_lengkap ? (
+    // FALLBACK: geocode dari alamat_lengkap
+    <div className="relative w-full h-[500px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-xl">
+      <Maps
+        address={data.alamat_lengkap}
+      />
+    </div>
+  ) : (
+    // Tidak ada koordinat & tidak ada alamat
+    <div className="bg-slate-900/30 border border-slate-700/30 rounded-xl p-8 flex flex-col items-center justify-center text-center">
+      <Icon
+        icon="solar:map-point-bold-duotone"
+        className="text-6xl text-slate-700 mb-3"
+      />
+      <h4 className="text-white font-bold mb-2">
+        Lokasi Belum Tersedia
+      </h4>
+      <p className="text-sm text-gray-400 max-w-md">
+        Koordinat dan alamat belum diinput. Hubungi agent untuk informasi lokasi.
+      </p>
+    </div>
+  )}
+</div>
+
 
        {/* 7. KPR CALCULATOR - AUTO OPEN & SMART INPUT */}
        {showKPRCalculator && (
