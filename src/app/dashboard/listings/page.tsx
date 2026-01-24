@@ -38,6 +38,7 @@ export default async function DashboardListingsPage() {
     thumbnailUrl: p.gambar
       ? p.gambar.split(",")[0]                // ✅ ambil URL pertama dari kolom text
       : undefined,
+    views: p.dilihat ?? 0, // ✅ tambahan
   }));
 
   return <ListingsPage headerStats={headerStats} listings={listings} />;
