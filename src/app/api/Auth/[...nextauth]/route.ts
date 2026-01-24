@@ -112,24 +112,24 @@ export const authOptions: AuthOptions = {
               data: {
                 nama_lengkap: profile.name || "Pengguna Google",
                 email: profile.email,
-                google_id: account.providerAccountId, // PENTING: Simpan ID Google
+                google_id: account.providerAccountId, // Simpan ID Google
                 foto_profil_url: profile.picture,
                 kata_sandi: null, // Password kosong
-                peran: "USER",    // PENTING: Sesuai Enum Baru (Uppercase)
-                status_akun: "AKTIF", // PENTING: Sesuai Enum Baru
+                peran: "USER",
+                status_akun: "AKTIF",
                 wa_terverifikasi: true,
               },
             });
-          } 
+          }
           // 3. JIKA SUDAH ADA (tapi belum link Google ID) -> Update
           else if (!existingUser.google_id) {
-             await prisma.pengguna.update({
-               where: { id_pengguna: existingUser.id_pengguna },
-               data: { 
-                 google_id: account.providerAccountId,
-                 foto_profil_url: existingUser.foto_profil_url || profile.picture 
-               }
-             });
+            await prisma.pengguna.update({
+              where: { id_pengguna: existingUser.id_pengguna },
+              data: {
+                google_id: account.providerAccountId,
+                foto_profil_url: existingUser.foto_profil_url || profile.picture,
+              },
+            });
           }
 
           return true; // Lanjut login
@@ -143,24 +143,39 @@ export const authOptions: AuthOptions = {
 
     // === CALLBACK 2: JWT ===
     async jwt({ token, user, account }: any) {
-      // Saat pertama kali login berhasil
+      // Saat pertama kali login (credentials)
       if (user) {
         token.id = user.id;
         token.role = user.role;
       }
-      
-      // Khusus Google: Kita perlu ambil ID & Role dari DB karena 'user' dari Google provider belum lengkap
+
+      // Khusus Google: ambil id_pengguna & peran dari DB
       if (account?.provider === "google" && token.email) {
-         const dbUser = await prisma.pengguna.findUnique({
-            where: { email: token.email },
-            select: { id_pengguna: true, peran: true }
-         });
-         if (dbUser) {
-            token.id = dbUser.id_pengguna;
-            token.role = dbUser.peran;
-         }
+        const dbUser = await prisma.pengguna.findUnique({
+          where: { email: token.email },
+          select: { id_pengguna: true, peran: true },
+        });
+
+        if (dbUser) {
+          token.id = dbUser.id_pengguna;
+          token.role = dbUser.peran;
+        }
       }
-      
+
+      // Tambahkan lookup agent berdasarkan id_pengguna
+      if (token.id) {
+        const agent = await prisma.agent.findUnique({
+          where: { id_pengguna: token.id as string },
+          select: { id_agent: true },
+        });
+
+        if (agent) {
+          (token as any).agentId = agent.id_agent;
+        } else {
+          (token as any).agentId = null;
+        }
+      }
+
       return token;
     },
 
@@ -169,6 +184,7 @@ export const authOptions: AuthOptions = {
       if (session.user) {
         session.user.id = token.id;
         session.user.role = token.role; // Frontend bisa baca role user
+        (session.user as any).agentId = (token as any).agentId || null;
       }
       return session;
     },
