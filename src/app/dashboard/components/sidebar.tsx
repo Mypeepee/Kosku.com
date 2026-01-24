@@ -1,3 +1,4 @@
+// src/app/dashboard/components/sidebar.tsx
 "use client";
 
 import Link from "next/link";
@@ -7,11 +8,27 @@ import { usePathname } from "next/navigation";
 
 const homepageMenu = [
   { label: "Dashboard", icon: "solar:widget-5-linear", href: "/dashboard" },
-  { label: "Listings", icon: "solar:buildings-3-linear", href: "/dashboard/listings" },
-  { label: "Leads & Clients", icon: "solar:users-group-two-rounded-linear", href: "/dashboard/leads" },
+  {
+    label: "Listings",
+    icon: "solar:buildings-3-linear",
+    href: "/dashboard/listings",
+  },
+  {
+    label: "Leads & Clients",
+    icon: "solar:users-group-two-rounded-linear",
+    href: "/dashboard/leads",
+  },
   { label: "Agents", icon: "solar:user-id-linear", href: "/dashboard/agents" },
-  { label: "Analytics", icon: "solar:chart-square-linear", href: "/dashboard/analytics" },
-  { label: "Tasks & HRM", icon: "solar:clipboard-check-linear", href: "/dashboard/tasks" },
+  {
+    label: "Analytics",
+    icon: "solar:chart-square-linear",
+    href: "/dashboard/analytics",
+  },
+  {
+    label: "Tasks & HRM",
+    icon: "solar:clipboard-check-linear",
+    href: "/dashboard/tasks",
+  },
 ];
 
 const appsMenu = [
@@ -32,11 +49,12 @@ export function OwnerSidebar() {
   return (
     <aside
       className="
-        hidden md:flex w-72 flex-col border-r border-white/5 bg-[#040608] px-5 py-6
+        hidden md:flex w-72 flex-col
+        border-r border-white/5 bg-[#040608] px-5 py-6
         overflow-y-auto
       "
     >
-      {/* Logo + text clickable ke home, glow halus hanya saat hover */}
+      {/* Logo */}
       <Link
         href="/"
         className="
@@ -47,7 +65,6 @@ export function OwnerSidebar() {
         "
       >
         <div className="relative">
-          {/* Glow belakang logo */}
           <div
             className="
               pointer-events-none absolute inset-0
@@ -85,7 +102,6 @@ export function OwnerSidebar() {
           </span>
         </span>
 
-        {/* highlight halus di belakang teks + logo */}
         <div
           className="
             pointer-events-none absolute inset-0 -z-10
@@ -99,7 +115,7 @@ export function OwnerSidebar() {
 
       {/* HOME SECTION */}
       <SectionLabel>Homepage</SectionLabel>
-      <nav className="mb-6 space-y-1">
+      <nav className="mb-6 space-y-1.5">
         {homepageMenu.map((item) => (
           <SidebarItem
             key={item.label}
@@ -109,12 +125,11 @@ export function OwnerSidebar() {
         ))}
       </nav>
 
-      {/* Divider subtle */}
       <div className="my-3 h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
       {/* APPS SECTION */}
       <SectionLabel>Apps</SectionLabel>
-      <nav className="mb-2 space-y-1">
+      <nav className="mb-2 space-y-1.5">
         {appsMenu.map((item) => (
           <SidebarItem key={item.label} item={item} />
         ))}
@@ -138,20 +153,15 @@ function SidebarItem({
   item: { label: string; icon: string; href?: string };
   active?: boolean;
 }) {
-  const Component = item.href ? Link : "button";
+  const isLink = Boolean(item.href);
   const base =
     "group flex w-full items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm transition-all duration-150";
-
   const state = active
     ? "bg-emerald-500/12 text-emerald-200 shadow-[0_0_24px_rgba(16,185,129,0.45)] border border-emerald-400/40"
     : "text-slate-300 hover:bg-white/5 hover:text-emerald-200 border border-transparent";
 
-  return (
-    <Component
-      // @ts-expect-error href hanya untuk Link
-      href={item.href || "#"}
-      className={`${base} ${state}`}
-    >
+  const content = (
+    <>
       <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#050608] border border-white/10 group-hover:border-emerald-400/50">
         <Icon
           icon={item.icon}
@@ -171,6 +181,20 @@ function SidebarItem({
           className="ml-auto text-[16px] text-slate-500 group-hover:text-emerald-300"
         />
       )}
-    </Component>
+    </>
+  );
+
+  if (isLink) {
+    return (
+      <Link href={item.href!} className={`${base} ${state}`}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" className={`${base} ${state}`}>
+      {content}
+    </button>
   );
 }

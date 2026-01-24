@@ -1,3 +1,4 @@
+// src/app/dashboard/components/topbar.tsx
 "use client";
 
 import { Icon } from "@iconify/react";
@@ -7,7 +8,13 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 
-export default function DashboardTopbar() {
+type DashboardTopbarProps = {
+  onOpenMobileSidebar?: () => void;
+};
+
+export default function DashboardTopbar({
+  onOpenMobileSidebar,
+}: DashboardTopbarProps) {
   const { data: session } = useSession();
   const [open, setOpen] = useState(false);
 
@@ -15,14 +22,23 @@ export default function DashboardTopbar() {
     <div
       className="
         sticky top-0 z-20
-        flex items-center justify-between gap-4
+        flex items-center justify-between gap-3
         border-b border-white/5
         bg-[#050608]/90 backdrop-blur
-        px-5 py-6          /* >>> SAMA dgn aside: px-5 py-6 */
+        px-4 sm:px-5 py-4 sm:py-6
       "
     >
-      {/* LEFT: search */}
+      {/* LEFT: burger (mobile) + search */}
       <div className="flex flex-1 items-center gap-3">
+        {/* Burger hanya tampil di < md */}
+        <button
+          type="button"
+          onClick={onOpenMobileSidebar}
+          className="flex md:hidden h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-[#050608] text-slate-200 hover:bg-white/5"
+        >
+          <Icon icon="solar:hamburger-menu-linear" className="h-4 w-4" />
+        </button>
+
         <div className="flex flex-1 items-center rounded-full bg-[#0b0d11] px-4 py-2 border border-white/5">
           <Icon
             icon="solar:magnifer-linear"
@@ -37,17 +53,20 @@ export default function DashboardTopbar() {
       </div>
 
       {/* RIGHT: notif + profile */}
-      <div className="hidden sm:flex items-center gap-2">
-        <button className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-[#050608] text-slate-200 hover:bg-white/5">
+      <div className="flex items-center gap-2">
+        <button className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full border border-white/10 bg-[#050608] text-slate-200 hover:bg-white/5">
           <Icon icon="solar:bell-linear" className="h-4 w-4" />
         </button>
 
-        <div className="relative">
-          <button
-            onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-2 rounded-full border border-white/10 bg-[#050608] pl-1 pr-3 py-1 hover:bg-white/5 transition-colors"
-          >
-            <div className="w-10 h-10 rounded-full overflow-hidden bg-white/5 border border-white/10 relative">
+        {/* Wrapper untuk hover */}
+        <div
+          className="relative"
+          onMouseEnter={() => setOpen(true)}
+          onMouseLeave={() => setOpen(false)}
+        >
+          {/* Trigger profile */}
+          <button className="flex items-center gap-2 rounded-full border border-white/10 bg-[#050608] pl-1 pr-2 sm:pr-3 py-1 hover:bg-white/5 transition-colors">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden bg-white/5 border border-white/10 relative">
               {session?.user?.image ? (
                 <Image
                   src={session.user.image}
@@ -58,7 +77,7 @@ export default function DashboardTopbar() {
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-slate-300">
-                  <Icon icon="solar:user-circle-bold" className="text-xl" />
+                  <Icon icon="solar:user-circle-bold" className="text-lg sm:text-xl" />
                 </div>
               )}
             </div>
@@ -71,7 +90,7 @@ export default function DashboardTopbar() {
             />
           </button>
 
-          {/* Dropdown profil mirip header */}
+          {/* Dropdown profil */}
           <AnimatePresence>
             {open && (
               <motion.div
@@ -94,7 +113,6 @@ export default function DashboardTopbar() {
                 <Link
                   href="/profile"
                   className="flex items-center gap-2 px-4 py-3 text-sm text-gray-300 hover:bg-white/5 hover:text-[#86efac] transition-colors"
-                  onClick={() => setOpen(false)}
                 >
                   <Icon icon="solar:user-id-bold" className="text-lg" />
                   Profil Saya
@@ -102,7 +120,6 @@ export default function DashboardTopbar() {
 
                 <button
                   onClick={() => {
-                    setOpen(false);
                     signOut({ callbackUrl: "/" });
                   }}
                   className="w-full flex items-center gap-2 px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors text-left"

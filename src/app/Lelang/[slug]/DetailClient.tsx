@@ -13,6 +13,7 @@ import SimilarProperties from "./[id]/components/SimilarPropertiesLelang";
 interface ProductData {
   id_property: string;
   kode_properti?: string | null;
+  slug?: string; // ⚠️ TAMBAHKAN INI
   judul: string;
   kota: string;
   harga: number | string;
@@ -64,11 +65,13 @@ interface ProductData {
 interface DetailClientProps {
   product: ProductData;
   fotoArray: string[];
+  similarProperties?: ProductData[]; // ⚠️ TAMBAHKAN INI (optional untuk backward compatibility)
 }
 
 export default function DetailClient({
   product,
   fotoArray,
+  similarProperties = [], // ⚠️ TAMBAHKAN INI
 }: DetailClientProps) {
   const convertToNumber = (value: any): number => {
     if (typeof value === "number") return value;
@@ -98,6 +101,7 @@ export default function DetailClient({
 
   const propertyData = {
     id_property: product.id_property,
+    slug: product.slug || "", // ⚠️ TAMBAHKAN INI
     kode_properti: product.kode_properti ?? "-",
     judul: product.judul,
     title: product.judul,
@@ -138,6 +142,8 @@ export default function DetailClient({
     deskripsi: product.deskripsi ?? null,
 
     gambar_utama: fotoArray[0] || "/images/hero/banner.jpg",
+    gambar: fotoArray[0] || "/images/hero/banner.jpg", // ⚠️ TAMBAHKAN INI
+    foto_list: fotoArray, // ⚠️ TAMBAHKAN INI
 
     agent: product.agent
       ? {
@@ -156,6 +162,9 @@ export default function DetailClient({
           jabatan: product.agent.jabatan || "",
         }
       : null,
+
+    agent_name: product.agent?.pengguna?.nama_lengkap || "Agent Premier", // ⚠️ TAMBAHKAN INI
+    agent_photo: product.agent?.pengguna?.foto_profil_url || "/images/user/user-01.png", // ⚠️ TAMBAHKAN INI
 
     owner: product.agent
       ? {
@@ -194,6 +203,19 @@ export default function DetailClient({
 
   const [selectedRoom, setSelectedRoom] = useState(minimalRoom);
 
+  // ⚠️ KONVERSI similarProperties ke format yang benar
+  const formattedSimilarProperties = similarProperties.map((p) => ({
+    ...p,
+    slug: p.slug || "",
+    gambar: p.gambar || "/images/hero/banner.jpg",
+    foto_list: p.gambar ? p.gambar.split(",").map((g) => g.trim()) : [],
+    agent_name: p.agent?.pengguna?.nama_lengkap || "Agent Premier",
+    agent_photo: p.agent?.pengguna?.foto_profil_url || "/images/user/user-01.png",
+    harga: convertToNumber(p.harga),
+    dilihat: p.dilihat ?? 0,
+    is_hot_deal: p.is_hot_deal ?? false,
+  }));
+
   return (
     <div className="text-white font-sans bg-[#0F0F0F]">
       <MobileNav />
@@ -204,7 +226,7 @@ export default function DetailClient({
       {/* Spacer desktop */}
       <div className="hidden lg:block h-24 w-full" />
 
-      {/* BREADCRUMB - tampil di semua ukuran, tapi beda styling */}
+      {/* BREADCRUMB */}
       <div className="container mx-auto px-4 mb-4 lg:mb-6">
         <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-bold text-gray-500 uppercase tracking-wider">
           <Link href="/" className="hover:text-[#86efac] transition-colors">
@@ -224,7 +246,7 @@ export default function DetailClient({
         </div>
       </div>
 
-      {/* Gallery dengan margin top di mobile */}
+      {/* Gallery */}
       <div className="container mx-auto lg:px-4 mb-8 px-4 mt-4 lg:mt-0">
         <ImageGallery images={fotoArray} />
       </div>
@@ -241,7 +263,11 @@ export default function DetailClient({
         </div>
       </div>
 
-      <SimilarProperties />
+      {/* ⚠️ FIX: Pass props ke SimilarProperties */}
+      <SimilarProperties
+        currentProperty={propertyData as any}
+        allProperties={formattedSimilarProperties as any}
+      />
     </div>
   );
 }

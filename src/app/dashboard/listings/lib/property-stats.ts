@@ -1,0 +1,88 @@
+// src/app/dashboard/listings/lib/property-stats.ts
+
+import { prisma } from "@/lib/prisma";
+
+export type KategoriEnum =
+  | "RUMAH"
+  | "APARTEMEN"
+  | "RUKO"
+  | "TANAH"
+  | "GUDANG"
+  | "HOTEL_DAN_VILLA"
+  | "TOKO"
+  | "PABRIK";
+
+export type ListingTypeCounts = Partial<Record<KategoriEnum, number>>;
+
+export type ListingHeaderStats = {
+  total: number;
+  totalForSale: number;     // PRIMARY + SECONDARY
+  totalForRent: number;     // SEWA
+  totalHotDeal: number;     // is_hot_deal = true
+  countsByCategory: ListingTypeCounts;
+};
+
+export async function fetchListingHeaderStats(
+  idAgent: string,
+): Promise<ListingHeaderStats> {
+  // Total semua listing tersedia milik agent
+  const total = await prisma.property.count({
+    where: {
+      id_agent: idAgent,
+      status_tayang: "TERSEDIA", // status_properti_enum
+    },
+  });
+
+  // Listing untuk dijual (PRIMARY + SECONDARY)
+  const totalForSale = await prisma.property.count({
+    where: {
+      id_agent: idAgent,
+      status_tayang: "TERSEDIA",
+      jenis_transaksi: {
+        in: ["PRIMARY", "SECONDARY"], // jenis_transaksi_enum
+      },
+    },
+  });
+
+  // Listing untuk disewa (SEWA)
+  const totalForRent = await prisma.property.count({
+    where: {
+      id_agent: idAgent,
+      status_tayang: "TERSEDIA",
+      jenis_transaksi: "SEWA",
+    },
+  });
+
+  // Hot deal
+  const totalHotDeal = await prisma.property.count({
+    where: {
+      id_agent: idAgent,
+      status_tayang: "TERSEDIA",
+      is_hot_deal: true,
+    },
+  });
+
+  // Group by kategori
+  const byCategory = await prisma.property.groupBy({
+    by: ["kategori"],
+    _count: { _all: true },
+    where: {
+      id_agent: idAgent,
+      status_tayang: "TERSEDIA",
+    },
+  });
+
+  const countsByCategory: ListingTypeCounts = {};
+  byCategory.forEach((row) => {
+    const key = row.kategori as KategoriEnum;
+    countsByCategory[key] = row._count._all;
+  });
+
+  return {
+    total,
+    totalForSale,
+    totalForRent,
+    totalHotDeal,
+    countsByCategory,
+  };
+}

@@ -71,8 +71,6 @@ const daysUntil = (date?: string | null) => {
 };
 
 // --- URL DETAIL LELANG ---
-// Semua listing di halaman ini adalah LELANG,
-// jadi langsung pakai prefix /Lelang, bukan /Jual.
 const getPropertyUrl = (property: PropertyDB): string => {
   const slug = property.slug || "property";
   return `/Lelang/${slug}/${property.id_property}`;
@@ -99,14 +97,100 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
   };
 
   const days = daysUntil(item.tanggal_lelang);
-  const daysLabel =
-    days === null
-      ? null
-      : days > 0
-      ? `${days} hari lagi`
-      : days === 0
-      ? "Hari ini"
-      : "Selesai";
+
+  // BADGE LOGIC:
+  // days === null   -> tidak tampil
+  // days <= 0       -> "Peluang Emas" (cup-star)
+  // days > 20       -> "Jangan Lewatkan" (eye)
+  // 10 < days < 20  -> "XX hari lagi" (style api yang lama)
+  // 0 < days <= 10  -> masih pakai api? -> di requirement kamu tidak minta, jadi ikut “X hari lagi” atau dibiarkan? 
+  // Di sini: 0 < days <= 10 tetap masuk "X hari lagi" biar tetap kebakar.
+
+  let badgeContent: React.ReactNode | null = null;
+
+  if (days !== null) {
+    if (days <= 0) {
+      // Peluang emas – sudah lewat, tapi dianggap unit berharga
+      badgeContent = (
+        <div className="absolute top-4 right-4 z-10">
+          <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.14em] text-amber-50">
+            {/* glow emas */}
+            <span className="absolute inset-0 rounded-full bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 opacity-80 blur-[3px]" />
+            {/* inner pill */}
+            <span className="absolute inset-[1px] rounded-full bg-gradient-to-r from-[#18181b] via-[#030712] to-[#111827] border border-amber-300/80 shadow-[0_0_22px_rgba(250,204,21,0.75)]" />
+            <span className="relative inline-flex items-center gap-1.5 px-1">
+              <Icon
+                icon="solar:cup-star-bold-duotone"
+                className="text-sm text-amber-200"
+              />
+              <span className="text-[10px] tracking-[0.24em]">
+                PELUANG EMAS
+              </span>
+            </span>
+          </span>
+        </div>
+      );
+    } else if (days > 20) {
+      // Masih lama, tapi tetap highlight: Jangan Lewatkan
+      badgeContent = (
+        <div className="absolute top-4 right-4 z-10">
+          <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.14em] text-sky-50">
+            <span className="absolute inset-0 rounded-full bg-gradient-to-r from-sky-500 via-cyan-400 to-emerald-400 opacity-70 blur-[3px]" />
+            <span className="absolute inset-[1px] rounded-full bg-gradient-to-r from-[#020617] via-[#020617] to-[#022c22] border border-sky-300/70 shadow-[0_0_18px_rgba(56,189,248,0.7)]" />
+            <span className="relative inline-flex items-center gap-1.5 px-1">
+              <Icon
+                icon="solar:eye-bold-duotone"
+                className="text-sm text-sky-200"
+              />
+              <span className="text-[10px] tracking-[0.22em]">
+                JANGAN LEWATKAN
+              </span>
+            </span>
+          </span>
+        </div>
+      );
+    } else if (days > 10 && days <= 20) {
+      // Style api favoritmu, hanya untuk 10 < days <= 20
+      const daysLabel = `${days} hari lagi`;
+      badgeContent = (
+        <div className="absolute top-4 right-4 z-10">
+          <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.12em] text-white">
+            <span className="absolute inset-0 rounded-full bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 opacity-80 blur-[2px]" />
+            <span className="absolute inset-0 rounded-full bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 animate-pulse opacity-70" />
+            <span className="relative inline-flex items-center gap-1.5 px-1">
+              <Icon
+                icon="solar:fire-bold-duotone"
+                className="text-sm text-yellow-100"
+              />
+              {daysLabel}
+            </span>
+          </span>
+        </div>
+      );
+    } else if (days > 0 && days <= 10) {
+      // Extra: kalau mau yang super urgent, bisa pakai versi lebih heboh,
+      // di sini saya tetap pakai versi api yang sama biar konsisten visual.
+      const daysLabel = `${days} hari lagi`;
+      badgeContent = (
+        <div className="absolute top-4 right-4 z-10">
+          <span className="relative inline-flex items-center gap-1.5 px-5 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.16em] text-white">
+            <span className="absolute inset-0 rounded-full bg-[conic-gradient(at_top,_#22c55e,_#f97316,_#ef4444,_#22c55e)] opacity-90 blur-[3px]" />
+            <span className="absolute inset-[1px] rounded-full bg-gradient-to-r from-black/80 via-black/70 to-black/80 border border-red-400/80 shadow-[0_0_26px_rgba(248,113,113,0.8)]" />
+            <span className="relative inline-flex items-center gap-1.5 px-1">
+              <Icon
+                icon="solar:fire-bold-duotone"
+                className="text-sm text-yellow-100"
+              />
+              <span className="flex items-center gap-1 text-[10px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping" />
+                {daysLabel}
+              </span>
+            </span>
+          </span>
+        </div>
+      );
+    }
+  }
 
   return (
     <div className="bg-[#151515] border border-white/5 rounded-3xl overflow-hidden group hover:border-primary/50 transition-all duration-300 relative flex flex-col h-full hover:shadow-[0_10px_40px_-10px_rgba(74,222,128,0.15)] mx-1.5">
@@ -163,22 +247,8 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
           </span>
         </div>
 
-        {/* Badge kanan: SISA HARI */}
-        {daysLabel && (
-          <div className="absolute top-4 right-4 z-10">
-            <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.12em] text-white">
-              <span className="absolute inset-0 rounded-full bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 opacity-80 blur-[2px]" />
-              <span className="absolute inset-0 rounded-full bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 animate-pulse opacity-70" />
-              <span className="relative inline-flex items-center gap-1.5 px-1">
-                <Icon
-                  icon="solar:fire-bold-duotone"
-                  className="text-sm text-yellow-100"
-                />
-                {daysLabel}
-              </span>
-            </span>
-          </div>
-        )}
+        {/* Badge kanan: dinamis */}
+        {badgeContent}
       </div>
 
       {/* CONTENT SECTION */}
