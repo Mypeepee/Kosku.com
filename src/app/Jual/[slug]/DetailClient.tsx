@@ -1,3 +1,4 @@
+// app/Jual/[slug]/DetailClient.tsx
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -5,16 +6,17 @@ import Link from "next/link";
 import { Icon } from "@iconify/react";
 
 // Components
-import MobileNav from "./[id]/components/MobileNav";
-import ImageGallery from "./[id]/components/ImageGallery";
-import DetailInfo from "./[id]/components/DetailInfo";
-import BookingSidebar from "./[id]/components/AgentSidebar";
-import SimilarProperties from "./[id]/components/SimilarProperties";
+import MobileNav from "./[agentId]/components/MobileNav";
+import ImageGallery from "./[agentId]/components/ImageGallery";
+import DetailInfo from "./[agentId]/components/DetailInfo";
+import BookingSidebar from "./[agentId]/components/AgentSidebar";
+import SimilarProperties from "./[agentId]/components/SimilarProperties";
 
 // Interface sesuai DB
 interface ProductData {
   id_property: string;
   kode_properti?: string;
+  slug?: string;
   judul: string;
   kota: string;
   harga: number | string;
@@ -59,7 +61,16 @@ interface ProductData {
   };
 }
 
-export default function DetailClient({ product }: { product: ProductData }) {
+// tambahan: agent yang sedang login (untuk share)
+interface DetailClientProps {
+  product: ProductData;
+  currentAgentId?: string | null;
+}
+
+export default function DetailClient({
+  product,
+  currentAgentId,
+}: DetailClientProps) {
   const convertToNumber = (value: any): number => {
     if (typeof value === "number") return value;
     if (typeof value === "string") {
@@ -75,11 +86,12 @@ export default function DetailClient({ product }: { product: ProductData }) {
     : null;
 
   useEffect(() => {
-    console.log("🔍 DetailClient - Product Data:", product);
+    console.log("🔍 DetailClient Jual - Product Data:", product);
   }, [product, harga, hargaPromo]);
 
   const propertyData = {
     id_property: product.id_property,
+    slug: product.slug || "",
     kode_properti: product.kode_properti || "-",
     judul: product.judul,
     title: product.judul,
@@ -115,22 +127,24 @@ export default function DetailClient({ product }: { product: ProductData }) {
 
     deskripsi: product.deskripsi || null,
 
-    gambar_utama_url: product.gambar_utama_url,
+    gambar_utama_url:
+      product.gambar_utama_url || "/images/placeholder.jpg",
 
     agent: product.agent
       ? {
           nama: product.agent.pengguna?.nama_lengkap || "Agent Premier",
           telepon:
             product.agent.pengguna?.nomor_telepon ||
-            product.agent.nomor_whatsapp,
-          whatsapp: product.agent.nomor_whatsapp,
+            product.agent.nomor_whatsapp ||
+            "",
+          whatsapp: product.agent.nomor_whatsapp || "",
           email: product.agent.pengguna?.email,
-          kantor: product.agent.nama_kantor,
-          foto_url: product.agent.pengguna?.foto_profil_url,
-          rating: product.agent.rating,
-          jumlah_closing: product.agent.jumlah_closing,
-          kota_area: product.agent.kota_area,
-          jabatan: product.agent.jabatan,
+          kantor: product.agent.nama_kantor || "Premier Asset",
+          foto_url: product.agent.pengguna?.foto_profil_url || "",
+          rating: product.agent.rating || 5,
+          jumlah_closing: product.agent.jumlah_closing || 0,
+          kota_area: product.agent.kota_area || "",
+          jabatan: product.agent.jabatan || "",
         }
       : null,
 
@@ -184,11 +198,10 @@ export default function DetailClient({ product }: { product: ProductData }) {
 
       {/* Spacer mobile utk header fixed */}
       <div className="lg:hidden h-[60px]" />
-
       {/* Spacer desktop */}
       <div className="hidden lg:block h-24 w-full" />
 
-      {/* Breadcrumb - TAMPIL di semua ukuran */}
+      {/* Breadcrumb */}
       <div className="container mx-auto px-4 mb-4 lg:mb-6">
         <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-bold text-gray-500 uppercase tracking-wider">
           <Link href="/" className="hover:text-[#86efac] transition-colors">
@@ -208,7 +221,7 @@ export default function DetailClient({ product }: { product: ProductData }) {
         </div>
       </div>
 
-      {/* Image Gallery dengan space atas (mt-2 untuk mobile) */}
+      {/* Image Gallery */}
       <div className="container mx-auto lg:px-4 mb-8 px-4 mt-2 lg:mt-0">
         <ImageGallery
           images={[
@@ -221,12 +234,12 @@ export default function DetailClient({ product }: { product: ProductData }) {
       <div className="container mx-auto px-4 relative">
         <div className="flex flex-col lg:flex-row gap-10 items-start">
           <DetailInfo
-            data={propertyData}
+            data={propertyData as any}
             selectedRoom={selectedRoom}
             setSelectedRoom={setSelectedRoom}
+            currentAgentId={currentAgentId} // ⬅️ kirim ke DetailInfo Jual
           />
-
-          <BookingSidebar data={propertyData} />
+          <BookingSidebar data={propertyData as any} />
         </div>
       </div>
 

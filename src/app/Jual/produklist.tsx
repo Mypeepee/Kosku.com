@@ -15,9 +15,9 @@ interface PropertyDB {
   kota: string;
   harga: number;
   jenis_transaksi: string; // PRIMARY / SECONDARY / LELANG / SEWA
-  kategori: string;        // Rumah, Apartemen, dll
-  gambar: string;          // gambar pertama (fallback)
-  foto_list: string[];     // hasil split kolom gambar
+  kategori: string;
+  gambar: string;
+  foto_list: string[];
   luas_tanah: number;
   luas_bangunan: number;
   kamar_tidur: number;
@@ -73,19 +73,23 @@ const getPropertyIcon = (kategori: string): string => {
   return PROPERTY_ICONS[key] || "solar:home-2-bold-duotone";
 };
 
-// ✅ URL detail: /Jual/slug/id atau /Sewa/slug/id
+// ✅ URL detail Jual/SEWA PERSIS seperti Lelang:
+//   - Lelang: /Lelang/[slug-id]
+//   - Jual:   /Jual/[slug-id]
+//   - Sewa:   /Sewa/[slug-id]
+// slug di DB = baseSlug, id_property ditempel di ujung
 const getPropertyUrl = (property: PropertyDB): string => {
   const transactionType = property.jenis_transaksi?.toUpperCase();
   const urlPath = transactionType === "SEWA" ? "Sewa" : "Jual";
-  const slug = property.slug || "property";
-  return `/${urlPath}/${slug}/${property.id_property}`;
+  const baseSlug = property.slug || "property";
+  const slugWithId = `${baseSlug}-${property.id_property}`;
+  return `/${urlPath}/${slugWithId}`;
 };
 
 // --- CARD ---
 const PropertyCard = ({ item }: { item: PropertyDB }) => {
   const kategoriUpper = item.kategori?.trim().toUpperCase() || "";
 
-  // slider dari foto_list, fallback ke gambar pertama atau placeholder
   const images =
     item.foto_list && item.foto_list.length > 0
       ? item.foto_list
@@ -93,7 +97,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 
   return (
     <div className="bg-[#1A1A1A] border border-white/5 rounded-3xl overflow-hidden group hover:border-primary/50 transition-all duration-300 relative flex flex-col h-full hover:shadow-[0_10px_40px_-10px_rgba(74,222,128,0.1)]">
-      {/* IMAGE SECTION – tinggi besar + horizontal slide */}
+      {/* IMAGE SECTION */}
       <div className="relative w-full h-72 md:h-80 overflow-hidden">
         <div className="w-full h-full overflow-x-auto overflow-y-hidden scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent snap-x snap-mandatory">
           <div className="flex h-full w-max">
@@ -139,7 +143,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
           </span>
         </div>
 
-        {/* indikator dot */}
+        {/* dots */}
         {images.length > 1 && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1 pointer-events-none">
             {images.map((_, idx) => (
