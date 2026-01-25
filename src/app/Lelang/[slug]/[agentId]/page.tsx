@@ -4,6 +4,8 @@ import { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import DetailClient from "../DetailClient";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 interface Props {
   params: {
@@ -26,6 +28,7 @@ async function getProperty(id: string) {
     include: {
       agent: {
         select: {
+          id_agent: true,
           nama_kantor: true,
           rating: true,
           jumlah_closing: true,
@@ -227,6 +230,16 @@ export default async function DetailPage({ params }: Props) {
     }
   }
 
+  // Ambil session dan cocokan dengan agentId di URL
+  const session = await getServerSession(authOptions);
+  const loggedInAgentId = (session?.user as any)?.agentId || null;
+
+  // Hanya kalau agent yang login sama dengan agentId di URL → aktifkan panel agent
+  const currentAgentId =
+    loggedInAgentId && loggedInAgentId === agentId
+      ? loggedInAgentId
+      : null;
+
   const rawGambar = product.gambar || "";
   const fotoArray =
     rawGambar.trim().length > 0
@@ -265,7 +278,7 @@ export default async function DetailPage({ params }: Props) {
         similarProperties={JSON.parse(
           JSON.stringify(similarProperties)
         )}
-        currentAgentId={agentId} // ⬅️ kirim ke DetailClient
+        currentAgentId={currentAgentId}
       />
     </main>
   );

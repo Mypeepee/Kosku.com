@@ -5,20 +5,26 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 
-export type ListingStatus = "For Sale" | "For Rent" | "Pending" | "Draft" | "Archived";
+export type ListingStatus =
+  | "For Sale"
+  | "For Rent"
+  | "Pending"
+  | "Draft"
+  | "Archived";
 
 export type Listing = {
-  id: string;
+  id: string;                  // id_property
+  slug: string;                // slug-id lengkap untuk detail
   title: string;
   status: ListingStatus | string;
   category: string;
-  transactionType: string;
+  transactionType: string;     // "LELANG" | "PRIMARY" | "SECONDARY" | "SEWA" dll
   city: string;
   area: string;
   address: string;
   price: string;
   thumbnailUrl?: string;
-  views: number; // kolom baru
+  views: number;
 };
 
 const PAGE_SIZE = 10;
@@ -28,7 +34,30 @@ const formatViews = (value: number) =>
     value || 0
   );
 
-export default function ListingsTable({ listings }: { listings: Listing[] }) {
+interface ListingsTableProps {
+  listings: Listing[];
+  currentAgentId?: string | null; // id agent dari session
+}
+
+// Helper: tentukan URL publik detail
+const getPublicDetailUrl = (item: Listing, currentAgentId?: string | null) => {
+  const tx = item.transactionType?.toUpperCase();
+  const baseSlug = item.slug; // pastikan sudah slug-id dari server
+
+  const agentSegment = currentAgentId ? `/${currentAgentId}` : "";
+
+  if (tx === "LELANG") {
+    return `/Lelang/${baseSlug}${agentSegment}`;
+  }
+
+  // PRIMARY / SECONDARY / SEWA → Jual
+  return `/Jual/${baseSlug}${agentSegment}`;
+};
+
+export default function ListingsTable({
+  listings,
+  currentAgentId,
+}: ListingsTableProps) {
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
@@ -44,7 +73,6 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
 
   const totalItems = filteredListings.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
-
   const currentPage = Math.min(page, totalPages);
 
   const paginatedListings = useMemo(() => {
@@ -86,7 +114,7 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/5 bg-[#050608]">
-      {/* HEADER ATAS: info, search, bulk delete, add property */}
+      {/* HEADER ATAS */}
       <div className="flex flex-col gap-3 border-b border-white/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1 text-[11px] text-slate-400">
           <span>
@@ -98,14 +126,14 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
           </span>
           {totalItems > 0 && (
             <span className="text-[10px] text-slate-500">
-              Halaman {currentPage} dari {totalPages} •{" "}
-              Menampilkan {paginatedListings.length} listing per halaman.
+              Halaman {currentPage} dari {totalPages} • Menampilkan{" "}
+              {paginatedListings.length} listing per halaman.
             </span>
           )}
         </div>
 
         <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-          {/* Search: alamat saja */}
+          {/* Search alamat */}
           <div className="relative w-full sm:w-64">
             <Icon
               icon="solar:magnifer-linear"
@@ -118,7 +146,7 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
-                setPage(1); // reset ke halaman 1 ketika search berubah
+                setPage(1);
               }}
             />
           </div>
@@ -137,16 +165,10 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
               Hapus terpilih ({selectedIds.length})
             </button>
 
-            {/* Add Property pill */}
+            {/* Add Property */}
             <Link
               href="/dashboard/listings/new"
-              className="
-                inline-flex items-center justify-center gap-1.5
-                rounded-full border border-emerald-400/60 bg-emerald-500/15
-                px-3 py-1.5 text-[11px] font-semibold text-emerald-100
-                hover:bg-emerald-500/25 hover:border-emerald-300
-                shadow-[0_0_16px_rgba(16,185,129,0.35)]
-              "
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/25 hover:border-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.35)]"
             >
               <Icon
                 icon="solar:add-circle-linear"
@@ -186,7 +208,7 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
           <tbody>
             {paginatedListings.map((item) => {
               const checked = selectedIds.includes(item.id);
-              const detailHref = `/dashboard/listings/${item.id}`;
+              const detailHref = getPublicDetailUrl(item, currentAgentId);
 
               return (
                 <tr
@@ -203,7 +225,7 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
                     />
                   </td>
 
-                  {/* tombol utama (view/detail) */}
+                  {/* tombol view/detail */}
                   <td className="px-2 py-3 align-top">
                     <Link
                       href={detailHref}
@@ -276,18 +298,18 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
                     {formatViews(item.views)}
                   </td>
 
-                  {/* tombol edit */}
+                  {/* tombol edit (dashboard) */}
                   <td className="px-4 py-3 align-top text-right">
-                    <button
+                    <Link
+                      href={`/dashboard/listings/${item.id}`}
                       className="inline-flex h-8 items-center justify-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 text-[11px] text-slate-100 hover:bg-white/10"
-                      type="button"
                     >
                       <Icon
                         icon="solar:pen-new-square-linear"
                         className="text-xs"
                       />
                       Edit
-                    </button>
+                    </Link>
                   </td>
                 </tr>
               );

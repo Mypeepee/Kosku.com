@@ -73,6 +73,7 @@ async function getSimilarProperties(currentProperty: any) {
       include: {
         agent: {
           select: {
+            id_agent: true,
             nama_kantor: true,
             rating: true,
             jumlah_closing: true,
@@ -91,10 +92,7 @@ async function getSimilarProperties(currentProperty: any) {
         },
       },
       take: 50,
-      orderBy: [
-        { is_hot_deal: "desc" },
-        { tanggal_dibuat: "desc" },
-      ],
+      orderBy: [{ is_hot_deal: "desc" }, { tanggal_dibuat: "desc" }],
     });
 
     return similarProperties;
@@ -221,8 +219,7 @@ export default async function DetailPage({ params }: Props) {
 
   // Ambil session: kalau agent login, punya agentId
   const session = await getServerSession(authOptions);
-  const currentAgentId =
-    (session?.user as any)?.agentId || null;
+  const currentAgentId = (session?.user as any)?.agentId || null;
 
   // Self-healing slug
   if (product.slug && product.id_property) {
@@ -230,9 +227,7 @@ export default async function DetailPage({ params }: Props) {
 
     if (expectedSlug !== params.slug) {
       if (currentAgentId) {
-        return redirect(
-          `/Lelang/${expectedSlug}/${currentAgentId}`
-        );
+        return redirect(`/Lelang/${expectedSlug}/${currentAgentId}`);
       }
       return redirect(`/Lelang/${expectedSlug}`);
     }
@@ -240,9 +235,7 @@ export default async function DetailPage({ params }: Props) {
 
   // Kalau slug sudah benar dan agent sedang login → paksa URL pakai /[slug]/[agentId]
   if (currentAgentId) {
-    return redirect(
-      `/Lelang/${params.slug}/${currentAgentId}`
-    );
+    return redirect(`/Lelang/${params.slug}/${currentAgentId}`);
   }
 
   const canonicalUrl = `https://premierasset.com/Lelang/${params.slug}`;
@@ -338,10 +331,10 @@ export default async function DetailPage({ params }: Props) {
       <DetailClient
         product={JSON.parse(JSON.stringify(product))}
         fotoArray={finalFotoArray}
-        similarProperties={JSON.parse(
-          JSON.stringify(similarProperties)
-        )}
-        currentAgentId={null} // di route tanpa /agentId, biarkan null (agent akan di-redirect ke route with agentId)
+        similarProperties={JSON.parse(JSON.stringify(similarProperties))}
+        // route tanpa /[agentId] selalu dianggap visitor biasa;
+        // agent login sudah di-redirect ke route [slug]/[agentId]
+        currentAgentId={null}
       />
     </main>
   );

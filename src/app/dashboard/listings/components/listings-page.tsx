@@ -10,9 +10,14 @@ type ListingsPageProps = {
     totalPriority?: number;
   };
   listings: Listing[];
+  currentAgentId: string; // id agent dari session
 };
 
-export default function ListingsPage({ headerStats, listings }: ListingsPageProps) {
+export default function ListingsPage({
+  headerStats,
+  listings,
+  currentAgentId,
+}: ListingsPageProps) {
   const { total, totalHotDeal, totalViewed, totalPriority } = headerStats;
 
   const safeTotalViewed = totalViewed ?? 0;
@@ -63,9 +68,12 @@ export default function ListingsPage({ headerStats, listings }: ListingsPageProp
         />
       </div>
 
-      {/* TABEL LISTING DI BAWAH CARD */}
+      {/* TABEL LISTING */}
       <div className="mx-auto max-w-6xl">
-        <ListingsTable listings={listings} />
+        <ListingsTable
+          listings={listings}
+          currentAgentId={currentAgentId}
+        />
       </div>
     </div>
   );

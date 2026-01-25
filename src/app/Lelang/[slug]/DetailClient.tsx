@@ -10,9 +10,11 @@ import ImageGallery from "./[agentId]/components/ImageGalleryLelang";
 import DetailInfo from "./[agentId]/components/DetailInfoLelang";
 import BookingSidebar from "./[agentId]/components/AgentSidebarLelang";
 import SimilarProperties from "./[agentId]/components/SimilarPropertiesLelang";
+import KeperluanAgent from "./[agentId]/components/KeperluanAgent";
 
 interface ProductData {
   id_property: string;
+  agent_id?: string | null;
   kode_properti?: string | null;
   slug?: string;
   judul: string;
@@ -48,6 +50,7 @@ interface ProductData {
   nilai_limit_lelang?: number | string | null;
 
   agent?: {
+    id_agent?: string | null;
     nama_kantor?: string | null;
     rating?: number | null;
     jumlah_closing?: number | null;
@@ -67,7 +70,7 @@ interface DetailClientProps {
   product: ProductData;
   fotoArray: string[];
   similarProperties?: ProductData[];
-  currentAgentId?: string | null; // ⬅️ baru
+  currentAgentId?: string | null;
 }
 
 export default function DetailClient({
@@ -142,7 +145,7 @@ export default function DetailClient({
     kondisi_interior: product.kondisi_interior ?? null,
     legalitas: product.legalitas ?? null,
 
-  deskripsi: product.deskripsi ?? null,
+    deskripsi: product.deskripsi ?? null,
 
     gambar_utama: fotoArray[0] || "/images/hero/banner.jpg",
     gambar: fotoArray[0] || "/images/hero/banner.jpg",
@@ -226,6 +229,9 @@ export default function DetailClient({
     is_hot_deal: p.is_hot_deal ?? false,
   }));
 
+  // UNTUK SAAT INI: kalau ada currentAgentId => tampilkan panel agent
+  const isOwnerAgent = !!currentAgentId;
+
   return (
     <div className="text-white font-sans bg-[#0F0F0F]">
       <MobileNav />
@@ -264,9 +270,14 @@ export default function DetailClient({
             data={propertyData as any}
             selectedRoom={selectedRoom}
             setSelectedRoom={setSelectedRoom}
-            currentAgentId={currentAgentId} // ⬅️ kirim ke DetailInfo
+            currentAgentId={currentAgentId}
           />
-          <BookingSidebar data={propertyData as any} />
+
+          {isOwnerAgent ? (
+            <KeperluanAgent data={propertyData as any} />
+          ) : (
+            <BookingSidebar data={propertyData as any} />
+          )}
         </div>
       </div>
 

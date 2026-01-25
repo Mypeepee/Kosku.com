@@ -26,22 +26,33 @@ export default async function DashboardListingsPage() {
   });
 
   const listings = properties.map((p) => ({
-    id: p.kode_properti,
+    // gunakan id_property sebagai ID utama
+    id: p.id_property,
+    // tambahkan slug-id lengkap untuk detail publik
+    slug: p.slug
+      ? `${p.slug}-${p.id_property}`
+      : p.id_property, // fallback kalau slug kosong
     title: p.judul,
     status: mapStatus(p.status_tayang),
-    category: p.kategori,                     // ✅ cocok dengan Listing.category
-    transactionType: p.jenis_transaksi,       // ✅ isi transaksi
+    category: p.kategori,
+    transactionType: p.jenis_transaksi, // "LELANG" | "PRIMARY" | ...
     city: p.kota,
     area: p.area_lokasi ?? "",
-    address: p.alamat_lengkap ?? "",          // ✅ alamat lengkap
+    address: p.alamat_lengkap ?? "",
     price: formatRupiah(Number(p.harga)),
     thumbnailUrl: p.gambar
-      ? p.gambar.split(",")[0]                // ✅ ambil URL pertama dari kolom text
+      ? p.gambar.split(",")[0].trim()
       : undefined,
-    views: p.dilihat ?? 0, // ✅ tambahan
+    views: p.dilihat ?? 0,
   }));
 
-  return <ListingsPage headerStats={headerStats} listings={listings} />;
+  return (
+    <ListingsPage
+      headerStats={headerStats}
+      listings={listings}
+      currentAgentId={agentId}
+    />
+  );
 }
 
 function mapStatus(status?: string | null): string {
