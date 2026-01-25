@@ -7,14 +7,19 @@ import DetailClient from "./DetailClient";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
+interface ParamsShape {
+  slug?: string;
+}
+
 interface Props {
-  params: {
-    slug: string;
-  };
+  params: Promise<ParamsShape>; // ← penting: treat params as Promise
 }
 
 // Ambil id_property (UUID v4) dari slug-id => 5 segmen terakhir
-function extractIdPropertyFromSlug(slug: string): string | null {
+function extractIdPropertyFromSlug(
+  slug: string | undefined | null
+): string | null {
+  if (!slug) return null;
   const parts = slug.split("-");
   if (parts.length < 5) return null;
   const uuidParts = parts.slice(-5); // 8-4-4-4-12
@@ -103,7 +108,9 @@ async function getSimilarProperties(currentProperty: any) {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const idProperty = extractIdPropertyFromSlug(params.slug);
+  const { slug } = await params; // ← di-await dulu
+
+  const idProperty = extractIdPropertyFromSlug(slug);
   if (!idProperty) {
     return {
       title: "Properti Tidak Ditemukan | Premier Asset",
@@ -152,7 +159,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       : [];
   const firstImage = fotoArray[0] || "/images/hero/banner.jpg";
 
-  const canonicalUrl = `https://premierasset.com/Lelang/${params.slug}`;
+  const safeSlug = slug || product.slug || "";
+  const canonicalUrl = `https://premierasset.com/Lelang/${safeSlug}`;
 
   return {
     title: `${product.judul} - ${hargaFormatted} | Premier Asset`,
@@ -207,12 +215,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function DetailPage({ params }: Props) {
-  const idProperty = extractIdPropertyFromSlug(params.slug);
+  const { slug } = await params; // ← di-await
+
+  const idProperty = extractIdPropertyFromSlug(slug);
   if (!idProperty) {
     notFound();
   }
 
-  const product = await getProperty(idProperty);
+  const product = await getProperty(idProperty!);
   if (!product) {
     notFound();
   }
@@ -225,7 +235,7 @@ export default async function DetailPage({ params }: Props) {
   if (product.slug && product.id_property) {
     const expectedSlug = `${product.slug}-${product.id_property}`;
 
-    if (expectedSlug !== params.slug) {
+    if (expectedSlug !== slug) {
       if (currentAgentId) {
         return redirect(`/Lelang/${expectedSlug}/${currentAgentId}`);
       }
@@ -233,12 +243,14 @@ export default async function DetailPage({ params }: Props) {
     }
   }
 
-  // Kalau slug sudah benar dan agent sedang login → paksa URL pakai /[slug]/[agentId]
+  // Kalau slug sudah benar dan agent sedang login → pakai /[slug]/[agentId]
   if (currentAgentId) {
-    return redirect(`/Lelang/${params.slug}/${currentAgentId}`);
+    const safeSlug = slug || `${product.slug}-${product.id_property}`;
+    return redirect(`/Lelang/${safeSlug}/${currentAgentId}`);
   }
 
-  const canonicalUrl = `https://premierasset.com/Lelang/${params.slug}`;
+  const safeSlug = slug || `${product.slug}-${product.id_property}`;
+  const canonicalUrl = `https://premierasset.com/Lelang/${safeSlug}`;
 
   const rawGambar = product.gambar || "";
   const fotoArray =
@@ -333,7 +345,6 @@ export default async function DetailPage({ params }: Props) {
         fotoArray={finalFotoArray}
         similarProperties={JSON.parse(JSON.stringify(similarProperties))}
         // route tanpa /[agentId] selalu dianggap visitor biasa;
-        // agent login sudah di-redirect ke route [slug]/[agentId]
         currentAgentId={null}
       />
     </main>

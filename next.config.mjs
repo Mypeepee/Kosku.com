@@ -1,10 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  reactStrictMode: false, // matikan Strict Mode di dev
+  turbopack: false,       // optional, pakai webpack klasik
+
   // output: "export",
 
   images: {
     // unoptimized: true,
-
     remotePatterns: [
       {
         protocol: "https",
@@ -21,7 +23,7 @@ const nextConfig = {
         hostname: "avatars.githubusercontent.com",
         pathname: "**",
       },
-      // ⬇️ tambahin ini buat gambar lelang
+      // gambar lelang KPKNL
       {
         protocol: "https",
         hostname: "file.lelang.go.id",

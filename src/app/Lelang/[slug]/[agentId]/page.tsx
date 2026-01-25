@@ -7,15 +7,20 @@ import DetailClient from "../DetailClient";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
+interface ParamsShape {
+  slug?: string;
+  agentId?: string;
+}
+
 interface Props {
-  params: {
-    slug: string;
-    agentId: string;
-  };
+  params: Promise<ParamsShape>; // ← treat params as Promise
 }
 
 // Ambil id_property (UUID v4) dari slug-id => 5 segmen terakhir
-function extractIdPropertyFromSlug(slug: string): string | null {
+function extractIdPropertyFromSlug(
+  slug: string | undefined | null
+): string | null {
+  if (!slug) return null;
   const parts = slug.split("-");
   if (parts.length < 5) return null;
   const uuidParts = parts.slice(-5);
@@ -106,7 +111,9 @@ async function getSimilarProperties(currentProperty: any) {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const idProperty = extractIdPropertyFromSlug(params.slug);
+  const { slug } = await params; // ← di‑await
+  const idProperty = extractIdPropertyFromSlug(slug);
+
   if (!idProperty) {
     return {
       title: "Properti Tidak Ditemukan | Premier Asset",
@@ -155,7 +162,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       : [];
   const firstImage = fotoArray[0] || "/images/hero/banner.jpg";
 
-  const canonicalUrl = `https://premierasset.com/Lelang/${params.slug}`;
+  const safeSlug = slug || `${product.slug}-${product.id_property}`;
+  const canonicalUrl = `https://premierasset.com/Lelang/${safeSlug}`;
 
   return {
     title: `${product.judul} - ${hargaFormatted} | Premier Asset`,
@@ -210,14 +218,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function DetailPage({ params }: Props) {
-  const { slug, agentId } = params;
+  const { slug, agentId } = await params; // ← di‑await
 
   const idProperty = extractIdPropertyFromSlug(slug);
   if (!idProperty) {
     notFound();
   }
 
-  const product = await getProperty(idProperty);
+  const product = await getProperty(idProperty!);
   if (!product) {
     notFound();
   }
@@ -275,9 +283,7 @@ export default async function DetailPage({ params }: Props) {
       <DetailClient
         product={JSON.parse(JSON.stringify(product))}
         fotoArray={finalFotoArray}
-        similarProperties={JSON.parse(
-          JSON.stringify(similarProperties)
-        )}
+        similarProperties={JSON.parse(JSON.stringify(similarProperties))}
         currentAgentId={currentAgentId}
       />
     </main>
