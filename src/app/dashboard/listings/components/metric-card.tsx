@@ -87,7 +87,7 @@ export function MetricCard({
 
           <div className="mt-1 flex flex-wrap items-baseline gap-1 sm:mt-2 sm:gap-2">
             <span className="text-xl font-bold text-white sm:text-3xl">
-              {main.toLocaleString()}
+              {main.toLocaleString("id-ID")}
             </span>
             {suffix && (
               <span className="text-[10px] font-medium text-slate-300 sm:text-xs sm:text-slate-200">

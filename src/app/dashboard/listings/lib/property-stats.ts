@@ -19,6 +19,7 @@ export type ListingHeaderStats = {
   totalForSale: number;     // PRIMARY + SECONDARY
   totalForRent: number;     // SEWA
   totalHotDeal: number;     // is_hot_deal = true
+  totalViewed: number;      // SUM(dilihat) semua listing agent
   countsByCategory: ListingTypeCounts;
 };
 
@@ -78,11 +79,25 @@ export async function fetchListingHeaderStats(
     countsByCategory[key] = row._count._all;
   });
 
+  // Total viewed: sum kolom dilihat untuk semua listing agent ini
+  const viewedAgg = await prisma.property.aggregate({
+    where: {
+      id_agent: idAgent,
+      status_tayang: "TERSEDIA",
+    },
+    _sum: {
+      dilihat: true,
+    },
+  });
+
+  const totalViewed = viewedAgg._sum.dilihat ?? 0;
+
   return {
     total,
     totalForSale,
     totalForRent,
     totalHotDeal,
+    totalViewed,
     countsByCategory,
   };
 }

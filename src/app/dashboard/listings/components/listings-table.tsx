@@ -86,7 +86,7 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/5 bg-[#050608]">
-      {/* HEADER ATAS: info, search, bulk delete */}
+      {/* HEADER ATAS: info, search, bulk delete, add property */}
       <div className="flex flex-col gap-3 border-b border-white/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1 text-[11px] text-slate-400">
           <span>
@@ -123,18 +123,39 @@ export default function ListingsTable({ listings }: { listings: Listing[] }) {
             />
           </div>
 
-          {/* Bulk delete */}
-          <button
-            className="inline-flex items-center justify-center gap-1 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-40"
-            disabled={selectedIds.length === 0}
-            type="button"
-          >
-            <Icon
-              icon="solar:trash-bin-minimalistic-linear"
-              className="text-xs"
-            />
-            Hapus terpilih ({selectedIds.length})
-          </button>
+          <div className="flex items-center justify-end gap-2">
+            {/* Bulk delete */}
+            <button
+              className="inline-flex items-center justify-center gap-1 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-40"
+              disabled={selectedIds.length === 0}
+              type="button"
+            >
+              <Icon
+                icon="solar:trash-bin-minimalistic-linear"
+                className="text-xs"
+              />
+              Hapus terpilih ({selectedIds.length})
+            </button>
+
+            {/* Add Property pill */}
+            <Link
+              href="/dashboard/listings/new"
+              className="
+                inline-flex items-center justify-center gap-1.5
+                rounded-full border border-emerald-400/60 bg-emerald-500/15
+                px-3 py-1.5 text-[11px] font-semibold text-emerald-100
+                hover:bg-emerald-500/25 hover:border-emerald-300
+                shadow-[0_0_16px_rgba(16,185,129,0.35)]
+              "
+            >
+              <Icon
+                icon="solar:add-circle-linear"
+                className="text-xs text-emerald-200"
+              />
+              <span className="hidden sm:inline">Tambah property</span>
+              <span className="sm:hidden">Tambah</span>
+            </Link>
+          </div>
         </div>
       </div>
 

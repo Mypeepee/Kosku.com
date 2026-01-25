@@ -7,15 +7,15 @@ import ListingsTable, { Listing } from "./listings-table";
 
 type ListingsPageProps = {
   headerStats: ListingHeaderStats & {
-    totalViewed?: number;
     totalPriority?: number;
   };
   listings: Listing[];
 };
 
 export default function ListingsPage({ headerStats, listings }: ListingsPageProps) {
-  const { total, totalHotDeal, totalViewed = 0, totalPriority } = headerStats;
+  const { total, totalHotDeal, totalViewed, totalPriority } = headerStats;
 
+  const safeTotalViewed = totalViewed ?? 0;
   const priorityCount = totalPriority ?? totalHotDeal;
   const safeTotal = total || 1;
   const priorityPercent = Math.min(
@@ -34,7 +34,7 @@ export default function ListingsPage({ headerStats, listings }: ListingsPageProp
       </div>
 
       {/* GRID CARD */}
-      <div className="mx-auto grid max-w-6xl grid-cols-3 gap-3 sm:gap-6">
+      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-6">
         <MetricCard
           label="Total Listings"
           icon="solar:buildings-3-bold-duotone"
@@ -56,9 +56,9 @@ export default function ListingsPage({ headerStats, listings }: ListingsPageProp
         <MetricCard
           label="Dilihat"
           icon="solar:eye-bold-duotone"
-          main={totalViewed}
+          main={safeTotalViewed}
           suffix="views"
-          description="Total listing dibuka."
+          description="Total semua listing dibuka."
           variant="soft"
         />
       </div>
