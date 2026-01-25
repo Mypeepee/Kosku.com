@@ -7,7 +7,6 @@ import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 
-// --- TIPE DATA ---
 interface PropertyDB {
   id_property: string;
   slug: string;
@@ -18,9 +17,8 @@ interface PropertyDB {
   jenis_transaksi: string;
   kategori: string;
 
-  // dari page.tsx
-  gambar: string;      // foto pertama / fallback
-  foto_list: string[]; // hasil split kolom gambar
+  gambar: string;
+  foto_list: string[];
 
   luas_tanah: number;
   luas_bangunan: number;
@@ -71,16 +69,17 @@ const daysUntil = (date?: string | null) => {
 };
 
 // --- URL DETAIL LELANG ---
+// Sekarang pakai pola slug-id: /Lelang/[slug-id]
 const getPropertyUrl = (property: PropertyDB): string => {
-  const slug = property.slug || "property";
-  return `/Lelang/${slug}/${property.id_property}`;
+  const baseSlug = property.slug || "property";
+  const slugWithId = `${baseSlug}-${property.id_property}`;
+  return `/Lelang/${slugWithId}`;
 };
 
 // --- CARD LELANG ---
 const PropertyCard = ({ item }: { item: PropertyDB }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-  // Slider dari foto_list; fallback ke gambar pertama jika kosong
   const images =
     item.foto_list && item.foto_list.length > 0
       ? item.foto_list
@@ -98,25 +97,14 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 
   const days = daysUntil(item.tanggal_lelang);
 
-  // BADGE LOGIC:
-  // days === null   -> tidak tampil
-  // days <= 0       -> "Peluang Emas" (cup-star)
-  // days > 20       -> "Jangan Lewatkan" (eye)
-  // 10 < days < 20  -> "XX hari lagi" (style api yang lama)
-  // 0 < days <= 10  -> masih pakai api? -> di requirement kamu tidak minta, jadi ikut “X hari lagi” atau dibiarkan? 
-  // Di sini: 0 < days <= 10 tetap masuk "X hari lagi" biar tetap kebakar.
-
   let badgeContent: React.ReactNode | null = null;
 
   if (days !== null) {
     if (days <= 0) {
-      // Peluang emas – sudah lewat, tapi dianggap unit berharga
       badgeContent = (
         <div className="absolute top-4 right-4 z-10">
           <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.14em] text-amber-50">
-            {/* glow emas */}
             <span className="absolute inset-0 rounded-full bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 opacity-80 blur-[3px]" />
-            {/* inner pill */}
             <span className="absolute inset-[1px] rounded-full bg-gradient-to-r from-[#18181b] via-[#030712] to-[#111827] border border-amber-300/80 shadow-[0_0_22px_rgba(250,204,21,0.75)]" />
             <span className="relative inline-flex items-center gap-1.5 px-1">
               <Icon
@@ -131,7 +119,6 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
         </div>
       );
     } else if (days > 20) {
-      // Masih lama, tapi tetap highlight: Jangan Lewatkan
       badgeContent = (
         <div className="absolute top-4 right-4 z-10">
           <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-[0.14em] text-sky-50">
@@ -150,7 +137,6 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
         </div>
       );
     } else if (days > 10 && days <= 20) {
-      // Style api favoritmu, hanya untuk 10 < days <= 20
       const daysLabel = `${days} hari lagi`;
       badgeContent = (
         <div className="absolute top-4 right-4 z-10">
@@ -168,8 +154,6 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
         </div>
       );
     } else if (days > 0 && days <= 10) {
-      // Extra: kalau mau yang super urgent, bisa pakai versi lebih heboh,
-      // di sini saya tetap pakai versi api yang sama biar konsisten visual.
       const daysLabel = `${days} hari lagi`;
       badgeContent = (
         <div className="absolute top-4 right-4 z-10">
@@ -204,7 +188,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#151515] via-transparent to-transparent opacity-60" />
 
-        {/* Mini gallery arrows */}
+        {/* Slider controls */}
         {images.length > 1 && (
           <>
             <button
@@ -232,7 +216,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
           </>
         )}
 
-        {/* Badge kiri: TIPE PROPERTI */}
+        {/* Badge kiri: kategori */}
         <div className="absolute top-4 left-4 z-10">
           <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-black/70 text-emerald-300 text-[11px] font-semibold border border-emerald-400/40 backdrop-blur">
             <Icon
@@ -284,7 +268,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
           </span>
         </div>
 
-        {/* Box Lelang: Luas Tanah + Tanggal */}
+        {/* Box Lelang */}
         <div className="bg-white/5 rounded-xl p-3 mb-5 border border-white/5">
           <div className="flex justify-between items-center px-1">
             <div className="flex items-center gap-2">
@@ -468,7 +452,10 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
             <button
               onClick={() =>
                 handlePageChange(
-                  Math.min(pagination.totalPages, pagination.currentPage + 1)
+                  Math.min(
+                    pagination.totalPages,
+                    pagination.currentPage + 1
+                  )
                 )
               }
               disabled={pagination.currentPage === pagination.totalPages}

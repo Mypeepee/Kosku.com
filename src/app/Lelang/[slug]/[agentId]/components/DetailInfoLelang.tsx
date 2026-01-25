@@ -161,12 +161,78 @@ const formatTanggalLelang = (val?: string | null) => {
   });
 };
 
+// Template soft selling ala contoh kamu
+const buildShareMessage = (data: PropertyData) => {
+  const judul = data?.judul || "Listing Properti";
+  const harga = formatRupiah(data?.harga);
+  const lokasiSingkat =
+    data?.kota ||
+    data?.alamat_lengkap ||
+    [data?.kelurahan, data?.kecamatan, data?.kota, data?.provinsi]
+      .filter(Boolean)
+      .join(", ");
+
+  const luasTanah = data?.luas_tanah ? `${data.luas_tanah} m²` : "-";
+  const legal = data?.legalitas || "-";
+
+  const headerLelang = data?.tanggal_lelang
+    ? `🔥 SEGERA LELANG, ${formatTanggalLelang(data.tanggal_lelang)} 🔥`
+    : "🔥 SEGERA LELANG 🔥";
+
+  return (
+    `${headerLelang}\n` +
+    `🏡 ${judul}\n` +
+    (lokasiSingkat ? `📍 ${lokasiSingkat}\n` : "") +
+    `📌 Spesifikasi\n` +
+    (data?.alamat_lengkap
+      ? `📍 ${data.alamat_lengkap}\n`
+      : "") +
+    `📐 LT ${luasTanah}\n` +
+    `📃 Tipe Hak: ${legal}\n` +
+    `💰 Harga: ${harga}\n` +
+    `Kode: ${data?.kode_properti || "-"}\n\n` +
+    `✨ Kenapa Beli Lelang Menarik?\n` +
+    `• Harga jauh di bawah pasar, lebih murah dibanding rumah primary & secondary.\n` +
+    `• Potensi capital gain tinggi, bisa dijual kembali mendekati harga pasar.\n` +
+    `• Salah satu cara aman untuk beli properti melalui mekanisme resmi.\n\n` +
+    `📞 Kontak: ${
+      data?.agent?.telepon ||
+      data?.owner?.phone ||
+      "Hubungi kami untuk info lebih lanjut"
+    }`
+  );
+};
+
 export default function DetailInfo({
   data,
   selectedRoom,
   setSelectedRoom,
 }: DetailInfoProps) {
   const transactionBadge = getTransactionBadge(data?.jenis_transaksi || "JUAL");
+
+  const handleShare = async () => {
+    if (typeof window === "undefined") return;
+    const url = window.location.href;
+    const text = buildShareMessage(data);
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: data?.judul || "Listing Properti Lelang",
+          text,
+          url,
+        });
+      } catch {
+        // user batal / error
+      }
+    } else if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(`${text}\n\n🔗 Info lengkap: ${url}`);
+      } catch {
+        // gagal copy, abaikan
+      }
+    }
+  };
 
   return (
     <div className="w-full lg:w-2/3 space-y-6 pb-10">
@@ -253,7 +319,10 @@ export default function DetailInfo({
             </div>
           </div>
 
-          <button className="bg-slate-800/50 w-10 h-10 flex items-center justify-center rounded-lg text-white border border-slate-700/50 hover:bg-slate-700/50 active:scale-95 transition-all flex-shrink-0">
+          <button
+            onClick={handleShare}
+            className="bg-slate-800/50 w-10 h-10 flex items-center justify-center rounded-lg text-white border border-slate-700/50 hover:bg-slate-700/50 active:scale-95 transition-all flex-shrink-0"
+          >
             <Icon icon="solar:share-bold" className="text-lg" />
           </button>
         </div>
@@ -410,7 +479,7 @@ export default function DetailInfo({
               className="text-emerald-400"
             />
           </div>
-        Alamat Lengkap
+          Alamat Lengkap
         </h4>
         <div className="space-y-3">
           <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
@@ -464,57 +533,73 @@ export default function DetailInfo({
         </div>
       </div>
 
-       {/* 6. MAP */}
-<div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5 backdrop-blur-sm">
-  <div className="flex justify-between items-end mb-4">
-    <h3 className="text-sm font-bold flex items-center gap-2 text-white">
-      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/30 flex items-center justify-center">
-        <Icon icon="solar:map-bold-duotone" className="text-red-400 text-xl" />
+      {/* 6. MAP */}
+      <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5 backdrop-blur-sm">
+        <div className="flex justify-between items-end mb-4">
+          <h3 className="text-sm font-bold flex items-center gap-2 text-white">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/30 flex items-center justify-center">
+              <Icon
+                icon="solar:map-bold-duotone"
+                className="text-red-400 text-xl"
+              />
+            </div>
+            Peta Lokasi & Fasilitas Sekitar
+          </h3>
+
+          {(data?.latitude != null && data?.longitude != null) ||
+          data?.alamat_lengkap ? (
+            <a
+              href={
+                data?.latitude != null && data?.longitude != null
+                  ? `https://www.google.com/maps/search/?api=1&query=${data.latitude},${data.longitude}`
+                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      data?.alamat_lengkap || ""
+                    )}`
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all flex items-center gap-1 group"
+            >
+              Buka di Google Maps
+              <Icon
+                icon="solar:arrow-right-up-linear"
+                className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"
+              />
+            </a>
+          ) : null}
+        </div>
+
+        {data?.latitude != null && data?.longitude != null ? (
+          <div className="relative w-full h-[550px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl ring-1 ring-white/5">
+            <Maps
+              lat={data.latitude}
+              lng={data.longitude}
+              address={data.alamat_lengkap}
+            />
+          </div>
+        ) : data?.alamat_lengkap ? (
+          <div className="relative w-full h-[550px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl ring-1 ring-white/5">
+            <Maps address={data.alamat_lengkap} />
+          </div>
+        ) : (
+          <div className="bg-slate-900/30 border border-slate-700/30 rounded-xl p-8 flex flex-col items-center justify-center text-center min-h-[400px]">
+            <Icon
+              icon="solar:map-point-bold-duotone"
+              className="text-6xl text-slate-700 mb-3"
+            />
+            <h4 className="text-white font-bold mb-2">
+              Lokasi Belum Tersedia
+            </h4>
+            <p className="text-sm text-gray-400 max-w-md">
+              Koordinat dan alamat belum diinput. Hubungi agent untuk informasi
+              lokasi.
+            </p>
+          </div>
+        )}
       </div>
-      Peta Lokasi & Fasilitas Sekitar
-    </h3>
 
-    {(data?.latitude != null && data?.longitude != null) || data?.alamat_lengkap ? (
-      <a
-        href={
-          data?.latitude != null && data?.longitude != null
-            ? `https://www.google.com/maps/search/?api=1&query=${data.latitude},${data.longitude}`
-            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                data?.alamat_lengkap || ""
-              )}`
-        }
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all flex items-center gap-1 group"
-      >
-        Buka di Google Maps
-        <Icon icon="solar:arrow-right-up-linear" className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-      </a>
-    ) : null}
-  </div>
-
-  {data?.latitude != null && data?.longitude != null ? (
-    <div className="relative w-full h-[550px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl ring-1 ring-white/5">
-      <Maps lat={data.latitude} lng={data.longitude} address={data.alamat_lengkap} />
-    </div>
-  ) : data?.alamat_lengkap ? (
-    <div className="relative w-full h-[550px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl ring-1 ring-white/5">
-      <Maps address={data.alamat_lengkap} />
-    </div>
-  ) : (
-    <div className="bg-slate-900/30 border border-slate-700/30 rounded-xl p-8 flex flex-col items-center justify-center text-center min-h-[400px]">
-      <Icon icon="solar:map-point-bold-duotone" className="text-6xl text-slate-700 mb-3" />
-      <h4 className="text-white font-bold mb-2">Lokasi Belum Tersedia</h4>
-      <p className="text-sm text-gray-400 max-w-md">
-        Koordinat dan alamat belum diinput. Hubungi agent untuk informasi lokasi.
-      </p>
-    </div>
-  )}
-</div>
-
-
-{/* 7. EDUKASI LELANG - MODERN UI */}
-<div className="bg-gradient-to-br from-slate-900 via-slate-800/90 to-slate-900 border border-emerald-500/20 rounded-2xl p-6 md:p-8 shadow-2xl">
+      {/* 7. EDUKASI LELANG - MODERN UI */}
+      <div className="bg-gradient-to-br from-slate-900 via-slate-800/90 to-slate-900 border border-emerald-500/20 rounded-2xl p-6 md:p-8 shadow-2xl">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 mb-4 shadow-lg shadow-emerald-500/30">
@@ -531,7 +616,6 @@ export default function DetailInfo({
             sampai serah terima kunci.
           </p>
         </div>
-
 
         {/* Benefit Cards */}
         <div className="grid md:grid-cols-3 gap-4 mb-8">
@@ -556,7 +640,6 @@ export default function DetailInfo({
             </div>
           </div>
 
-
           {/* Card 2 */}
           <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/20 rounded-xl p-5 hover:border-blue-400/50 hover:shadow-lg hover:shadow-blue-500/10 transition-all group">
             <div className="flex items-start gap-3 mb-3">
@@ -577,7 +660,6 @@ export default function DetailInfo({
               </div>
             </div>
           </div>
-
 
           {/* Card 3 */}
           <div className="bg-gradient-to-br from-purple-500/10 to-transparent border border-purple-500/20 rounded-xl p-5 hover:border-purple-400/50 hover:shadow-lg hover:shadow-purple-500/10 transition-all group">
@@ -600,7 +682,6 @@ export default function DetailInfo({
             </div>
           </div>
         </div>
-
 
         {/* CTA Section - Guarantee */}
         <div className="bg-gradient-to-r from-emerald-500/10 via-blue-500/10 to-purple-500/10 border border-white/10 rounded-xl p-6">
@@ -639,7 +720,6 @@ export default function DetailInfo({
             </div>
           </div>
         </div>
-
 
         {/* Disclaimer */}
         <div className="mt-6 flex items-start gap-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">

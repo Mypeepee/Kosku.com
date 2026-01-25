@@ -1,3 +1,4 @@
+// app/Lelang/[slug]/[agentId]/page.tsx
 import React from "react";
 import { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
@@ -7,8 +8,16 @@ import DetailClient from "../DetailClient";
 interface Props {
   params: {
     slug: string;
-    id: string;
+    agentId: string;
   };
+}
+
+// Ambil id_property (UUID v4) dari slug-id => 5 segmen terakhir
+function extractIdPropertyFromSlug(slug: string): string | null {
+  const parts = slug.split("-");
+  if (parts.length < 5) return null;
+  const uuidParts = parts.slice(-5);
+  return uuidParts.join("-");
 }
 
 async function getProperty(id: string) {
@@ -43,21 +52,20 @@ async function getProperty(id: string) {
   return product;
 }
 
-// ⚠️ NEW: Fetch Similar Properties
 async function getSimilarProperties(currentProperty: any) {
   try {
     const similarProperties = await prisma.property.findMany({
       where: {
         AND: [
-          { id_property: { not: currentProperty.id_property } }, // Exclude current property
+          { id_property: { not: currentProperty.id_property } },
           {
             OR: [
-              { kota: currentProperty.kota }, // Same city (highest priority)
-              { kategori: currentProperty.kategori }, // Same category
+              { kota: currentProperty.kota },
+              { kategori: currentProperty.kategori },
             ],
           },
-          { status_tayang: "TERSEDIA" }, // Only available properties
-          { jenis_transaksi: "LELANG" }, // Only auction properties
+          { status_tayang: "TERSEDIA" },
+          { jenis_transaksi: "LELANG" },
         ],
       },
       include: {
@@ -80,10 +88,10 @@ async function getSimilarProperties(currentProperty: any) {
           },
         },
       },
-      take: 50, // Max 50 for algorithm scoring
+      take: 50,
       orderBy: [
-        { is_hot_deal: "desc" }, // Hot deals first
-        { tanggal_dibuat: "desc" }, // Newest first
+        { is_hot_deal: "desc" },
+        { tanggal_dibuat: "desc" },
       ],
     });
 
@@ -95,7 +103,15 @@ async function getSimilarProperties(currentProperty: any) {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const product = await getProperty(params.id);
+  const idProperty = extractIdPropertyFromSlug(params.slug);
+  if (!idProperty) {
+    return {
+      title: "Properti Tidak Ditemukan | Premier Asset",
+      description: "Halaman properti yang Anda cari tidak ditemukan.",
+    };
+  }
+
+  const product = await getProperty(idProperty);
 
   if (!product) {
     return {
@@ -110,7 +126,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     maximumFractionDigits: 0,
   }).format(Number(product.harga));
 
-  const namaAgent = product.agent?.pengguna?.nama_lengkap || "Agent Premier";
+  const namaAgent =
+    product.agent?.pengguna?.nama_lengkap || "Agent Premier";
 
   const specs = [
     product.luas_tanah && `LT ${product.luas_tanah}m²`,
@@ -125,7 +142,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     ? product.deskripsi.substring(0, 155) + "..."
     : `${product.jenis_transaksi} ${product.kategori} di ${product.kota}, ${product.provinsi}. ${specs}. Hubungi ${namaAgent} untuk info lebih lanjut.`;
 
-  // Split gambar untuk metadata
   const rawGambar = product.gambar || "";
   const fotoArray =
     rawGambar.trim().length > 0
@@ -136,12 +152,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       : [];
   const firstImage = fotoArray[0] || "/images/hero/banner.jpg";
 
-  const canonicalUrl = `https://premierasset.com/Lelang/${product.slug || "property"}/${product.id_property}`;
+  const canonicalUrl = `https://premierasset.com/Lelang/${params.slug}`;
 
   return {
     title: `${product.judul} - ${hargaFormatted} | Premier Asset`,
-    description: description,
-
+    description,
     keywords: [
       product.kategori,
       product.jenis_transaksi,
@@ -153,14 +168,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       "Indonesia",
       namaAgent,
     ],
-
     openGraph: {
       type: "website",
       locale: "id_ID",
       url: canonicalUrl,
       siteName: "Premier Asset",
       title: `${product.judul} - ${hargaFormatted}`,
-      description: description,
+      description,
       images: [
         {
           url: firstImage,
@@ -170,14 +184,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         },
       ],
     },
-
     twitter: {
       card: "summary_large_image",
       title: `${product.judul} - ${hargaFormatted}`,
-      description: description,
+      description,
       images: [firstImage],
     },
-
     robots: {
       index: product.status_tayang === "TERSEDIA",
       follow: true,
@@ -188,7 +200,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         "max-snippet": -1,
       },
     },
-
     alternates: {
       canonical: canonicalUrl,
     },
@@ -196,19 +207,26 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function DetailPage({ params }: Props) {
-  const product = await getProperty(params.id);
+  const { slug, agentId } = params;
 
+  const idProperty = extractIdPropertyFromSlug(slug);
+  if (!idProperty) {
+    notFound();
+  }
+
+  const product = await getProperty(idProperty);
   if (!product) {
     notFound();
   }
 
-  if (product.slug && product.slug !== params.slug) {
-    redirect(`/Lelang/${product.slug}/${product.id_property}`);
+  // Self-healing slug: kalau slug berubah, tetap pertahankan agentId
+  if (product.slug && product.id_property) {
+    const expectedSlug = `${product.slug}-${product.id_property}`;
+    if (expectedSlug !== slug) {
+      return redirect(`/Lelang/${expectedSlug}/${agentId}`);
+    }
   }
 
-  const canonicalUrl = `https://premierasset.com/Lelang/${product.slug || "property"}/${product.id_property}`;
-
-  // Split kolom gambar jadi array
   const rawGambar = product.gambar || "";
   const fotoArray =
     rawGambar.trim().length > 0
@@ -221,12 +239,8 @@ export default async function DetailPage({ params }: Props) {
   const finalFotoArray =
     fotoArray.length > 0 ? fotoArray : ["/images/hero/banner.jpg"];
 
-  console.log("✅ page.tsx finalFotoArray:", finalFotoArray);
-
-  // ⚠️ NEW: Fetch similar properties
   const similarPropertiesRaw = await getSimilarProperties(product);
 
-  // Process similar properties (split gambar untuk each)
   const similarProperties = similarPropertiesRaw.map((prop) => {
     const propGambar = prop.gambar || "";
     const propFotoArray =
@@ -243,151 +257,15 @@ export default async function DetailPage({ params }: Props) {
     };
   });
 
-  console.log("✅ Found similar properties:", similarProperties.length);
-
-  // JSON-LD
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "RealEstateListing",
-    "@id": canonicalUrl,
-    url: canonicalUrl,
-    name: product.judul,
-    description:
-      product.deskripsi ||
-      `${product.kategori} ${product.jenis_transaksi} di ${product.kota}`,
-    image: finalFotoArray,
-
-    offers: {
-      "@type": "Offer",
-      url: canonicalUrl,
-      priceCurrency: "IDR",
-      price: Number(product.harga),
-      priceValidUntil: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0],
-      itemCondition:
-        product.kondisi_interior === "BARU"
-          ? "https://schema.org/NewCondition"
-          : "https://schema.org/UsedCondition",
-      availability:
-        product.status_tayang === "TERSEDIA"
-          ? "https://schema.org/InStock"
-          : "https://schema.org/SoldOut",
-      seller: {
-        "@type": "RealEstateAgent",
-        name: product.agent?.pengguna?.nama_lengkap || "Premier Asset",
-        telephone:
-          product.agent?.nomor_whatsapp ||
-          product.agent?.pengguna?.nomor_telepon,
-        email: product.agent?.pengguna?.email,
-      },
-    },
-
-    address: {
-      "@type": "PostalAddress",
-      streetAddress: product.alamat_lengkap,
-      addressLocality: product.kota,
-      addressRegion: product.provinsi,
-      postalCode: (product as any).kode_pos || "",
-      addressCountry: "ID",
-    },
-
-    ...(product.latitude &&
-      product.longitude && {
-        geo: {
-          "@type": "GeoCoordinates",
-          latitude: product.latitude,
-          longitude: product.longitude,
-        },
-      }),
-
-    numberOfRooms: product.kamar_tidur || 0,
-    numberOfBathroomsTotal: product.kamar_mandi || 0,
-
-    floorSize: product.luas_bangunan
-      ? {
-          "@type": "QuantitativeValue",
-          value: product.luas_bangunan,
-          unitCode: "MTK",
-          unitText: "m²",
-        }
-      : undefined,
-
-    additionalProperty: [
-      {
-        "@type": "PropertyValue",
-        name: "Luas Tanah",
-        value: `${product.luas_tanah || 0} m²`,
-      },
-      {
-        "@type": "PropertyValue",
-        name: "Jumlah Lantai",
-        value: product.jumlah_lantai || 1,
-      },
-      {
-        "@type": "PropertyValue",
-        name: "Sertifikat",
-        value: product.legalitas || "N/A",
-      },
-      {
-        "@type": "PropertyValue",
-        name: "Daya Listrik",
-        value: `${product.daya_listrik || 0} Watt`,
-      },
-    ].filter((prop) => prop.value && prop.value !== "N/A"),
-
-    identifier: product.kode_properti,
-    category: product.kategori,
-  };
-
-  const breadcrumbJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      {
-        "@type": "ListItem",
-        position: 1,
-        name: "Home",
-        item: "https://premierasset.com",
-      },
-      {
-        "@type": "ListItem",
-        position: 2,
-        name: "Lelang",
-        item: "https://premierasset.com/Lelang",
-      },
-      {
-        "@type": "ListItem",
-        position: 3,
-        name: product.kota,
-        item: `https://premierasset.com/Lelang?kota=${product.kota}`,
-      },
-      {
-        "@type": "ListItem",
-        position: 4,
-        name: product.judul,
-        item: canonicalUrl,
-      },
-    ],
-  };
-
   return (
     <main className="bg-[#0F0F0F] min-h-screen text-white">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
-      />
-
-      {/* ⚠️ PASS FOTO ARRAY + SIMILAR PROPERTIES KE DetailClient */}
       <DetailClient
         product={JSON.parse(JSON.stringify(product))}
         fotoArray={finalFotoArray}
-        similarProperties={JSON.parse(JSON.stringify(similarProperties))}
+        similarProperties={JSON.parse(
+          JSON.stringify(similarProperties)
+        )}
+        currentAgentId={agentId} // ⬅️ kirim ke DetailClient
       />
     </main>
   );

@@ -1,19 +1,20 @@
+// app/Lelang/[slug]/DetailClient.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 
-import MobileNav from "./[id]/components/MobileNavLelang";
-import ImageGallery from "./[id]/components/ImageGalleryLelang";
-import DetailInfo from "./[id]/components/DetailInfoLelang";
-import BookingSidebar from "./[id]/components/AgentSidebarLelang";
-import SimilarProperties from "./[id]/components/SimilarPropertiesLelang";
+import MobileNav from "./[agentId]/components/MobileNavLelang";
+import ImageGallery from "./[agentId]/components/ImageGalleryLelang";
+import DetailInfo from "./[agentId]/components/DetailInfoLelang";
+import BookingSidebar from "./[agentId]/components/AgentSidebarLelang";
+import SimilarProperties from "./[agentId]/components/SimilarPropertiesLelang";
 
 interface ProductData {
   id_property: string;
   kode_properti?: string | null;
-  slug?: string; // ⚠️ TAMBAHKAN INI
+  slug?: string;
   judul: string;
   kota: string;
   harga: number | string;
@@ -65,13 +66,15 @@ interface ProductData {
 interface DetailClientProps {
   product: ProductData;
   fotoArray: string[];
-  similarProperties?: ProductData[]; // ⚠️ TAMBAHKAN INI (optional untuk backward compatibility)
+  similarProperties?: ProductData[];
+  currentAgentId?: string | null; // ⬅️ baru
 }
 
 export default function DetailClient({
   product,
   fotoArray,
-  similarProperties = [], // ⚠️ TAMBAHKAN INI
+  similarProperties = [],
+  currentAgentId,
 }: DetailClientProps) {
   const convertToNumber = (value: any): number => {
     if (typeof value === "number") return value;
@@ -101,7 +104,7 @@ export default function DetailClient({
 
   const propertyData = {
     id_property: product.id_property,
-    slug: product.slug || "", // ⚠️ TAMBAHKAN INI
+    slug: product.slug || "",
     kode_properti: product.kode_properti ?? "-",
     judul: product.judul,
     title: product.judul,
@@ -139,11 +142,11 @@ export default function DetailClient({
     kondisi_interior: product.kondisi_interior ?? null,
     legalitas: product.legalitas ?? null,
 
-    deskripsi: product.deskripsi ?? null,
+  deskripsi: product.deskripsi ?? null,
 
     gambar_utama: fotoArray[0] || "/images/hero/banner.jpg",
-    gambar: fotoArray[0] || "/images/hero/banner.jpg", // ⚠️ TAMBAHKAN INI
-    foto_list: fotoArray, // ⚠️ TAMBAHKAN INI
+    gambar: fotoArray[0] || "/images/hero/banner.jpg",
+    foto_list: fotoArray,
 
     agent: product.agent
       ? {
@@ -163,8 +166,11 @@ export default function DetailClient({
         }
       : null,
 
-    agent_name: product.agent?.pengguna?.nama_lengkap || "Agent Premier", // ⚠️ TAMBAHKAN INI
-    agent_photo: product.agent?.pengguna?.foto_profil_url || "/images/user/user-01.png", // ⚠️ TAMBAHKAN INI
+    agent_name:
+      product.agent?.pengguna?.nama_lengkap || "Agent Premier",
+    agent_photo:
+      product.agent?.pengguna?.foto_profil_url ||
+      "/images/user/user-01.png",
 
     owner: product.agent
       ? {
@@ -203,14 +209,18 @@ export default function DetailClient({
 
   const [selectedRoom, setSelectedRoom] = useState(minimalRoom);
 
-  // ⚠️ KONVERSI similarProperties ke format yang benar
   const formattedSimilarProperties = similarProperties.map((p) => ({
     ...p,
     slug: p.slug || "",
     gambar: p.gambar || "/images/hero/banner.jpg",
-    foto_list: p.gambar ? p.gambar.split(",").map((g) => g.trim()) : [],
-    agent_name: p.agent?.pengguna?.nama_lengkap || "Agent Premier",
-    agent_photo: p.agent?.pengguna?.foto_profil_url || "/images/user/user-01.png",
+    foto_list: p.gambar
+      ? p.gambar.split(",").map((g) => g.trim())
+      : [],
+    agent_name:
+      p.agent?.pengguna?.nama_lengkap || "Agent Premier",
+    agent_photo:
+      p.agent?.pengguna?.foto_profil_url ||
+      "/images/user/user-01.png",
     harga: convertToNumber(p.harga),
     dilihat: p.dilihat ?? 0,
     is_hot_deal: p.is_hot_deal ?? false,
@@ -220,10 +230,7 @@ export default function DetailClient({
     <div className="text-white font-sans bg-[#0F0F0F]">
       <MobileNav />
 
-      {/* Spacer untuk mobile header */}
       <div className="lg:hidden h-[60px]" />
-
-      {/* Spacer desktop */}
       <div className="hidden lg:block h-24 w-full" />
 
       {/* BREADCRUMB */}
@@ -246,7 +253,7 @@ export default function DetailClient({
         </div>
       </div>
 
-      {/* Gallery */}
+      {/* GALLERY */}
       <div className="container mx-auto lg:px-4 mb-8 px-4 mt-4 lg:mt-0">
         <ImageGallery images={fotoArray} />
       </div>
@@ -254,16 +261,15 @@ export default function DetailClient({
       <div className="container mx-auto px-4 relative">
         <div className="flex flex-col lg:flex-row gap-10 items-start">
           <DetailInfo
-            data={propertyData}
+            data={propertyData as any}
             selectedRoom={selectedRoom}
             setSelectedRoom={setSelectedRoom}
+            currentAgentId={currentAgentId} // ⬅️ kirim ke DetailInfo
           />
-
-          <BookingSidebar data={propertyData} />
+          <BookingSidebar data={propertyData as any} />
         </div>
       </div>
 
-      {/* ⚠️ FIX: Pass props ke SimilarProperties */}
       <SimilarProperties
         currentProperty={propertyData as any}
         allProperties={formattedSimilarProperties as any}
