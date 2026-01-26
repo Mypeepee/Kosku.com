@@ -61,14 +61,12 @@ export default function KeperluanAgent({ data }: KeperluanAgentProps) {
   const biayaDokumen = limit * 0.085 + 7_000_000;
   const biayaPengosongan = calcPengosongan(limit);
 
-  // Versi simple: buka gambar utama (foto pertama) di tab baru
   const handleDownloadImages = () => {
     const urls: string[] = data?.foto_list || [];
     if (!urls.length) {
       alert("Belum ada foto untuk diunduh.");
       return;
     }
-    // buka gambar utama; user bisa save image
     window.open(urls[0], "_blank", "noopener,noreferrer");
   };
 
@@ -100,125 +98,171 @@ export default function KeperluanAgent({ data }: KeperluanAgentProps) {
   return (
     <>
       {/* DESKTOP */}
-      <div className="hidden lg:flex flex-col w-[360px] sticky top-28 h-fit bg-[#020617] border border-white/10 rounded-3xl shadow-[0_18px_60px_rgba(0,0,0,0.65)] overflow-hidden">
+      <div
+        className="hidden lg:flex flex-col w-[380px] sticky top-24 h-fit
+        bg-slate-950/95 border border-white/10 rounded-3xl
+        shadow-[0_24px_80px_rgba(0,0,0,0.75)] overflow-hidden backdrop-blur"
+      >
         {/* HEADER: Estimasi Biaya */}
-        <div className="px-5 pt-4 pb-3 border-b border-white/10 bg-gradient-to-r from-emerald-500/20 via-emerald-500/10 to-transparent">
-          <div className="flex items-center justify-between mb-2">
+        <div className="px-6 pt-5 pb-4 border-b border-white/10 bg-gradient-to-br from-emerald-500/20 via-emerald-500/5 to-transparent">
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[11px] font-semibold text-emerald-100">
+              <span className="text-[11px] font-semibold text-emerald-100 tracking-[0.16em] uppercase">
                 Estimasi Biaya
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-300">
+              Berdasarkan harga limit saat ini
+            </span>
+          </div>
+
+          {/* LIMIT UTAMA */}
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">
+              Harga Limit
+            </p>
+            <p className="mt-1 text-[20px] font-bold text-white leading-tight">
+              {formatMoney(limit)}
+            </p>
+            <p className="mt-1 text-[10px] text-slate-400">
+              Nilai ini akan menyesuaikan dengan harga menang lelang.
+            </p>
+          </div>
+        </div>
+
+        {/* RINCIAN ESTIMASI */}
+        <div className="px-6 py-4 space-y-3 bg-slate-950">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-semibold text-slate-200">
+              Rincian Estimasi
+            </span>
+            <span className="text-[10px] text-slate-400">
+              Belum termasuk pajak & biaya lain
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col rounded-2xl bg-emerald-500/5 border border-emerald-400/30 px-3 py-2.5">
+              <span className="text-[9px] uppercase tracking-[0.16em] text-emerald-200/80">
+                Biaya Dokumen
+              </span>
+              <span className="mt-1 text-[14px] font-semibold text-emerald-50">
+                {formatMoney(biayaDokumen)}
+              </span>
+              <span className="mt-1 text-[9px] text-emerald-100/80 leading-snug">
+                {`≈ ${formatMoney(limit * 0.085)} + Rp 7 Jt`}
+              </span>
+            </div>
+
+            <div className="flex flex-col rounded-2xl bg-rose-500/5 border border-rose-400/40 px-3 py-2.5">
+              <span className="text-[9px] uppercase tracking-[0.16em] text-rose-200/80">
+                Biaya Pengosongan
+              </span>
+              <span className="mt-1 text-[14px] font-semibold text-rose-50">
+                {formatMoney(biayaPengosongan)}
+              </span>
+              <span className="mt-1 text-[9px] text-rose-100/80 leading-snug">
+                Mengacu tabel estimasi pengosongan.
               </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <div className="flex flex-col">
-              <span className="text-[9px] uppercase text-slate-400 tracking-[0.14em]">
-                Harga Limit
-              </span>
-              <span className="mt-1 text-[13px] font-bold text-white leading-tight">
-                {formatMoney(limit)}
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[9px] uppercase text-slate-400 tracking-[0.14em]">
-                Biaya Dokumen
-              </span>
-              <span className="mt-1 text-[13px] font-bold text-emerald-200 leading-tight">
-                {formatMoney(biayaDokumen)}
-              </span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[9px] uppercase text-slate-400 tracking-[0.14em]">
-                Biaya Pengosongan
-              </span>
-              <span className="mt-1 text-[13px] font-bold text-rose-200 leading-tight">
-                {formatMoney(biayaPengosongan)}
-              </span>
-            </div>
+          <div className="mt-1 rounded-2xl bg-white/[0.02] border border-white/5 px-3 py-2">
+            <p className="text-[9px] text-slate-400 leading-relaxed">
+              Dokumen: limit × 8,5% + Rp 7 Jt. Pengosongan: mengikuti range
+              harga limit (lihat detail di deskripsi atau dokumen lelang).
+            </p>
           </div>
         </div>
 
         {/* TOMBOL AKSI */}
-        <div className="px-5 py-4 space-y-3 bg-[#020617]">
-          <button
-            onClick={handleDownloadImages}
-            className="w-full group flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-sky-400/60 hover:bg-sky-500/5 transition-all active:scale-[0.99]"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-400/40 flex items-center justify-center">
-                <Icon
-                  icon="solar:gallery-download-bold-duotone"
-                  className="text-sky-300 text-xl"
-                />
+        <div className="px-5 pb-4 pt-2 bg-slate-950/95 border-t border-white/5">
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleDownloadImages}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl
+                bg-white/[0.03] border border-white/10 hover:border-sky-400/60
+                hover:bg-sky-500/5 transition-all active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-400/40 flex items-center justify-center">
+                  <Icon
+                    icon="solar:gallery-download-bold-duotone"
+                    className="text-sky-300 text-lg"
+                  />
+                </div>
+                <div className="text-left">
+                  <p className="text-[11px] font-semibold text-white">
+                    Download Gambar
+                  </p>
+                  <p className="text-[10px] text-gray-400">
+                    Buka foto utama lalu simpan.
+                  </p>
+                </div>
               </div>
-              <div className="text-left">
-                <p className="text-[11px] font-semibold text-white">
-                  Download Gambar
-                </p>
-                <p className="text-[10px] text-gray-400">
-                  Buka foto utama untuk disimpan.
-                </p>
-              </div>
-            </div>
-            <Icon
-              icon="solar:arrow-right-up-linear"
-              className="text-gray-500 text-sm group-hover:text-sky-300"
-            />
-          </button>
+              <Icon
+                icon="solar:arrow-right-up-linear"
+                className="text-gray-500 text-sm"
+              />
+            </button>
 
-          <button
-            onClick={handleDownloadVideos}
-            className="w-full group flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-purple-400/60 hover:bg-purple-500/5 transition-all active:scale-[0.99]"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-400/40 flex items-center justify-center">
-                <Icon
-                  icon="solar:videocamera-record-bold-duotone"
-                  className="text-purple-300 text-xl"
-                />
+            <button
+              onClick={handleDownloadVideos}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl
+                bg-white/[0.03] border border-white/10 hover:border-purple-400/60
+                hover:bg-purple-500/5 transition-all active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-purple-500/15 border border-purple-400/40 flex items-center justify-center">
+                  <Icon
+                    icon="solar:videocamera-record-bold-duotone"
+                    className="text-purple-300 text-lg"
+                  />
+                </div>
+                <div className="text-left">
+                  <p className="text-[11px] font-semibold text-white">
+                    Download Video
+                  </p>
+                  <p className="text-[10px] text-gray-400">
+                    Video tur untuk sosial media.
+                  </p>
+                </div>
               </div>
-              <div className="text-left">
-                <p className="text-[11px] font-semibold text-white">
-                  Download Video
-                </p>
-                <p className="text-[10px] text-gray-400">
-                  Video tur untuk sosial media.
-                </p>
-              </div>
-            </div>
-            <Icon
-              icon="solar:arrow-right-up-linear"
-              className="text-gray-500 text-sm group-hover:text-purple-300"
-            />
-          </button>
+              <Icon
+                icon="solar:arrow-right-up-linear"
+                className="text-gray-500 text-sm"
+              />
+            </button>
 
-          <button
-            onClick={handleAskStock}
-            className="w-full group flex items-center justify-between px-4 py-3 rounded-2xl bg-emerald-500/12 border border-emerald-400/70 hover:bg-emerald-500/22 transition-all active:scale-[0.99]"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/25 border border-emerald-200/80 flex items-center justify-center">
-                <Icon
-                  icon="solar:clipboard-list-bold-duotone"
-                  className="text-emerald-50 text-xl"
-                />
+            <button
+              onClick={handleAskStock}
+              className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl
+                bg-emerald-500/14 border border-emerald-400/70 hover:bg-emerald-500/24
+                transition-all active:scale-[0.99]"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/25 border border-emerald-100/70 flex items-center justify-center">
+                  <Icon
+                    icon="solar:clipboard-list-bold-duotone"
+                    className="text-emerald-50 text-lg"
+                  />
+                </div>
+                <div className="text-left">
+                  <p className="text-[11px] font-semibold text-emerald-50">
+                    Tanyakan Stok
+                  </p>
+                  <p className="text-[10px] text-emerald-100/80">
+                    Kirim estimasi ini ke admin / tim.
+                  </p>
+                </div>
               </div>
-              <div className="text-left">
-                <p className="text-[11px] font-semibold text-emerald-50">
-                  Tanyakan Stok
-                </p>
-                <p className="text-[10px] text-emerald-100/80">
-                  Kirim detail estimasi ke admin / tim.
-                </p>
-              </div>
-            </div>
-            <Icon
-              icon="solar:arrow-right-up-linear"
-              className="text-emerald-50 text-sm"
-            />
-          </button>
+              <Icon
+                icon="solar:arrow-right-up-linear"
+                className="text-emerald-50 text-sm"
+              />
+            </button>
+          </div>
         </div>
       </div>
 

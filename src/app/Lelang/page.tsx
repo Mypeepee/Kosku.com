@@ -19,8 +19,8 @@ const KATEGORI_MAP: Record<string, Prisma.kategori_properti_enum> = {
   PABRIK: "PABRIK",
   RUKO: "RUKO",
   TOKO: "TOKO",
-  HOTEL: "HOTEL",
-  VILLA: "VILLA",
+  HOTEL: "HOTEL_DAN_VILLA",
+  VILLA: "HOTEL_DAN_VILLA",
 };
 
 export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
@@ -108,7 +108,7 @@ export default async function SearchPage({ searchParams }: Props) {
   // mapping tipe -> enum kategori
   const mappedKategori = tipe ? KATEGORI_MAP[tipe.toUpperCase()] : undefined;
 
-  const whereClause: Prisma.propertyWhereInput = {
+  const whereClause: Prisma.ListingWhereInput = {
     jenis_transaksi: "LELANG",
     status_tayang: "TERSEDIA",
 
@@ -159,7 +159,7 @@ export default async function SearchPage({ searchParams }: Props) {
     }),
   };
 
-  const orderByArray: Prisma.propertyOrderByWithRelationInput[] = [];
+  const orderByArray: Prisma.ListingOrderByWithRelationInput[] = [];
 
   if (hasToken(sortParts, "auction") && hasToken(sortParts, "desc")) {
     orderByArray.push({ tanggal_lelang: "desc" });
@@ -184,13 +184,13 @@ export default async function SearchPage({ searchParams }: Props) {
   }
 
   const orderBy:
-    | Prisma.propertyOrderByWithRelationInput
-    | Prisma.propertyOrderByWithRelationInput[] =
+    | Prisma.ListingOrderByWithRelationInput
+    | Prisma.ListingOrderByWithRelationInput[] =
     orderByArray.length > 0 ? orderByArray : [{ tanggal_lelang: "asc" }];
 
   const [totalItems, propertiesRaw] = await prisma.$transaction([
-    prisma.property.count({ where: whereClause }),
-    prisma.property.findMany({
+    prisma.listing.count({ where: whereClause }),
+    prisma.listing.findMany({
       where: whereClause,
       take: limit,
       skip,

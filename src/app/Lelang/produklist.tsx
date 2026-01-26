@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 
 interface PropertyDB {
-  id_property: string;
+  id_property: number | string;
   slug: string;
   judul: string;
   kota: string;
@@ -69,10 +69,10 @@ const daysUntil = (date?: string | null) => {
 };
 
 // --- URL DETAIL LELANG ---
-// Sekarang pakai pola slug-id: /Lelang/[slug-id]
 const getPropertyUrl = (property: PropertyDB): string => {
   const baseSlug = property.slug || "property";
-  const slugWithId = `${baseSlug}-${property.id_property}`;
+  const id = String(property.id_property);
+  const slugWithId = `${baseSlug}-${id}`;
   return `/Lelang/${slugWithId}`;
 };
 
@@ -87,11 +87,13 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 
   const nextImage = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setCurrentImageIndex((prev) => (prev + 1) % images.length);
   };
 
   const prevImage = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setCurrentImageIndex((prev) => (prev - 1 + images.length) % images.length);
   };
 
@@ -179,30 +181,40 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
   return (
     <div className="bg-[#151515] border border-white/5 rounded-3xl overflow-hidden group hover:border-primary/50 transition-all duration-300 relative flex flex-col h-full hover:shadow-[0_10px_40px_-10px_rgba(74,222,128,0.15)] mx-1.5">
       {/* IMAGE SECTION */}
-      <div className="relative h-60 md:h-64 w-full overflow-hidden group/image">
-        <Image
-          src={images[currentImageIndex]}
-          alt={item.judul}
-          fill
-          className="object-cover transition-transform duration-500 group-hover:scale-105"
-        />
+      <div className="relative h-60 md:h-64 w-full overflow-hidden">
+        {/* wrapper untuk transisi image biar smooth */}
+        <div className="relative w-full h-full">
+          <Image
+            key={images[currentImageIndex]} // paksa re-render ketika index berubah
+            src={images[currentImageIndex]}
+            alt={item.judul}
+            fill
+            sizes="(max-width: 768px) 100vw, 33vw"
+            priority={currentImageIndex === 0}
+            className="object-cover transition-opacity duration-200 ease-out"
+          />
+        </div>
+
         <div className="absolute inset-0 bg-gradient-to-t from-[#151515] via-transparent to-transparent opacity-60" />
 
         {/* Slider controls */}
         {images.length > 1 && (
           <>
+            {/* ALWAYS visible on mobile/tablet, hover fade only on lg+ */}
             <button
               onClick={prevImage}
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/50 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-all z-20"
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/60 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center z-20 transition-all lg:opacity-0 lg:group-hover:opacity-100"
             >
               <Icon icon="solar:alt-arrow-left-linear" />
             </button>
             <button
               onClick={nextImage}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/50 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-all z-20"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/60 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center z-20 transition-all lg:opacity-0 lg:group-hover:opacity-100"
             >
               <Icon icon="solar:alt-arrow-right-linear" />
             </button>
+
+            {/* Indicator bullets */}
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1 z-20">
               {images.map((_, idx) => (
                 <div
