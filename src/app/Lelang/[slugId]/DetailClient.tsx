@@ -5,7 +5,6 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 
-import MobileNav from "./[agentId]/components/MobileNavLelang";
 import ImageGallery from "./[agentId]/components/ImageGalleryLelang";
 import DetailInfo from "./[agentId]/components/DetailInfoLelang";
 import BookingSidebar from "./[agentId]/components/AgentSidebarLelang";
@@ -234,7 +233,6 @@ export default function DetailClient({
 
   return (
     <div className="text-white font-sans bg-[#0F0F0F]">
-      <MobileNav />
 
       <div className="lg:hidden h-[60px]" />
       <div className="hidden lg:block h-24 w-full" />

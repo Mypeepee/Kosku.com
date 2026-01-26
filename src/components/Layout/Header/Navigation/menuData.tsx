@@ -30,7 +30,7 @@ export const headerData: HeaderItem[] = [
   // ... (Menu Agent, Tentang Kami, dll tetap sama)
   {
     label: "Agent Kami",
-    href: "/agents",
+    href: "/agent",
   },
   {
     label: "Tentang Kami",

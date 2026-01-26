@@ -179,13 +179,25 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
   }
 
   return (
-    <div className="bg-[#151515] border border-white/5 rounded-3xl overflow-hidden group hover:border-primary/50 transition-all duration-300 relative flex flex-col h-full hover:shadow-[0_10px_40px_-10px_rgba(74,222,128,0.15)] mx-1.5">
+    <div
+      className="bg-[#050608] border border-white/10 rounded-3xl overflow-hidden group
+                 relative flex flex-col h-full mx-1.5
+                 shadow-[0_18px_60px_rgba(0,0,0,0.9)]
+                 before:content-[''] before:absolute before:inset-px before:rounded-[22px]
+                 before:border before:border-white/5 before:pointer-events-none
+                 hover:border-emerald-400/60 hover:shadow-[0_22px_70px_rgba(34,197,94,0.3)]
+                 transition-all duration-300"
+    >
       {/* IMAGE SECTION */}
-      <div className="relative h-60 md:h-64 w-full overflow-hidden">
-        {/* wrapper untuk transisi image biar smooth */}
+      <div
+        className="relative h-60 md:h-64 w-full overflow-hidden
+                   after:content-[''] after:absolute after:inset-x-6 after:bottom-0
+                   after:h-px after:bg-gradient-to-r from-transparent via-emerald-400/40 to-transparent
+                   after:opacity-70"
+      >
         <div className="relative w-full h-full">
           <Image
-            key={images[currentImageIndex]} // paksa re-render ketika index berubah
+            key={images[currentImageIndex]}
             src={images[currentImageIndex]}
             alt={item.judul}
             fill
@@ -195,21 +207,20 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
           />
         </div>
 
-        <div className="absolute inset-0 bg-gradient-to-t from-[#151515] via-transparent to-transparent opacity-60" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-70" />
 
         {/* Slider controls */}
         {images.length > 1 && (
           <>
-            {/* ALWAYS visible on mobile/tablet, hover fade only on lg+ */}
             <button
               onClick={prevImage}
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/60 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center z-20 transition-all lg:opacity-0 lg:group-hover:opacity-100"
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/70 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center z-20 transition-all lg:opacity-0 lg:group-hover:opacity-100"
             >
               <Icon icon="solar:alt-arrow-left-linear" />
             </button>
             <button
               onClick={nextImage}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/60 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center z-20 transition-all lg:opacity-0 lg:group-hover:opacity-100"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/70 hover:bg-primary hover:text-black text-white rounded-full flex items-center justify-center z-20 transition-all lg:opacity-0 lg:group-hover:opacity-100"
             >
               <Icon icon="solar:alt-arrow-right-linear" />
             </button>
@@ -230,7 +241,7 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 
         {/* Badge kiri: kategori */}
         <div className="absolute top-4 left-4 z-10">
-          <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-black/70 text-emerald-300 text-[11px] font-semibold border border-emerald-400/40 backdrop-blur">
+          <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-black/80 text-emerald-300 text-[11px] font-semibold border border-emerald-400/40 backdrop-blur-sm">
             <Icon
               icon={
                 item.kategori.toUpperCase() === "GUDANG"
@@ -248,7 +259,12 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
       </div>
 
       {/* CONTENT SECTION */}
-      <div className="p-5 flex flex-col flex-grow">
+      <div
+        className="p-5 flex flex-col flex-grow 
+                   bg-gradient-to-b from-slate-900/80 via-slate-950/90 to-black
+                   border-t border-slate-800
+                   backdrop-blur-sm"
+      >
         {/* Harga */}
         <div className="mb-2">
           <div className="flex items-baseline gap-1">
@@ -281,7 +297,12 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
         </div>
 
         {/* Box Lelang */}
-        <div className="bg-white/5 rounded-xl p-3 mb-5 border border-white/5">
+        <div
+          className="bg-gradient-to-r from-slate-900/90 via-slate-900/80 to-slate-950/90
+                     rounded-2xl p-3 mb-5
+                     border border-slate-700
+                     shadow-[0_12px_35px_rgba(0,0,0,0.8)]"
+        >
           <div className="flex justify-between items-center px-1">
             <div className="flex items-center gap-2">
               <Icon icon="solar:ruler-angular-bold" className="text-gray-400" />
@@ -303,7 +324,8 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
                 className="text-red-400"
               />
               <div className="flex flex-col items-start">
-                <span className="text-[10px] text-gray-500 uppercase">
+                <span className="flex items-center gap-1 text-[10px] text-gray-500 uppercase">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   Lelang
                 </span>
                 <span className="text-white text-xs font-bold">
@@ -315,7 +337,12 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
         </div>
 
         {/* Agent + CTA Detail */}
-        <div className="mt-auto pt-4 border-t border-dashed border-white/10 flex items-center justify-between">
+        <div
+          className="mt-auto pt-4 flex items-center justify-between
+                     border-t border-slate-800
+                     bg-gradient-to-r from-transparent via-slate-900/70 to-transparent
+                     -mx-5 px-5 pb-3 rounded-b-3xl"
+        >
           <div className="flex items-center gap-3 group/agent cursor-pointer">
             <div className="relative w-9 h-9 rounded-full p-[1px] bg-gradient-to-tr from-primary to-transparent">
               <div className="w-full h-full rounded-full overflow-hidden border-2 border-[#151515] relative">
@@ -337,7 +364,14 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
             </div>
           </div>
 
-          <span className="bg-white/5 hover:bg-primary/90 hover:text-black border border-white/10 hover:border-primary text-white text-xs font-bold px-4 py-2 rounded-full flex items-center gap-2 transition-all active:scale-95">
+          <span
+            className="bg-emerald-400/5 hover:bg-emerald-400
+                       text-emerald-200 hover:text-black
+                       border border-emerald-400/60
+                       shadow-[0_0_18px_rgba(34,197,94,0.6)]
+                       text-xs font-bold px-4 py-2 rounded-full
+                       flex items-center gap-2 transition-all active:scale-95"
+          >
             Detail
             <Icon
               icon="solar:arrow-right-up-bold-duotone"
