@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "predeploy": "npm run build",
-    "deploy": "touch out/.nojekyll && gh-pages -d out --dotfiles"
+    "deploy": "touch out/.nojekyll && gh-pages -d out --dotfiles",
+    "migrate:users": "node scripts/migrate-users.js",
+    "migrate:agents": "node scripts/migrate-agents.js"
   },
   "dependencies": {
     "@iconify/icons-ion": "^1.2.10",
@@ -26,6 +28,7 @@
     "next": "14.2.4",
     "next-auth": "^4.24.7",
     "next-themes": "^0.3.0",
+    "pg": "^8.17.2",
     "react": "^18",
     "react-datepicker": "^9.1.0",
     "react-dom": "^18",

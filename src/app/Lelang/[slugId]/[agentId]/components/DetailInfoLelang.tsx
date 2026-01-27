@@ -44,7 +44,7 @@ interface OwnerInfo {
 }
 
 interface PropertyData {
-  id_property: string;
+  id_property: string; // <- biarkan sebagai string hasil serialize BigInt
   kode_properti: string;
   judul: string;
   title: string;
@@ -161,7 +161,7 @@ const formatTanggalLelang = (val?: string | null) => {
   });
 };
 
-// Template soft selling ala contoh kamu
+// Template soft selling
 const buildShareMessage = (data: PropertyData) => {
   const judul = data?.judul || "Listing Properti";
   const harga = formatRupiah(data?.harga);
@@ -184,9 +184,7 @@ const buildShareMessage = (data: PropertyData) => {
     `🏡 ${judul}\n` +
     (lokasiSingkat ? `📍 ${lokasiSingkat}\n` : "") +
     `📌 Spesifikasi\n` +
-    (data?.alamat_lengkap
-      ? `📍 ${data.alamat_lengkap}\n`
-      : "") +
+    (data?.alamat_lengkap ? `📍 ${data.alamat_lengkap}\n` : "") +
     `📐 LT ${luasTanah}\n` +
     `📃 Tipe Hak: ${legal}\n` +
     `💰 Harga: ${harga}\n` +
@@ -227,7 +225,9 @@ export default function DetailInfo({
       }
     } else if (navigator.clipboard) {
       try {
-        await navigator.clipboard.writeText(`${text}\n\n🔗 Info lengkap: ${url}`);
+        await navigator.clipboard.writeText(
+          `${text}\n\n🔗 Info lengkap: ${url}`
+        );
       } catch {
         // gagal copy, abaikan
       }
@@ -311,7 +311,7 @@ export default function DetailInfo({
                 <Icon icon="solar:eye-bold" /> {data?.dilihat ?? 0}
               </span>
               <span>•</span>
-              <span>ID: {data?.kode_properti || "-"}</span>
+              <span>ID: {data?.id_property || "-"}</span>
               <span>•</span>
               <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded text-[10px] border border-emerald-500/20 font-medium">
                 {data?.status_tayang || "TERSEDIA"}
@@ -328,7 +328,7 @@ export default function DetailInfo({
         </div>
       </div>
 
-      {/* 2. OVERVIEW LELANG */}
+      {/* 2. RINGKASAN LELANG */}
       <div>
         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
           <Icon
@@ -598,9 +598,8 @@ export default function DetailInfo({
         )}
       </div>
 
-      {/* 7. EDUKASI LELANG - MODERN UI */}
+      {/* 7. EDUKASI LELANG */}
       <div className="bg-gradient-to-br from-slate-900 via-slate-800/90 to-slate-900 border border-emerald-500/20 rounded-2xl p-6 md:p-8 shadow-2xl">
-        {/* Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 mb-4 shadow-lg shadow-emerald-500/30">
             <Icon
@@ -617,9 +616,7 @@ export default function DetailInfo({
           </p>
         </div>
 
-        {/* Benefit Cards */}
         <div className="grid md:grid-cols-3 gap-4 mb-8">
-          {/* Card 1 */}
           <div className="bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 rounded-xl p-5 hover:border-emerald-400/50 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group">
             <div className="flex items-start gap-3 mb-3">
               <div className="w-12 h-12 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
@@ -640,7 +637,6 @@ export default function DetailInfo({
             </div>
           </div>
 
-          {/* Card 2 */}
           <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/20 rounded-xl p-5 hover:border-blue-400/50 hover:shadow-lg hover:shadow-blue-500/10 transition-all group">
             <div className="flex items-start gap-3 mb-3">
               <div className="w-12 h-12 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
@@ -661,7 +657,6 @@ export default function DetailInfo({
             </div>
           </div>
 
-          {/* Card 3 */}
           <div className="bg-gradient-to-br from-purple-500/10 to-transparent border border-purple-500/20 rounded-xl p-5 hover:border-purple-400/50 hover:shadow-lg hover:shadow-purple-500/10 transition-all group">
             <div className="flex items-start gap-3 mb-3">
               <div className="w-12 h-12 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
@@ -683,7 +678,6 @@ export default function DetailInfo({
           </div>
         </div>
 
-        {/* CTA Section - Guarantee */}
         <div className="bg-gradient-to-r from-emerald-500/10 via-blue-500/10 to-purple-500/10 border border-white/10 rounded-xl p-6">
           <div className="flex flex-col md:flex-row items-center gap-6">
             <div className="flex-shrink-0">
@@ -721,7 +715,6 @@ export default function DetailInfo({
           </div>
         </div>
 
-        {/* Disclaimer */}
         <div className="mt-6 flex items-start gap-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
           <Icon
             icon="solar:info-circle-bold"

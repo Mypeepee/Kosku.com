@@ -23,11 +23,16 @@ const nextConfig = {
         hostname: "avatars.githubusercontent.com",
         pathname: "**",
       },
-      // gambar lelang KPKNL
       {
         protocol: "https",
         hostname: "file.lelang.go.id",
         pathname: "/lelang/photo_barang/**",
+      },
+      // untuk foto profil dari Google Drive thumbnail
+      {
+        protocol: "https",
+        hostname: "drive.google.com",
+        pathname: "/thumbnail/**",
       },
     ],
   },

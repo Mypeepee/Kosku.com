@@ -7,195 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Pengguna {
-  id_pengguna      String           @id @default(dbgenerated("('AC'::text || lpad((nextval('pengguna_code_seq'::regclass))::text, 4, '0'::text))")) @db.VarChar(20)
-  nama_lengkap     String           @db.VarChar(100)
-  email            String?          @unique @db.VarChar(150)
-  nomor_telepon    String?          @unique @db.VarChar(20)
-  kata_sandi       String?          @db.VarChar(255)
-  google_id        String?          @unique @db.VarChar(100)
-  kota_asal        String?          @db.VarChar(50)
-  tanggal_lahir    DateTime?        @db.Date
-  foto_profil_url  String?
-  peran            peran_enum       @default(USER)
-  status_akun      status_akun_enum @default(AKTIF)
-  wa_terverifikasi Boolean          @default(false)
-  kode_referral    String?          @unique @db.VarChar(20)
-  login_terakhir   DateTime?        @db.Timestamp(6)
-  dibuat_pada      DateTime         @default(now()) @db.Timestamp(6)
-  diperbarui_pada  DateTime         @default(now()) @updatedAt @db.Timestamp(6)
-
-  agent          Agent?
-  transaksiKlien Transactions[] @relation("TransaksiKlien")
-
-  @@index([kode_referral], map: "idx_kode_referral")
-  @@index([email], map: "idx_pengguna_email")
-  @@map("pengguna")
-}
-
-model Agent {
-  id_agent           String             @id @db.VarChar(20)
-  id_pengguna        String             @unique(map: "agent_id_pengguna_unique") @db.VarChar(20)
-  nama_kantor        String             @db.VarChar(100)
-  kota_area          String             @db.VarChar(50)
-  jabatan            jabatan_agent_enum @default(AGENT)
-  id_upline          String?            @db.VarChar(20)
-  rating             Decimal            @default(0.00) @db.Decimal(3, 2)
-  jumlah_closing     Int                @default(0)
-  total_omset        Decimal            @default(0) @db.Decimal(18, 2)
-  nomor_whatsapp     String             @db.VarChar(20)
-  foto_ktp_url       String?
-  foto_npwp_url      String?
-  nama_bank          String?            @db.VarChar(50)
-  nomor_rekening     String?            @db.VarChar(50)
-  atas_nama_rekening String?            @db.VarChar(100)
-  link_instagram     String?            @db.VarChar(100)
-  link_tiktok        String?            @db.VarChar(100)
-  link_facebook      String?            @db.VarChar(100)
-  status_keanggotaan status_agent_enum  @default(PENDING)
-  tanggal_gabung     DateTime           @default(dbgenerated("CURRENT_DATE")) @db.Date
-  dibuat_pada        DateTime           @default(now()) @db.Timestamp(6)
-  diperbarui_pada    DateTime           @default(now()) @db.Timestamp(6)
-
-  pengguna       Pengguna               @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade)
-  upline         Agent?                 @relation("AgentToAgent", fields: [id_upline], references: [id_agent])
-  downlines      Agent[]                @relation("AgentToAgent")
-  listings       Listing[]
-  transaksiAgent Transactions[]
-  detailKomisi   TransactionCommissions[]
-
-  @@index([jabatan], map: "idx_agent_jabatan")
-  @@index([nama_kantor], map: "idx_agent_kantor")
-  @@map("agent")
-}
-
-model Listing {
-  id_property        BigInt                 @id @default(autoincrement()) @db.BigInt
-  id_agent           String                 @db.VarChar(20)
-
-  judul              String                 @db.VarChar(255)
-  slug               String                 @unique @db.VarChar(300)
-  deskripsi          String?
-  jenis_transaksi    jenis_transaksi_enum
-  kategori           kategori_properti_enum
-  vendor             String?                @db.VarChar(200)
-  status_tayang      status_properti_enum   @default(TERSEDIA)
-
-  harga              Decimal                @db.Decimal(20, 2)
-  harga_promo        Decimal?               @db.Decimal(20, 2)
-  tanggal_lelang     DateTime?              @db.Timestamp(6)
-  uang_jaminan       Decimal?               @db.Decimal(20, 2)
-  nilai_limit_lelang Decimal?               @db.Decimal(20, 2)
-  link               String?                @db.VarChar(500)
-  alamat_lengkap     String?                @db.VarChar(500)
-  provinsi           String?                @db.VarChar(355)
-  kota               String                 @db.VarChar(355)
-  kecamatan          String?                @db.VarChar(355)
-  kelurahan          String?                @db.VarChar(355)
-  latitude           Decimal?               @db.Decimal(10, 8)
-  longitude          Decimal?               @db.Decimal(11, 8)
-  luas_tanah         Decimal?               @db.Decimal(12, 2)
-  luas_bangunan      Decimal?               @db.Decimal(12, 2)
-  jumlah_lantai      Int                    @default(1)
-  kamar_tidur        Int?
-  kamar_mandi        Int?
-  daya_listrik       Int?
-  sumber_air         String?                @db.VarChar(50)
-  hadap_bangunan     String?                @db.VarChar(20)
-  kondisi_interior   String?                @db.VarChar(50)
-  legalitas          sertifikat_enum?
-  nomor_legalitas    String?                @db.VarChar(250)
-  gambar             String?
-  dilihat            Int                    @default(0)
-  wa_click_count     Int                    @default(0)
-  is_hot_deal        Boolean                @default(false)
-  tanggal_dibuat     DateTime               @default(now()) @db.Timestamp(6)
-  tanggal_diupdate   DateTime               @default(now()) @db.Timestamp(6)
-
-  agent     Agent          @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
-  transaksi Transactions[]
-  boosts    ListingBoost[]
-
-  @@index([kota], map: "idx_property_lokasi")
-  @@index([jenis_transaksi], map: "idx_property_jenis")
-  @@index([id_agent], map: "idx_property_agent")
-  @@index([slug], map: "idx_property_slug")
-  @@map("listing")
-}
-
-model Transactions {
-  id                BigInt    @id @default(autoincrement())
-  kode_transaksi    String?   @unique @db.VarChar(20)
-  id_listing        BigInt    @db.BigInt
-  id_agent          String    @db.VarChar(20)
-  id_klien          String?   @db.VarChar(20)
-  jenis_transaksi   jenis_transaksi_enum
-  tipe_komisi       String    @db.VarChar(50)
-  harga_deal        BigInt
-  harga_promo_deal  BigInt    @default(0)
-  harga_limit       Decimal?  @db.Decimal(20, 2)
-  harga_bidding     Decimal?  @db.Decimal(20, 2)
-  selisih           Decimal?  @db.Decimal(20, 2)
-  kenaikan_dari_limit Decimal? @db.Decimal(10, 6)
-  persentase_komisi Decimal?  @db.Decimal(10, 6)
-  basis_pendapatan  BigInt
-  biaya_baliknama   BigInt?
-  biaya_pengosongan BigInt?
-  royalty_fee       BigInt    @default(0)
-  cobroke_fee       BigInt    @default(0)
-  status_transaksi  String    @default("CLOSING") @db.VarChar(50)
-  tanggal_transaksi DateTime  @db.Date
-  rating            Int?
-  comment           String?   @db.VarChar(250)
-  catatan           String?
-  dibuat_pada       DateTime  @default(now()) @db.Timestamp(6)
-  diperbarui_pada   DateTime  @default(now()) @db.Timestamp(6)
-
-  listing Listing   @relation(fields: [id_listing], references: [id_property], onDelete: Restrict)
-  agent   Agent     @relation(fields: [id_agent], references: [id_agent], onDelete: Restrict)
-  klien   Pengguna? @relation("TransaksiKlien", fields: [id_klien], references: [id_pengguna], onDelete: SetNull)
-  detailKomisi TransactionCommissions[]
-
-  @@index([id_agent], map: "transactions_agent_idx")
-  @@index([id_listing], map: "transactions_listing_idx")
-  @@index([tanggal_transaksi], map: "transactions_date_idx")
-  @@map("transactions")
-}
-
-model TransactionCommissions {
-  id             BigInt   @id @default(autoincrement())
-  transaction_id BigInt
-  agent_id       String   @db.VarChar(20)
-  role           String   @db.VarChar(50)
-  pendapatan     BigInt
-
-  transaksi Transactions @relation(fields: [transaction_id], references: [id], onDelete: Cascade)
-  agent     Agent        @relation(fields: [agent_id], references: [id_agent], onDelete: Cascade)
-
-  @@unique([transaction_id, agent_id, role], map: "transaction_comm_unique_per_role")
-  @@index([agent_id], map: "transaction_comm_agent_idx")
-  @@index([transaction_id], map: "transaction_comm_trans_idx")
-  @@map("transaction_commissions")
-}
-
-model ListingBoost {
-  id_boost        BigInt   @id @default(autoincrement())
-  id_listing      BigInt   @db.BigInt
-  jenis_boost     String   @db.VarChar(30)
-  sumber          String   @db.VarChar(30)
-  tanggal_mulai   DateTime @db.Timestamp(6)
-  tanggal_selesai DateTime @db.Timestamp(6)
-  status          String   @default("SCHEDULED") @db.VarChar(20)
-  created_at      DateTime @default(now()) @db.Timestamp(6)
-
-  listing Listing @relation(fields: [id_listing], references: [id_property], onDelete: Cascade)
-
-  @@index([id_listing], map: "listing_boost_listing_idx")
-  @@index([status], map: "listing_boost_status_idx")
-  @@index([tanggal_mulai, tanggal_selesai], map: "listing_boost_time_idx")
-  @@map("listing_boost")
-}
-
+//
+// ENUMS
+//
 enum peran_enum {
   USER
   AGENT
@@ -255,4 +69,214 @@ enum status_properti_enum {
   TERSEDIA
   TERJUAL
   TARIK_LISTING
+}
+
+//
+// MODELS
+//
+
+model Pengguna {
+  id_pengguna      String            @id @default(dbgenerated("('AC' || nextval('pengguna_code_seq'::regclass))")) @db.VarChar(20)
+  nama_lengkap     String            @db.VarChar(100)
+  email            String?           @unique(map: "pengguna_email_key") @db.VarChar(150)
+  nomor_telepon    String?           @unique(map: "pengguna_nomor_telepon_key") @db.VarChar(20)
+  kata_sandi       String?           @db.VarChar(255)
+  google_id        String?           @unique(map: "pengguna_google_id_key") @db.VarChar(100)
+  kota_asal        String?           @db.VarChar(50)
+  tanggal_lahir    DateTime?         @db.Date
+  peran            peran_enum        @default(USER)
+  status_akun      status_akun_enum  @default(AKTIF)
+  wa_terverifikasi Boolean           @default(false)
+  kode_referral    String?           @db.VarChar(20)
+  login_terakhir   DateTime?         @db.Timestamp(6)
+  dibuat_pada      DateTime?         @default(now()) @db.Timestamp(6)
+  diperbarui_pada  DateTime?         @default(now()) @db.Timestamp(6)
+
+  agent            Agent?
+  transaksiKlien   Transaksi[]       @relation("TransaksiKlien")
+
+  @@index([kode_referral], map: "idx_kode_referral")
+  @@index([email], map: "idx_pengguna_email")
+  @@map("pengguna")
+}
+
+model Agent {
+  id_agent           String              @id @default(dbgenerated("('AG' || nextval('agent_code_seq'::regclass))")) @db.VarChar(20)
+  id_pengguna        String              @unique(map: "agent_id_pengguna_unique") @db.VarChar(20)
+
+  nama_kantor        String              @db.VarChar(100)
+  kota_area          String              @db.VarChar(50)
+  jabatan            jabatan_agent_enum  @default(AGENT)
+
+  id_upline          String?             @db.VarChar(20)
+
+  rating             Decimal?            @default(0.00) @db.Decimal(3, 2)
+  jumlah_closing     Int                 @default(0)
+  total_omset        Decimal?            @default(0) @db.Decimal(18, 2)
+  nomor_whatsapp     String              @db.VarChar(20)
+  foto_ktp_url       String?
+  foto_npwp_url      String?
+  foto_profil_url    String?
+  nama_bank          String?             @db.VarChar(50)
+  nomor_rekening     String?             @db.VarChar(50)
+  atas_nama_rekening String?             @db.VarChar(100)
+  link_instagram     String?             @db.VarChar(100)
+  link_tiktok        String?             @db.VarChar(100)
+  link_facebook      String?             @db.VarChar(100)
+
+  status_keanggotaan status_agent_enum   @default(PENDING)
+  tanggal_gabung     DateTime?           @default(dbgenerated("CURRENT_DATE")) @db.Date
+  dibuat_pada        DateTime?           @default(now()) @db.Timestamp(6)
+  diperbarui_pada    DateTime?           @default(now()) @db.Timestamp(6)
+
+  pengguna           Pengguna            @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade)
+  upline             Agent?              @relation("AgentUpline", fields: [id_upline], references: [id_agent])
+  downlines          Agent[]             @relation("AgentUpline")
+  listings           Listing[]
+  transaksiAgent     Transaksi[]         @relation("TransaksiAgent")
+  detailTransaksi    DetailTransaksi[]
+
+  @@index([jabatan], map: "idx_agent_jabatan")
+  @@index([nama_kantor], map: "idx_agent_kantor")
+  @@map("agent")
+}
+
+model Listing {
+  id_property        BigInt                 @id @default(autoincrement())
+  id_agent           String                 @db.VarChar(20)
+
+  judul              String                 @db.VarChar(255)
+  slug               String                 @unique @db.VarChar(300)
+  deskripsi          String?
+  jenis_transaksi    jenis_transaksi_enum
+  kategori           kategori_properti_enum
+
+  vendor             String?                @db.VarChar(200)
+
+  status_tayang      status_properti_enum   @default(TERSEDIA)
+
+  harga              Decimal                @db.Decimal(20, 2)
+  harga_promo        Decimal?               @db.Decimal(20, 2)
+  tanggal_lelang     DateTime?              @db.Timestamp(6)
+  uang_jaminan       Decimal?               @db.Decimal(20, 2)
+  nilai_limit_lelang Decimal?               @db.Decimal(20, 2)
+  link               String?                @db.VarChar(500)
+  alamat_lengkap     String?                @db.VarChar(500)
+  provinsi           String?                @db.VarChar(355)
+  kota               String                 @db.VarChar(355)
+  kecamatan          String?                @db.VarChar(355)
+  kelurahan          String?                @db.VarChar(355)
+  latitude           Decimal?               @db.Decimal(10, 8)
+  longitude          Decimal?               @db.Decimal(11, 8)
+  luas_tanah         Decimal?               @db.Decimal(12, 2)
+  luas_bangunan      Decimal?               @db.Decimal(12, 2)
+  jumlah_lantai      Int                    @default(1)
+  kamar_tidur        Int?
+  kamar_mandi        Int?
+  daya_listrik       Int?
+  sumber_air         String?                @db.VarChar(50)
+  hadap_bangunan     String?                @db.VarChar(20)
+  kondisi_interior   String?                @db.VarChar(50)
+
+  legalitas          sertifikat_enum?
+  nomor_legalitas    String?                @db.VarChar(250)
+
+  gambar             String?
+  dilihat            Int                    @default(0)
+  wa_click_count     Int                    @default(0)
+  is_hot_deal        Boolean                @default(false)
+  tanggal_dibuat     DateTime?              @default(now()) @db.Timestamp(6)
+  tanggal_diupdate   DateTime?              @default(now()) @db.Timestamp(6)
+
+  agent              Agent                  @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
+  transaksi          Transaksi[]
+  listingBoosts      ListingBoost[]
+
+  @@index([kota], map: "idx_property_lokasi")
+  @@index([jenis_transaksi], map: "idx_property_jenis")
+  @@index([id_agent], map: "idx_property_agent")
+  @@index([slug], map: "idx_property_slug")
+  @@map("listing")
+}
+
+model Transaksi {
+  id                  BigInt               @id @default(autoincrement())
+  kode_transaksi      String?              @unique @db.VarChar(20)
+
+  id_listing          BigInt
+  id_agent            String               @db.VarChar(20)
+  id_klien            String?              @db.VarChar(20)
+
+  jenis_transaksi     jenis_transaksi_enum
+  tipe_komisi         String               @db.VarChar(50)
+
+  harga_deal          BigInt
+  harga_promo_deal    BigInt?              @default(0)
+
+  harga_limit         Decimal?             @db.Decimal(20, 2)
+  harga_bidding       Decimal?             @db.Decimal(20, 2)
+  selisih             BigInt?
+  kenaikan_dari_limit Decimal?             @db.Decimal(10, 6)
+
+  persentase_komisi   Decimal?             @db.Decimal(10, 6)
+  basis_pendapatan    BigInt
+
+  biaya_baliknama     BigInt?
+  biaya_pengosongan   BigInt?
+  royalty_fee         BigInt               @default(0)
+  cobroke_fee         BigInt               @default(0)
+
+  status_transaksi    String               @default("CLOSING") @db.VarChar(50)
+  tanggal_transaksi   DateTime             @db.Date
+
+  rating              Int?
+  comment             String?              @db.VarChar(250)
+  catatan             String?
+
+  dibuat_pada         DateTime             @default(now()) @db.Timestamp(6)
+  diperbarui_pada     DateTime             @default(now()) @db.Timestamp(6)
+
+  agent               Agent                @relation("TransaksiAgent", fields: [id_agent], references: [id_agent], onDelete: Restrict, map: "transaksi_agent_fk")
+  klien               Pengguna?            @relation("TransaksiKlien", fields: [id_klien], references: [id_pengguna], onDelete: SetNull, map: "transaksi_klien_fk")
+  listing             Listing              @relation(fields: [id_listing], references: [id_property], onDelete: Restrict, map: "transaksi_listing_fk")
+  detail              DetailTransaksi[]
+
+  @@index([id_agent], map: "transaksi_agent_idx")
+  @@index([id_listing], map: "transaksi_listing_idx")
+  @@index([tanggal_transaksi], map: "transaksi_date_idx")
+  @@map("transaksi")
+}
+
+model DetailTransaksi {
+  id           BigInt    @id @default(autoincrement())
+  id_transaksi BigInt
+  id_agent     String    @db.VarChar(20)
+  role         String    @db.VarChar(50)
+  pendapatan   BigInt
+
+  transaksi    Transaksi @relation(fields: [id_transaksi], references: [id], onDelete: Cascade, map: "detail_transaksi_trans_fk")
+  agent        Agent     @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "detail_transaksi_agent_fk")
+
+  @@unique([id_transaksi, id_agent, role], map: "detail_transaksi_unique_per_role")
+  @@index([id_agent], map: "detail_transaksi_agent_idx")
+  @@index([id_transaksi], map: "detail_transaksi_trans_idx")
+  @@map("detail_transaksi")
+}
+
+model ListingBoost {
+  id_boost        BigInt   @id @default(autoincrement())
+  id_listing      BigInt
+  jenis_boost     String   @db.VarChar(30)
+  sumber          String   @db.VarChar(30)
+  tanggal_mulai   DateTime @db.Timestamp(6)
+  tanggal_selesai DateTime @db.Timestamp(6)
+  status          String   @default("SCHEDULED") @db.VarChar(20)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  listing         Listing  @relation(fields: [id_listing], references: [id_property], onDelete: Cascade, map: "listing_boost_listing_fk")
+
+  @@index([id_listing], map: "listing_boost_listing_idx")
+  @@index([status], map: "listing_boost_status_idx")
+  @@index([tanggal_mulai, tanggal_selesai], map: "listing_boost_time_idx")
+  @@map("listing_boost")
 }

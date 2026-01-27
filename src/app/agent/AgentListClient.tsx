@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 
 interface AgentUser {
   nama_lengkap: string | null;
-  foto_profil_url: string | null;
   email: string | null;
   nomor_telepon: string | null;
   kota_asal: string | null;
@@ -19,7 +18,7 @@ interface AgentItem {
   nama_kantor: string;
   kota_area: string;
   jabatan: string;
-  rating: string | number;
+  rating: string | number | null;
   nomor_whatsapp: string;
   status_keanggotaan: string;
   tanggal_gabung: string;
@@ -28,6 +27,10 @@ interface AgentItem {
   jualListings: number;
   sewaListings: number;
 
+  namaLengkap: string;
+  initial: string;
+  photoUrl: string | null;
+
   pengguna: AgentUser | null;
 }
 
@@ -35,24 +38,58 @@ interface AgentListClientProps {
   agents: AgentItem[];
 }
 
+// helper: nama -> slug URL-friendly
+const toNamaSlug = (nama: string) =>
+  nama
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-") // spasi -> -
+    .replace(/[^a-z0-9-]/g, ""); // buang karakter aneh
+
+const AgentAvatar: React.FC<{ agent: AgentItem }> = ({ agent }) => {
+  const [imgError, setImgError] = useState(false);
+
+  if (!agent.photoUrl || imgError) {
+    return (
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-300 font-semibold text-lg">
+        {agent.initial}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-sky-500 p-[2px] shadow-[0_0_25px_rgba(16,185,129,0.5)] group-hover:shadow-[0_0_35px_rgba(16,185,129,0.9)] transition-shadow">
+      <div className="w-full h-full rounded-2xl overflow-hidden bg-black">
+        <Image
+          src={agent.photoUrl}
+          alt={agent.namaLengkap}
+          width={56}
+          height={56}
+          className="w-full h-full object-cover"
+          onError={() => setImgError(true)}
+        />
+      </div>
+    </div>
+  );
+};
+
 const AgentCard: React.FC<{ agent: AgentItem }> = ({ agent }) => {
-  const name = agent.pengguna?.nama_lengkap || "Agent Premier";
-  const avatar =
-    agent.pengguna?.foto_profil_url || "/images/user/user-01.png";
+  const name = agent.namaLengkap || "Agent Premier";
 
   const rating =
     typeof agent.rating === "string"
-      ? parseFloat(agent.rating)
+      ? parseFloat(agent.rating) || 0
       : agent.rating || 0;
 
   const kota =
     agent.kota_area || agent.pengguna?.kota_asal || "Area strategis";
 
-  const profileUrl = `/Agent/${agent.id_agent}`;
+  // pakai nama -> slug, dan path lowercase /agent/...
+  const profileUrl = `/agent/${toNamaSlug(name)}`;
 
   return (
     <div className="group relative bg-[#050816] border border-emerald-400/60 rounded-3xl overflow-hidden shadow-[0_18px_60px_-20px_rgba(16,185,129,0.6)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_22px_80px_-24px_rgba(16,185,129,0.9)]">
-      {/* Glow aktif dari awal */}
+      {/* Glow aktif */}
       <div className="pointer-events-none absolute inset-0 opacity-100">
         <div className="absolute -inset-px bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.25),_transparent_55%),radial-gradient(circle_at_bottom,_rgba(59,130,246,0.2),_transparent_55%)]" />
       </div>
@@ -67,17 +104,7 @@ const AgentCard: React.FC<{ agent: AgentItem }> = ({ agent }) => {
         {/* Top: avatar + basic info */}
         <div className="flex items-center gap-4">
           <div className="relative">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-sky-500 p-[2px] shadow-[0_0_25px_rgba(16,185,129,0.5)] group-hover:shadow-[0_0_35px_rgba(16,185,129,0.9)] transition-shadow">
-              <div className="w-full h-full rounded-2xl overflow-hidden bg-black">
-                <Image
-                  src={avatar}
-                  alt={name}
-                  width={56}
-                  height={56}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            </div>
+            <AgentAvatar agent={agent} />
             <span className="absolute -bottom-1 -right-1 inline-flex items-center gap-1 px-2 py-[2px] rounded-full bg-black/80 border border-emerald-400/60">
               <Icon
                 icon="solar:star-bold-duotone"
@@ -116,18 +143,10 @@ const AgentCard: React.FC<{ agent: AgentItem }> = ({ agent }) => {
         </div>
 
         {/* Middle: public stats (listing) */}
-        <div className="grid grid-cols-3 gap-2 mt-2 text-center text-[11px]">
+        <div className="grid grid-cols-2 gap-2 mt-2 text-center text-[11px]">
           <div className="bg-white/5 rounded-xl py-2 px-1 border border-white/5">
             <p className="text-[9px] text-gray-400 uppercase tracking-wide mb-1">
-              Listing Aktif
-            </p>
-            <p className="text-xs font-bold text-white">
-              {agent.totalListings}
-            </p>
-          </div>
-          <div className="bg-white/5 rounded-xl py-2 px-1 border border-white/5">
-            <p className="text-[9px] text-gray-400 uppercase tracking-wide mb-1">
-              Jual
+              Listing Jual
             </p>
             <p className="text-xs font-bold text-emerald-300">
               {agent.jualListings}
@@ -135,7 +154,7 @@ const AgentCard: React.FC<{ agent: AgentItem }> = ({ agent }) => {
           </div>
           <div className="bg-white/5 rounded-xl py-2 px-1 border border-white/5">
             <p className="text-[9px] text-gray-400 uppercase tracking-wide mb-1">
-              Sewa
+              Listing Sewa
             </p>
             <p className="text-xs font-bold text-sky-300">
               {agent.sewaListings}
@@ -162,10 +181,7 @@ const AgentCard: React.FC<{ agent: AgentItem }> = ({ agent }) => {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold shadow-[0_10px_30px_rgba(16,185,129,0.6)] transition-transform active:scale-95"
           >
-            <Icon
-              icon="logos:whatsapp-icon"
-              className="text-base"
-            />
+            <Icon icon="logos:whatsapp-icon" className="text-base" />
             <span>Chat WhatsApp</span>
           </a>
         </div>
@@ -175,15 +191,59 @@ const AgentCard: React.FC<{ agent: AgentItem }> = ({ agent }) => {
 };
 
 const AgentListClient: React.FC<AgentListClientProps> = ({ agents }) => {
+  const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 15;
 
-  const totalPages = Math.max(1, Math.ceil((agents?.length || 0) / pageSize));
+  useEffect(() => {
+    const input = document.getElementById(
+      "agent-search-input"
+    ) as HTMLInputElement | null;
+    if (!input) return;
+
+    const handler = (e: Event) => {
+      const target = e.target as HTMLInputElement;
+      setSearchTerm(target.value);
+      setCurrentPage(1);
+    };
+
+    input.addEventListener("input", handler);
+    return () => {
+      input.removeEventListener("input", handler);
+    };
+  }, []);
+
+  const normalized = (val: string | null | undefined) =>
+    (val || "").toLowerCase().trim();
+
+  const filteredAgents = useMemo(() => {
+    const term = normalized(searchTerm);
+    if (!term) return agents;
+
+    return agents.filter((agent) => {
+      const name = normalized(agent.namaLengkap);
+      const kotaArea = normalized(agent.kota_area);
+      const kotaUser = normalized(agent.pengguna?.kota_asal);
+      const kantor = normalized(agent.nama_kantor);
+
+      return (
+        name.includes(term) ||
+        kotaArea.includes(term) ||
+        kotaUser.includes(term) ||
+        kantor.includes(term)
+      );
+    });
+  }, [agents, searchTerm]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil((filteredAgents?.length || 0) / pageSize)
+  );
 
   const pagedAgents = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    return agents.slice(start, start + pageSize);
-  }, [agents, currentPage]);
+    return filteredAgents.slice(start, start + pageSize);
+  }, [filteredAgents, currentPage]);
 
   if (!agents || agents.length === 0) {
     return (
@@ -205,16 +265,36 @@ const AgentListClient: React.FC<AgentListClientProps> = ({ agents }) => {
     );
   }
 
+  if (filteredAgents.length === 0) {
+    return (
+      <div className="mt-10 rounded-3xl border border-dashed border-emerald-500/40 bg-emerald-500/5 px-6 py-10 flex flex-col items-center text-center gap-3">
+        <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-center mb-1">
+          <Icon
+            icon="solar:magnifer-bold-duotone"
+            className="text-2xl text-emerald-300"
+          />
+        </div>
+        <h2 className="text-base md:text-lg font-bold text-white">
+          Agent tidak ditemukan
+        </h2>
+        <p className="text-xs md:text-sm text-emerald-100 max-w-md">
+          Tidak ada agent yang cocok dengan kata kunci{" "}
+          <span className="font-semibold text-white">“{searchTerm}”</span>.
+          Coba cek kembali ejaan nama, atau gunakan kata kunci lain seperti kota
+          atau nama kantor.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <>
-      {/* GRID: 3 kolom di desktop */}
       <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {pagedAgents.map((agent) => (
           <AgentCard key={agent.id_agent} agent={agent} />
         ))}
       </div>
 
-      {/* PAGINATION */}
       {totalPages > 1 && (
         <div className="mt-10 flex justify-center">
           <nav className="flex items-center gap-2 bg-[#050816] p-2 rounded-full border border-white/10 shadow-2xl">

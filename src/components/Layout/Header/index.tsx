@@ -15,9 +15,12 @@ import SignUp from "@/components/Auth/SignUp";
 import { headerData } from "./Navigation/menuData";
 
 // =============================================================================
-// MOBILE NAV (dari kode kamu, sedikit dirapikan)
+// MOBILE NAV
 // =============================================================================
-const MobileNav: React.FC = () => {
+const MobileNav: React.FC<{
+  onOpenSignIn: () => void;
+  onOpenSignUp: () => void;
+}> = ({ onOpenSignIn, onOpenSignUp }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState<number | null>(null);
@@ -38,10 +41,9 @@ const MobileNav: React.FC = () => {
     setOpenSubmenu(openSubmenu === index ? null : index);
   };
 
-  // TOMBOL BACK: hanya muncul di halaman non-root
   const noBackPaths = ["/"];
   const showBackButton = !noBackPaths.includes(pathname || "/");
-  const backHref = "/Jual"; // ubah kalau mau balik ke "/" atau lainnya
+  const backHref = "/Jual";
 
   return (
     <>
@@ -53,7 +55,7 @@ const MobileNav: React.FC = () => {
             : "bg-gradient-to-b from-black/80 to-transparent"
         }`}
       >
-        {/* 1. BACK BUTTON (opsional) */}
+        {/* 1. BACK BUTTON */}
         {showBackButton ? (
           <Link
             href={backHref}
@@ -152,7 +154,6 @@ const MobileNav: React.FC = () => {
                   <div key={idx}>
                     {menuItem.submenu && menuItem.submenu.length > 0 ? (
                       <div>
-                        {/* Accordion Button */}
                         <button
                           onClick={() => toggleSubmenu(idx)}
                           className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all font-medium border-b border-white/5 ${
@@ -172,7 +173,6 @@ const MobileNav: React.FC = () => {
                           />
                         </button>
 
-                        {/* Submenu Content */}
                         <AnimatePresence>
                           {openSubmenu === idx && (
                             <motion.div
@@ -220,7 +220,13 @@ const MobileNav: React.FC = () => {
 
               {/* FOOTER DRAWER */}
               <div className="p-5 border-t border-white/10 space-y-3 bg-[#0F0F0F]">
-                <button className="w-full py-3 rounded-xl border border-white/20 text-white font-bold hover:bg-white/10 transition-colors text-sm">
+                <button
+                  className="w-full py-3 rounded-xl border border-white/20 text-white font-bold hover:bg-white/10 transition-colors text-sm"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onOpenSignIn();
+                  }}
+                >
                   Masuk
                 </button>
                 <button className="w-full py-3 rounded-xl bg-primary text-black font-bold hover:bg-green-400 transition-colors shadow-lg shadow-green-500/10 text-sm">
@@ -367,7 +373,10 @@ const Header: React.FC = () => {
   return (
     <>
       {/* MOBILE HEADER */}
-      <MobileNav />
+      <MobileNav
+        onOpenSignIn={() => setIsSignInOpen(true)}
+        onOpenSignUp={() => setIsSignUpOpen(true)}
+      />
 
       {/* DESKTOP HEADER */}
       <header
@@ -507,15 +516,18 @@ const Header: React.FC = () => {
               onClick={() => setIsSignInOpen(false)}
               className="absolute top-4 right-4 text-gray-400 hover:text-white"
             >
-              <Icon
-                icon="solar:close-circle-bold"
-                className="text-2xl"
-              />
+              <Icon icon="solar:close-circle-bold" className="text-2xl" />
             </button>
             <h3 className="text-2xl font-bold text-white mb-6 text-center">
               Selamat Datang Kembali
             </h3>
-            <Signin closeModal={() => setIsSignInOpen(false)} />
+            <Signin
+              closeModal={() => setIsSignInOpen(false)}
+              openSignupModal={() => {
+                setIsSignInOpen(false);
+                setIsSignUpOpen(true);
+              }}
+            />
           </div>
         </div>
       )}
@@ -531,15 +543,18 @@ const Header: React.FC = () => {
               onClick={() => setIsSignUpOpen(false)}
               className="absolute top-4 right-4 text-gray-400 hover:text-white"
             >
-              <Icon
-                icon="solar:close-circle-bold"
-                className="text-2xl"
-              />
+              <Icon icon="solar:close-circle-bold" className="text-2xl" />
             </button>
             <h3 className="text-2xl font-bold text-white mb-6 text-center">
               Buat Akun Baru
             </h3>
-            <SignUp />
+            <SignUp
+              closeModal={() => setIsSignUpOpen(false)}
+              openSigninModal={() => {
+                setIsSignUpOpen(false);
+                setIsSignInOpen(true);
+              }}
+            />
           </div>
         </div>
       )}

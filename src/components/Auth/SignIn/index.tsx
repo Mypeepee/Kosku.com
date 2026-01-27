@@ -1,8 +1,7 @@
 "use client";
 
 import { signIn } from "next-auth/react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useState } from "react";
 import toast from "react-hot-toast";
 import Loader from "@/components/Common/Loader";
@@ -10,9 +9,9 @@ import Image from "next/image";
 
 type Mode = "email" | "phone";
 
-// ✅ TAMBAHAN 1: Definisikan tipe props untuk fungsi close
 interface SigninProps {
   closeModal?: () => void;
+  openSignupModal?: () => void;
 }
 
 function EyeIcon({ open }: { open: boolean }) {
@@ -74,9 +73,9 @@ function normalizePhoneDigits(raw: string) {
   return digits;
 }
 
-// ✅ TAMBAHAN 2: Terima props closeModal disini
-const Signin = ({ closeModal }: SigninProps) => {
+const Signin = ({ closeModal, openSignupModal }: SigninProps) => {
   const router = useRouter();
+  const pathname = usePathname(); // path saat ini
 
   const [mode, setMode] = useState<Mode>("email");
   const [email, setEmail] = useState("");
@@ -86,15 +85,24 @@ const Signin = ({ closeModal }: SigninProps) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // --- REVISI: Handle Google Login menggunakan NextAuth ---
+  // URL tujuan setelah login: full URL kalau di browser, fallback ke pathname
+  const getReturnUrl = () => {
+    if (typeof window !== "undefined") {
+      return window.location.href;
+    }
+    return pathname || "/";
+  };
+
   const handleGoogle = async () => {
     setLoading(true);
-    // ✅ TAMBAHAN 3A: Tutup modal saat user klik Google (UX lebih mulus saat redirect)
+
+    const callbackUrl = getReturnUrl();
+
+    // Tutup modal dulu biar transisi halus
     if (closeModal) closeModal();
-    
+
     try {
-      // callbackUrl: "/" artinya setelah login sukses akan diarahkan ke Home
-      await signIn("google", { callbackUrl: "/" });
+      await signIn("google", { callbackUrl });
     } catch (error) {
       console.error(error);
       toast.error("Gagal koneksi ke Google");
@@ -110,10 +118,12 @@ const Signin = ({ closeModal }: SigninProps) => {
     setLoading(true);
 
     try {
+      const callbackUrl = getReturnUrl();
+
       const payload: any =
         mode === "email"
-          ? { email: email.trim(), password, redirect: false }
-          : { phone: `+62${phoneDigits}`, password, redirect: false };
+          ? { email: email.trim(), password, redirect: false, callbackUrl }
+          : { phone: `+62${phoneDigits}`, password, redirect: false, callbackUrl };
 
       if (mode === "email" && !payload.email) {
         throw new Error("Email wajib diisi.");
@@ -125,24 +135,39 @@ const Signin = ({ closeModal }: SigninProps) => {
         throw new Error("Kata sandi wajib diisi.");
       }
 
-      // Login Credentials (Manual)
-      const callback = await signIn("credentials", payload);
+      // signIn dengan redirect:false -> kita handle manual
+      const res = await signIn("credentials", payload);
 
-      if (callback?.error) {
-        toast.error(callback.error);
+      // Di NextAuth v4/v5, kalau redirect:false kadang balikan adalah URL string.
+      // Kita handle dua kemungkinan: object atau string.
+      if (typeof res === "string") {
+        // asumsikan ini URL sukses
+        toast.success("Berhasil masuk.");
+        if (closeModal) closeModal();
+        setLoading(false);
+        router.push(callbackUrl);
+        return;
+      }
+
+      if (res?.error) {
+        toast.error(res.error);
         setLoading(false);
         return;
       }
 
-      if (callback?.ok && !callback?.error) {
+      if (res?.ok) {
         toast.success("Berhasil masuk.");
-        
-        // ✅ TAMBAHAN 3B: Tutup modal secara manual sebelum redirect
         if (closeModal) closeModal();
-        
         setLoading(false);
-        router.push("/");
+        router.push(callbackUrl);
+        return;
       }
+
+      // fallback kalau format tidak sesuai ekspektasi
+      toast.success("Berhasil masuk.");
+      if (closeModal) closeModal();
+      setLoading(false);
+      router.push(callbackUrl);
     } catch (err: any) {
       setLoading(false);
       toast.error(err?.message || "Terjadi kesalahan.");
@@ -156,7 +181,7 @@ const Signin = ({ closeModal }: SigninProps) => {
 
   return (
     <>
-      {/* Header: sama gaya dengan SignUp */}
+      {/* Header */}
       <div className="mb-6 w-full flex items-center justify-center">
         <div className="flex items-center gap-3">
           <div className="relative h-12 w-12 shrink-0">
@@ -208,7 +233,7 @@ const Signin = ({ closeModal }: SigninProps) => {
         </span>
       </span>
 
-      {/* Mode switch (konsisten dengan signup) */}
+      {/* Mode switch */}
       <div className="mb-4">
         <div className="inline-flex w-full rounded-md border border-dark_border/60 bg-white/5 p-1">
           <button
@@ -318,18 +343,25 @@ const Signin = ({ closeModal }: SigninProps) => {
         </div>
       </form>
 
-      <Link
+      <a
         href="/forgot-password"
         className="mb-2 inline-block text-sm text-white/80 hover:text-primary"
       >
         Lupa kata sandi?
-      </Link>
+      </a>
 
       <p className="text-body-secondary text-white text-sm">
         Belum punya akun?{" "}
-        <Link href="/signup" className="text-primary hover:underline">
+        <button
+          type="button"
+          className="text-primary hover:underline"
+          onClick={() => {
+            if (closeModal) closeModal();
+            if (openSignupModal) openSignupModal();
+          }}
+        >
           Daftar
-        </Link>
+        </button>
       </p>
     </>
   );

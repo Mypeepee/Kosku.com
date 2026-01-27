@@ -1,7 +1,7 @@
 // app/Lelang/[slug]/DetailClient.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 
@@ -78,6 +78,15 @@ export default function DetailClient({
   similarProperties = [],
   currentAgentId,
 }: DetailClientProps) {
+  // ========= INCREMENT VIEW SETIAP HALAMAN DETAIL DIBUKA =========
+  useEffect(() => {
+    if (!product?.id_property) return;
+
+    const id = product.id_property;
+    fetch(`/api/listing/${id}/dilihat`, { method: "POST" }).catch(() => {});
+  }, [product?.id_property]);
+  // ===============================================================
+
   const convertToNumber = (value: any): number => {
     if (typeof value === "number") return value;
     if (typeof value === "string") {
@@ -228,12 +237,10 @@ export default function DetailClient({
     is_hot_deal: p.is_hot_deal ?? false,
   }));
 
-  // UNTUK SAAT INI: kalau ada currentAgentId => tampilkan panel agent
   const isOwnerAgent = !!currentAgentId;
 
   return (
     <div className="text-white font-sans bg-[#0F0F0F]">
-
       <div className="lg:hidden h-[60px]" />
       <div className="hidden lg:block h-24 w-full" />
 

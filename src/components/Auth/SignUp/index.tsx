@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { signIn } from "next-auth/react"; // <--- WAJIB DITAMBAHKAN!
+import { signIn } from "next-auth/react";
 import toast from "react-hot-toast";
 import Loader from "@/components/Common/Loader";
 import { useState } from "react";
@@ -10,7 +8,11 @@ import Image from "next/image";
 
 type Mode = "email" | "phone";
 
-/** Eye icon modern (line style) */
+interface SignUpProps {
+  closeModal?: () => void;
+  openSigninModal?: () => void;
+}
+
 function EyeIcon({ open }: { open: boolean }) {
   return open ? (
     // Eye Off
@@ -64,36 +66,26 @@ function EyeIcon({ open }: { open: boolean }) {
 }
 
 function normalizePhoneDigits(raw: string) {
-  // ambil angka saja
   let digits = (raw || "").replace(/\D/g, "");
-
-  // kalau user paste "62812..." atau "+62812..." -> hilangkan 62
   if (digits.startsWith("62")) digits = digits.slice(2);
-
-  // hilangkan 0 di depan: 0821 -> 821
   digits = digits.replace(/^0+/, "");
-
   return digits;
 }
 
-export default function SignUp() {
-  const router = useRouter();
-
+export default function SignUp({ closeModal, openSigninModal }: SignUpProps) {
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<Mode>("email");
 
   const [email, setEmail] = useState("");
-  const [phoneDigits, setPhoneDigits] = useState(""); // tanpa 0 depan
+  const [phoneDigits, setPhoneDigits] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   const handleGoogle = async () => {
     setLoading(true);
     try {
-      // Ini akan memicu popup login Google
-      // Pastikan Google Client ID sudah benar di .env
-      await signIn("google", { callbackUrl: "/profile" }); 
+      await signIn("google", { callbackUrl: "/profile" });
     } catch (error) {
-      console.error(error); // Cek console browser untuk error detail
+      console.error(error);
       toast.error("Gagal koneksi ke Google");
     } finally {
       setLoading(false);
@@ -120,7 +112,7 @@ export default function SignUp() {
         finalData.login_mode = "email";
       } else {
         if (!phoneDigits) throw new Error("No. HP wajib diisi.");
-        finalData.phone = `+62${phoneDigits}`; // hasil final selalu +62xxxxx
+        finalData.phone = `+62${phoneDigits}`;
         finalData.login_mode = "phone";
       }
 
@@ -134,7 +126,10 @@ export default function SignUp() {
       if (!res.ok) throw new Error(payload?.message || "Pendaftaran gagal.");
 
       toast.success("Pendaftaran berhasil. Silakan masuk.");
-      router.push("/signin");
+
+      // Tutup modal sign up dan buka modal sign in (tanpa pindah halaman)
+      if (closeModal) closeModal();
+      if (openSigninModal) openSigninModal();
     } catch (err: any) {
       toast.error(err?.message || "Terjadi kesalahan.");
     } finally {
@@ -142,7 +137,6 @@ export default function SignUp() {
     }
   };
 
-  // ✅ Placeholder lebih pudar, text user tetap putih
   const inputClass =
     "w-full rounded-md border border-dark_border/60 bg-transparent px-5 py-3 text-base outline-none transition " +
     "text-white placeholder:text-white/35 " +
@@ -150,7 +144,7 @@ export default function SignUp() {
 
   return (
     <>
-      {/* Header: logo kiri + teks kanan (group centered) */}
+      {/* Header */}
       <div className="mb-6 w-full flex items-center justify-center">
         <div className="flex items-center gap-3">
           <div className="relative h-12 w-12 shrink-0">
@@ -176,12 +170,14 @@ export default function SignUp() {
       <button
         type="button"
         onClick={handleGoogle}
+        disabled={loading}
         className="
           flex w-full items-center justify-center gap-3
           rounded-md border border-dark_border/60
           bg-transparent px-5 py-3
           text-base font-medium text-white
           transition hover:bg-white/5 hover:border-primary/60
+          disabled:opacity-50 disabled:cursor-not-allowed
         "
       >
         <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
@@ -289,16 +285,13 @@ export default function SignUp() {
                     e.preventDefault();
                   }
                 }}
-                className={[
-                  inputClass,
-                  "rounded-l-none border-l-0", // sambung dengan prefix
-                ].join(" ")}
+                className={[inputClass, "rounded-l-none border-l-0"].join(" ")}
               />
             </div>
           </div>
         )}
 
-        {/* Password + eye icon inside */}
+        {/* Password */}
         <div className="mb-[22px]">
           <div className="relative">
             <input
@@ -354,9 +347,16 @@ export default function SignUp() {
 
       <p className="text-body-secondary text-white text-sm">
         Sudah punya akun?
-        <Link href="/signin" className="pl-2 text-primary hover:underline">
+        <button
+          type="button"
+          className="pl-2 text-primary hover:underline"
+          onClick={() => {
+            if (closeModal) closeModal();
+            if (openSigninModal) openSigninModal();
+          }}
+        >
           Masuk
-        </Link>
+        </button>
       </p>
     </>
   );
