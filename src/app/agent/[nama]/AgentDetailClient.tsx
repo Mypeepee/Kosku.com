@@ -38,6 +38,11 @@ interface AgentDetailProps {
     jualListings?: number;
     sewaListings?: number;
 
+    // sosial media – isi dengan URL penuh
+    // contoh:
+    // https://web.facebook.com/jasonderulo/?_rdc=1&_rdr#
+    // https://www.instagram.com/jasonchriss_/
+    // https://www.tiktok.com/@koko_lelang
     link_instagram?: string | null;
     link_tiktok?: string | null;
     link_facebook?: string | null;
@@ -134,6 +139,21 @@ const AgentDetailClient: React.FC<AgentDetailProps> = ({ agent }) => {
     agent.sewaListings ??
     agent.listings.filter((l) => l.jenis_transaksi === "SEWA").length;
 
+  // helper buka URL eksternal; tidak lewat routing Next
+  const openExternal = (e: React.MouseEvent, url: string) => {
+    e.stopPropagation(); // biar tidak dianggap klik ke elemen parent
+    e.preventDefault();
+
+    if (!url) return;
+
+    const finalUrl =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : `https://${url}`;
+
+    window.open(finalUrl, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <>
       {/* HEADER AGENT */}
@@ -186,6 +206,14 @@ const AgentDetailClient: React.FC<AgentDetailProps> = ({ agent }) => {
                     </p>
                   )}
 
+                  <p className="mt-3 text-[11px] text-gray-400">
+                    Agent ini memiliki{" "}
+                    <span className="font-semibold text-gray-100">
+                      {totalListings} listing aktif
+                    </span>{" "}
+                    di Premier Asset.
+                  </p>
+
                   <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
                     <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1">
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold">
@@ -212,10 +240,9 @@ const AgentDetailClient: React.FC<AgentDetailProps> = ({ agent }) => {
                 {/* Sosmed */}
                 <div className="flex flex-wrap gap-3">
                   {agent.link_instagram && (
-                    <a
-                      href={agent.link_instagram}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={(e) => openExternal(e, agent.link_instagram!)}
                       className="inline-flex items-center gap-2 rounded-full bg-white/5 px-4 py-2 text-[12px] font-semibold text-gray-100 border border-white/10 hover:bg-white/10"
                     >
                       <Icon
@@ -223,13 +250,12 @@ const AgentDetailClient: React.FC<AgentDetailProps> = ({ agent }) => {
                         className="text-pink-400 text-base"
                       />
                       <span>Instagram</span>
-                    </a>
+                    </button>
                   )}
                   {agent.link_facebook && (
-                    <a
-                      href={agent.link_facebook}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={(e) => openExternal(e, agent.link_facebook!)}
                       className="inline-flex items-center gap-2 rounded-full bg-white/5 px-4 py-2 text-[12px] font-semibold text-gray-100 border border-white/10 hover:bg-white/10"
                     >
                       <Icon
@@ -237,13 +263,12 @@ const AgentDetailClient: React.FC<AgentDetailProps> = ({ agent }) => {
                         className="text-sky-500 text-base"
                       />
                       <span>Facebook</span>
-                    </a>
+                    </button>
                   )}
                   {agent.link_tiktok && (
-                    <a
-                      href={agent.link_tiktok}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={(e) => openExternal(e, agent.link_tiktok!)}
                       className="inline-flex items-center gap-2 rounded-full bg-white/5 px-4 py-2 text-[12px] font-semibold text-gray-100 border border-white/10 hover:bg-white/10"
                     >
                       <Icon
@@ -251,7 +276,7 @@ const AgentDetailClient: React.FC<AgentDetailProps> = ({ agent }) => {
                         className="text-white text-base"
                       />
                       <span>TikTok</span>
-                    </a>
+                    </button>
                   )}
                 </div>
 

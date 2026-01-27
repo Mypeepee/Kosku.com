@@ -34,6 +34,16 @@ const nextConfig = {
         hostname: "drive.google.com",
         pathname: "/thumbnail/**",
       },
+      {
+        protocol: "https",
+        hostname: "drive.google.com",
+        pathname: "/uc*", // karena kita pakai /uc?export=view&id=...
+      },
+      {
+        protocol: "https",
+        hostname: "images.unsplash.com",
+      },
+      
     ],
   },
 };

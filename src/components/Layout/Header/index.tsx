@@ -11,16 +11,32 @@ import Image from "next/image";
 import Logo from "./Logo";
 import Signin from "@/components/Auth/SignIn";
 import SignUp from "@/components/Auth/SignUp";
-
 import { headerData } from "./Navigation/menuData";
 
-// =============================================================================
+// ============================================================================
 // MOBILE NAV
-// =============================================================================
-const MobileNav: React.FC<{
+// ============================================================================
+interface MobileNavProps {
   onOpenSignIn: () => void;
   onOpenSignUp: () => void;
-}> = ({ onOpenSignIn, onOpenSignUp }) => {
+  status: "loading" | "authenticated" | "unauthenticated";
+  userName?: string | null;
+  userImage?: string | null;
+  isAgent: boolean;
+  onLogout: () => void;
+  baseMenu: any[];
+}
+
+const MobileNav: React.FC<MobileNavProps> = ({
+  onOpenSignIn,
+  onOpenSignUp,
+  status,
+  userName,
+  userImage,
+  isAgent,
+  onLogout,
+  baseMenu,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [openSubmenu, setOpenSubmenu] = useState<number | null>(null);
@@ -33,8 +49,7 @@ const MobileNav: React.FC<{
   }, []);
 
   useEffect(() => {
-    if (isOpen) document.body.style.overflow = "hidden";
-    else document.body.style.overflow = "auto";
+    document.body.style.overflow = isOpen ? "hidden" : "auto";
   }, [isOpen]);
 
   const toggleSubmenu = (index: number) => {
@@ -44,6 +59,31 @@ const MobileNav: React.FC<{
   const noBackPaths = ["/"];
   const showBackButton = !noBackPaths.includes(pathname || "/");
   const backHref = "/Jual";
+
+  // menu untuk mobile: prepend Profile/Dashboard saat login
+  const mobileMenu = React.useMemo(() => {
+    const items = [...baseMenu];
+
+    if (status !== "authenticated") return items;
+
+    const extra: any[] = [
+      {
+        label: "Profil Saya",
+        href: "/profile",
+        icon: "solar:user-id-bold",
+      },
+    ];
+
+    if (isAgent) {
+      extra.push({
+        label: "Dashboard Agent",
+        href: "/dashboard",
+        icon: "solar:widget-3-bold-duotone",
+      });
+    }
+
+    return [...extra, { divider: true }, ...items];
+  }, [baseMenu, status, isAgent]);
 
   return (
     <>
@@ -55,7 +95,7 @@ const MobileNav: React.FC<{
             : "bg-gradient-to-b from-black/80 to-transparent"
         }`}
       >
-        {/* 1. BACK BUTTON */}
+        {/* BACK BUTTON */}
         {showBackButton ? (
           <Link
             href={backHref}
@@ -71,7 +111,7 @@ const MobileNav: React.FC<{
           <div className="w-10 h-10" />
         )}
 
-        {/* 2. LOGO TENGAH */}
+        {/* LOGO */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2 pointer-events-none">
           <div className="relative w-8 h-8">
             <Image
@@ -88,15 +128,37 @@ const MobileNav: React.FC<{
           </span>
         </div>
 
-        {/* 3. BURGER MENU */}
+        {/* AVATAR + BURGER */}
         <button
           onClick={() => setIsOpen(true)}
-          className={`p-2.5 rounded-full backdrop-blur-md active:scale-95 transition-all shadow-sm ${
+          className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full backdrop-blur-md active:scale-95 transition-all shadow-sm ${
             isScrolled
               ? "bg-white/10 text-white"
               : "bg-black/40 text-white border border-white/10"
           }`}
         >
+          {status === "authenticated" ? (
+            <div className="w-8 h-8 rounded-full overflow-hidden border border-white/10 bg-white/10 relative">
+              {userImage ? (
+                <Image
+                  src={userImage}
+                  alt="Profile"
+                  fill
+                  sizes="32px"
+                  className="object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-gray-300">
+                  <Icon icon="solar:user-circle-bold" className="text-xl" />
+                </div>
+              )}
+            </div>
+          ) : (
+            <Icon
+              icon="solar:user-circle-bold"
+              className="text-xl text-gray-300"
+            />
+          )}
           <Icon icon="solar:hamburger-menu-linear" className="text-xl" />
         </button>
       </div>
@@ -118,12 +180,12 @@ const MobileNav: React.FC<{
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed top-0 right-0 z-[61] h-full w-[80%] max-w-xs bg-[#121212] border-l border-white/10 shadow-2xl lg:hidden flex flex-col"
+              className="fixed top-0 right-0 z-[61] h-full w-[80%] max-w-xs bg-[#090909] border-l border-white/10 shadow-2xl lg:hidden flex flex-col"
             >
               {/* HEADER DRAWER */}
-              <div className="flex items-center justify-between p-5 border-b border-white/10 bg-[#0F0F0F]">
-                <div className="flex items-center gap-2">
-                  <div className="relative w-8 h-8">
+              <div className="p-5 border-b border-white/10 bg-[#0F0F0F] flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="relative w-9 h-9">
                     <Image
                       src="/images/logo/logopremier.svg"
                       alt="Logo Premier"
@@ -131,10 +193,14 @@ const MobileNav: React.FC<{
                       className="object-contain"
                     />
                   </div>
-                  <span className="text-xl font-bold tracking-tight">
-                    <span className="text-white">Premier</span>
-                    <span className="text-[#86efac] ml-1">Asset</span>
-                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-base font-bold text-white leading-tight">
+                      Premier Asset
+                    </span>
+                    <span className="text-[10px] text-gray-400">
+                      Portal properti modern
+                    </span>
+                  </div>
                 </div>
 
                 <button
@@ -148,90 +214,163 @@ const MobileNav: React.FC<{
                 </button>
               </div>
 
-              {/* LIST MENU */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
-                {headerData?.map((menuItem, idx) => (
-                  <div key={idx}>
-                    {menuItem.submenu && menuItem.submenu.length > 0 ? (
-                      <div>
-                        <button
-                          onClick={() => toggleSubmenu(idx)}
-                          className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all font-medium border-b border-white/5 ${
-                            openSubmenu === idx
-                              ? "bg-white/5 text-primary"
-                              : "text-gray-300 hover:text-white"
-                          }`}
-                        >
-                          <span className="flex items-center gap-3">
-                            {menuItem.label}
-                          </span>
-                          <Icon
-                            icon="solar:alt-arrow-down-linear"
-                            className={`transition-transform duration-300 ${
-                              openSubmenu === idx ? "rotate-180" : ""
-                            }`}
-                          />
-                        </button>
-
-                        <AnimatePresence>
-                          {openSubmenu === idx && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden bg-black/20 rounded-b-xl mb-1"
-                            >
-                              {menuItem.submenu.map((sub, subIdx) => (
-                                <Link
-                                  key={subIdx}
-                                  href={sub.href || "#"}
-                                  onClick={() => setIsOpen(false)}
-                                  className="flex items-center gap-3 px-6 py-3 text-sm text-gray-400 hover:text-white border-l-2 border-transparent hover:border-primary hover:bg-white/5 transition-all"
-                                >
-                                  {sub.icon && (
-                                    <Icon
-                                      icon={sub.icon}
-                                      className="text-lg text-primary"
-                                    />
-                                  )}
-                                  {sub.label}
-                                </Link>
-                              ))}
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
+              {/* SECTION PROFIL (JIKA LOGIN) */}
+              {status === "authenticated" && (
+                <div className="px-5 py-4 border-b border-white/10 bg-gradient-to-r from-emerald-500/10 via-emerald-500/0 to-sky-500/10 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full overflow-hidden border border-emerald-400/60 bg-black relative">
+                    {userImage ? (
+                      <Image
+                        src={userImage}
+                        alt="Profile"
+                        fill
+                        sizes="40px"
+                        className="object-cover"
+                      />
                     ) : (
-                      <Link
-                        href={menuItem.href || "/"}
-                        onClick={() => setIsOpen(false)}
-                        className="flex items-center justify-between px-4 py-3.5 rounded-xl text-gray-300 hover:text-white hover:bg-white/5 transition-all font-medium border-b border-white/5 last:border-0"
-                      >
-                        {menuItem.label}
+                      <div className="w-full h-full flex items-center justify-center text-emerald-300">
                         <Icon
-                          icon="solar:alt-arrow-right-linear"
-                          className="text-gray-600"
+                          icon="solar:user-circle-bold"
+                          className="text-2xl"
                         />
-                      </Link>
+                      </div>
                     )}
                   </div>
-                ))}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] text-gray-400">Masuk sebagai</p>
+                    <p className="text-sm font-semibold text-white truncate">
+                      {userName || "Pengguna"}
+                    </p>
+                    {isAgent && (
+                      <p className="text-[11px] text-emerald-300 font-medium">
+                        Agent Premier
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* LIST MENU */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-1 custom-scrollbar">
+                {mobileMenu.map((menuItem, idx) =>
+                  menuItem.divider ? (
+                    <div
+                      key={`divider-${idx}`}
+                      className="my-2 h-px bg-white/10"
+                    />
+                  ) : (
+                    <div key={idx}>
+                      {menuItem.submenu && menuItem.submenu.length > 0 ? (
+                        <div>
+                          <button
+                            onClick={() => toggleSubmenu(idx)}
+                            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl transition-all font-medium ${
+                              openSubmenu === idx
+                                ? "bg-white/5 text-[#86efac]"
+                                : "text-gray-300 hover:text-white hover:bg-white/5"
+                            }`}
+                          >
+                            <span className="flex items-center gap-3">
+                              {menuItem.icon && (
+                                <Icon
+                                  icon={menuItem.icon}
+                                  className="text-lg text-[#86efac]"
+                                />
+                              )}
+                              {menuItem.label}
+                            </span>
+                            <Icon
+                              icon="solar:alt-arrow-down-linear"
+                              className={`transition-transform duration-300 ${
+                                openSubmenu === idx ? "rotate-180" : ""
+                              }`}
+                            />
+                          </button>
+
+                          <AnimatePresence>
+                            {openSubmenu === idx && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden bg-black/30 rounded-2xl mt-1 mb-2"
+                              >
+                                {menuItem.submenu.map(
+                                  (sub: any, subIdx: number) => (
+                                    <Link
+                                      key={subIdx}
+                                      href={sub.href || "#"}
+                                      onClick={() => setIsOpen(false)}
+                                      className="flex items-center gap-3 px-6 py-3 text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+                                    >
+                                      {sub.icon && (
+                                        <Icon
+                                          icon={sub.icon}
+                                          className="text-lg text-[#86efac]"
+                                        />
+                                      )}
+                                      {sub.label}
+                                    </Link>
+                                  )
+                                )}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      ) : (
+                        <Link
+                          href={menuItem.href || "/"}
+                          onClick={() => setIsOpen(false)}
+                          className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-gray-300 hover:text-white hover:bg-white/5 transition-all font-medium"
+                        >
+                          {menuItem.icon && (
+                            <Icon
+                              icon={menuItem.icon}
+                              className="text-lg text-[#86efac]"
+                            />
+                          )}
+                          {menuItem.label}
+                        </Link>
+                      )}
+                    </div>
+                  )
+                )}
               </div>
 
               {/* FOOTER DRAWER */}
-              <div className="p-5 border-t border-white/10 space-y-3 bg-[#0F0F0F]">
-                <button
-                  className="w-full py-3 rounded-xl border border-white/20 text-white font-bold hover:bg-white/10 transition-colors text-sm"
-                  onClick={() => {
-                    setIsOpen(false);
-                    onOpenSignIn();
-                  }}
-                >
-                  Masuk
-                </button>
-                <button className="w-full py-3 rounded-xl bg-primary text-black font-bold hover:bg-green-400 transition-colors shadow-lg shadow-green-500/10 text-sm">
-                  Hubungi Agen
-                </button>
+              <div className="p-5 border-t border-white/10 bg-[#0F0F0F] space-y-3">
+                {status === "authenticated" ? (
+                  <button
+                    className="w-full py-3 rounded-xl border border-red-400/50 text-red-300 font-bold hover:bg-red-500/10 transition-colors text-sm flex items-center justify-center gap-2"
+                    onClick={() => {
+                      setIsOpen(false);
+                      onLogout();
+                    }}
+                  >
+                    <Icon icon="solar:logout-2-bold" className="text-lg" />
+                    Keluar
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="w-full py-3 rounded-xl border border-white/20 text-white font-bold hover:bg-white/10 transition-colors text-sm"
+                      onClick={() => {
+                        setIsOpen(false);
+                        onOpenSignIn();
+                      }}
+                    >
+                      Masuk
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsOpen(false);
+                        onOpenSignUp();
+                      }}
+                      className="w-full py-3 rounded-xl bg-[#86efac] text-black font-bold hover:bg-[#6ee7b7] transition-colors shadow-lg shadow-green-500/20 text-sm"
+                    >
+                      Daftar Gratis
+                    </button>
+                  </>
+                )}
               </div>
             </motion.div>
           </>
@@ -241,9 +380,9 @@ const MobileNav: React.FC<{
   );
 };
 
-// =============================================================================
+// ============================================================================
 // DESKTOP MENU ITEM
-// =============================================================================
+// ============================================================================
 const DesktopMenuItem = ({ item }: { item: any }) => {
   const [isHovered, setIsHovered] = useState(false);
   const pathUrl = usePathname();
@@ -319,9 +458,9 @@ const DesktopMenuItem = ({ item }: { item: any }) => {
   );
 };
 
-// =============================================================================
+// ============================================================================
 // MAIN HEADER
-// =============================================================================
+// ============================================================================
 const Header: React.FC = () => {
   const { data: session, status } = useSession();
   const pathUrl = usePathname();
@@ -340,8 +479,8 @@ const Header: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (isSignInOpen || isSignUpOpen) document.body.style.overflow = "hidden";
-    else document.body.style.overflow = "";
+    document.body.style.overflow =
+      isSignInOpen || isSignUpOpen ? "hidden" : "";
   }, [isSignInOpen, isSignUpOpen]);
 
   const handleLogout = () => {
@@ -376,6 +515,12 @@ const Header: React.FC = () => {
       <MobileNav
         onOpenSignIn={() => setIsSignInOpen(true)}
         onOpenSignUp={() => setIsSignUpOpen(true)}
+        status={status}
+        userName={session?.user?.name}
+        userImage={session?.user?.image}
+        isAgent={isAgent}
+        onLogout={handleLogout}
+        baseMenu={computedMenu}
       />
 
       {/* DESKTOP HEADER */}
