@@ -32,7 +32,7 @@ const buildDriveImageUrl = (idOrUrl?: string | null) => {
   return null;
 };
 
-type AgentData = {
+export type AgentData = {
   foto_ktp_url?: string | null;
   foto_npwp_url?: string | null;
   nama_bank?: string | null;
@@ -42,9 +42,12 @@ type AgentData = {
 
 type Props = {
   agent: AgentData;
+  onUploadKtp: () => void;
+  onUploadNpwp: () => void;
+  onEditRekening: () => void;
 };
 
-const DataPenting = ({ agent }: Props) => {
+const DataPenting = ({ agent, onUploadKtp, onUploadNpwp, onEditRekening }: Props) => {
   const ktpUrl = buildDriveImageUrl(agent.foto_ktp_url);
   const npwpUrl = buildDriveImageUrl(agent.foto_npwp_url);
 
@@ -101,26 +104,28 @@ const DataPenting = ({ agent }: Props) => {
                   Foto KTP
                 </p>
               </div>
-              <span
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[10px] ${
-                  hasKtp
-                    ? "border-[#86efac]/40 bg-[#86efac]/10 text-[#86efac]"
-                    : "border-gray-500/40 bg-gray-800/40 text-gray-300"
-                }`}
-              >
-                <Icon
-                  icon={
-                    hasKtp
-                      ? "solar:check-circle-bold"
-                      : "solar:upload-minimalistic-bold"
-                  }
-                  className="text-[11px]"
-                />
-                {hasKtp ? "Tersimpan" : "Belum diunggah"}
-              </span>
+
+              {hasKtp ? (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-[#86efac]/40 bg-[#86efac]/10 text-[10px] text-[#86efac]">
+                  <Icon
+                    icon="solar:check-circle-bold"
+                    className="text-[11px]"
+                  />
+                  Tersimpan
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-rose-400/50 bg-rose-500/10 text-[10px] text-rose-200">
+                  <Icon
+                    icon="solar:danger-triangle-bold"
+                    className="text-[11px]"
+                  />
+                  Belum diunggah
+                </span>
+              )}
             </div>
 
-            <div className="relative w-full aspect-[4/3] rounded-xl border border-dashed border-white/10 overflow-hidden bg-gradient-to-br from-black/60 via-[#0F172A]/60 to-black/60 flex items-center justify-center">
+            {/* ukuran kartu */}
+            <div className="relative w-full aspect-[16/9] rounded-xl border border-dashed border-white/10 overflow-hidden bg-gradient-to-br from-black/60 via-[#0F172A]/60 to-black/60 flex items-center justify-center">
               {ktpUrl ? (
                 <img
                   src={ktpUrl}
@@ -128,15 +133,25 @@ const DataPenting = ({ agent }: Props) => {
                   className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center gap-1.5 text-[11px] text-gray-400 px-4 text-center">
+                <div className="flex flex-col items-center justify-center gap-2 text-[11px] text-gray-400 px-4 text-center">
                   <Icon
                     icon="solar:id-card-bold-duotone"
                     className="text-2xl text-gray-600"
                   />
-                  <span>Belum ada foto KTP yang diunggah.</span>
+                  <p>Belum ada foto KTP.</p>
+                  <button
+                    type="button"
+                    onClick={onUploadKtp}
+                    className="inline-flex items-center gap-1.5 mt-1 rounded-full bg-sky-500 text-[11px] text-white px-3 py-1.5 hover:bg-sky-400 transition-colors"
+                  >
+                    <Icon
+                      icon="solar:upload-minimalistic-bold"
+                      className="text-[12px]"
+                    />
+                    Unggah KTP
+                  </button>
                   <span className="text-[10px] text-gray-500">
-                    Unggah KTP melalui portal agent untuk mempercepat
-                    proses verifikasi.
+                    Pastikan foto KTP terlihat jelas dan tidak blur.
                   </span>
                 </div>
               )}
@@ -155,26 +170,27 @@ const DataPenting = ({ agent }: Props) => {
                   Foto NPWP
                 </p>
               </div>
-              <span
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[10px] ${
-                  hasNpwp
-                    ? "border-[#86efac]/40 bg-[#86efac]/10 text-[#86efac]"
-                    : "border-gray-500/40 bg-gray-800/40 text-gray-300"
-                }`}
-              >
-                <Icon
-                  icon={
-                    hasNpwp
-                      ? "solar:check-circle-bold"
-                      : "solar:upload-minimalistic-bold"
-                  }
-                  className="text-[11px]"
-                />
-                {hasNpwp ? "Tersimpan" : "Belum diunggah"}
-              </span>
+
+              {hasNpwp ? (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-[#86efac]/40 bg-[#86efac]/10 text-[10px] text-[#86efac]">
+                  <Icon
+                    icon="solar:check-circle-bold"
+                    className="text-[11px]"
+                  />
+                  Tersimpan
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-amber-400/60 bg-amber-500/10 text-[10px] text-amber-100">
+                  <Icon
+                    icon="solar:danger-triangle-bold"
+                    className="text-[11px]"
+                  />
+                  Belum diunggah
+                </span>
+              )}
             </div>
 
-            <div className="relative w-full aspect-[4/3] rounded-xl border border-dashed border-white/10 overflow-hidden bg-gradient-to-br from-black/60 via-[#111827]/60 to-black/60 flex items-center justify-center">
+            <div className="relative w-full aspect-[16/9] rounded-xl border border-dashed border-white/10 overflow-hidden bg-gradient-to-br from-black/60 via-[#111827]/60 to-black/60 flex items-center justify-center">
               {npwpUrl ? (
                 <img
                   src={npwpUrl}
@@ -182,15 +198,25 @@ const DataPenting = ({ agent }: Props) => {
                   className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                 />
               ) : (
-                <div className="flex flex-col items-center justify-center gap-1.5 text-[11px] text-gray-400 px-4 text-center">
+                <div className="flex flex-col items-center justify-center gap-2 text-[11px] text-gray-400 px-4 text-center">
                   <Icon
                     icon="solar:card-bold-duotone"
                     className="text-2xl text-gray-600"
                   />
-                  <span>Belum ada foto NPWP yang diunggah.</span>
+                  <p>Belum ada foto NPWP.</p>
+                  <button
+                    type="button"
+                    onClick={onUploadNpwp}
+                    className="inline-flex items-center gap-1.5 mt-1 rounded-full bg-amber-400 text-[11px] text-black px-3 py-1.5 hover:bg-amber-300 transition-colors"
+                  >
+                    <Icon
+                      icon="solar:upload-minimalistic-bold"
+                      className="text-[12px]"
+                    />
+                    Unggah NPWP
+                  </button>
                   <span className="text-[10px] text-gray-500">
-                    Dokumen NPWP membantu kelancaran proses pembayaran dan
-                    pelaporan pajak.
+                    Dokumen NPWP membantu kelancaran pembayaran dan pajak.
                   </span>
                 </div>
               )}
@@ -215,21 +241,13 @@ const DataPenting = ({ agent }: Props) => {
               </div>
             </div>
 
-            {hasBank ? (
+            {hasBank && (
               <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/40 text-[10px] text-emerald-300">
                 <Icon
                   icon="solar:verified-check-bold"
                   className="text-[12px]"
                 />
                 Rekening siap digunakan
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-yellow-500/10 border border-yellow-400/40 text-[10px] text-yellow-300">
-                <Icon
-                  icon="solar:danger-triangle-bold"
-                  className="text-[12px]"
-                />
-                Lengkapi data rekening
               </span>
             )}
           </div>
@@ -260,9 +278,33 @@ const DataPenting = ({ agent }: Props) => {
               </div>
             </div>
           ) : (
-            <p className="text-[11px] text-gray-400 mt-2">
-              Kamu belum menambahkan informasi rekening.
-            </p>
+            <div className="flex items-center justify-between gap-3 mt-2">
+              <p className="text-[11px] text-gray-400">
+                Kamu belum menambahkan informasi rekening.
+              </p>
+              <button
+                type="button"
+                onClick={onEditRekening}
+                className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 text-[11px] text-black px-3 py-1.5 hover:bg-emerald-400 transition-colors"
+              >
+                <Icon
+                  icon="solar:add-circle-bold"
+                  className="text-[12px]"
+                />
+                Tambah rekening
+              </button>
+            </div>
+          )}
+
+          {hasBank && (
+            <button
+              type="button"
+              onClick={onEditRekening}
+              className="self-start mt-3 inline-flex items-center gap-1.5 rounded-full bg-white/5 border border-white/15 text-[11px] text-gray-100 px-3 py-1.5 hover:bg-white/10 transition-colors"
+            >
+              <Icon icon="solar:pen-bold" className="text-[12px]" />
+              Ubah rekening
+            </button>
           )}
 
           <p className="text-[10px] text-gray-500 mt-2">

@@ -13,6 +13,9 @@ import BookingHistory from "./FormTransaksi";
 import RedeemPoints from "./ZonaHadiah";
 import ProfilePhotoModal from "./ProfilePhotoModal";
 import DataPenting from "./DataPenting";
+import ModalRekening from "./ModalRekening";
+import ModalNPWP from "./ModalNPWP";
+import ModalKTP from "./ModalKTP";
 
 const buildDriveImageUrl = (idOrUrl?: string | null) => {
   if (!idOrUrl) return null;
@@ -68,6 +71,11 @@ const ProfilePage = () => {
 
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
 
+  // state untuk modal Data Penting
+  const [openKtp, setOpenKtp] = useState(false);
+  const [openNpwp, setOpenNpwp] = useState(false);
+  const [openRek, setOpenRek] = useState(false);
+
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/signin");
@@ -83,7 +91,7 @@ const ProfilePage = () => {
           const data = await res.json();
 
           const pengguna = data.pengguna;
-          const agent = data.agent ?? null; // agent berisi SEMUA kolom agent, termasuk foto_ktp_url, foto_npwp_url, nama_bank, dll.
+          const agent = data.agent ?? null;
           const stats = data.stats ?? {};
 
           setUserData(pengguna);
@@ -136,7 +144,7 @@ const ProfilePage = () => {
       const res = await fetch("/api/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData), // hanya kolom pengguna yang diupdate di endpoint ini
+        body: JSON.stringify(formData),
       });
 
       if (!res.ok) throw new Error("Gagal update");
@@ -223,7 +231,137 @@ const ProfilePage = () => {
               )}
 
               {activeTab === "data-penting" && isAgent && agentData && (
-                <DataPenting agent={agentData} user={userData} />
+                <>
+                  <DataPenting
+                    agent={agentData}
+                    onUploadKtp={() => setOpenKtp(true)}
+                    onUploadNpwp={() => setOpenNpwp(true)}
+                    onEditRekening={() => setOpenRek(true)}
+                  />
+
+                  {/* KTP */}
+                  <ModalKTP
+                    open={openKtp}
+                    onClose={() => setOpenKtp(false)}
+                    initialImageUrl={
+                      agentData.foto_ktp_url
+                        ? buildDriveImageUrl(agentData.foto_ktp_url)
+                        : undefined
+                    }
+                    onSave={async (croppedBase64) => {
+                      try {
+                        const res = await fetch("/api/profile/ktp", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            cropped_image: croppedBase64,
+                          }),
+                        });
+
+                        if (!res.ok) {
+                          toast.error("Gagal menyimpan KTP.");
+                          return;
+                        }
+
+                        const json = await res.json();
+                        setAgentData((prev: any) => ({
+                          ...prev,
+                          foto_ktp_url:
+                            json.fileId ?? prev?.foto_ktp_url ?? null,
+                        }));
+                        toast.success("KTP berhasil diperbarui.");
+                      } catch (err) {
+                        console.error(err);
+                        toast.error(
+                          "Terjadi kesalahan saat menyimpan KTP."
+                        );
+                      }
+                    }}
+                  />
+
+                  {/* NPWP */}
+                  <ModalNPWP
+                    open={openNpwp}
+                    onClose={() => setOpenNpwp(false)}
+                    initialImageUrl={
+                      agentData.foto_npwp_url
+                        ? buildDriveImageUrl(agentData.foto_npwp_url)
+                        : undefined
+                    }
+                    onSave={async (croppedBase64) => {
+                      try {
+                        const res = await fetch("/api/profile/npwp", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            nomor_npwp: agentData.nomor_npwp || "",
+                            cropped_image_npwp: croppedBase64,
+                          }),
+                        });
+
+                        if (!res.ok) {
+                          toast.error("Gagal menyimpan NPWP.");
+                          return;
+                        }
+
+                        const json = await res.json();
+                        setAgentData((prev: any) => ({
+                          ...prev,
+                          foto_npwp_url:
+                            json.fileId ?? prev?.foto_npwp_url ?? null,
+                          nomor_npwp:
+                            json.agent?.nomor_npwp ??
+                            prev?.nomor_npwp ??
+                            "",
+                        }));
+                        toast.success("NPWP berhasil diperbarui.");
+                      } catch (err) {
+                        console.error(err);
+                        toast.error(
+                          "Terjadi kesalahan saat menyimpan NPWP."
+                        );
+                      }
+                    }}
+                  />
+
+                  {/* Rekening */}
+                  <ModalRekening
+                    open={openRek}
+                    onClose={() => setOpenRek(false)}
+                    defaultValue={agentData}
+                    onSave={async (data) => {
+                      try {
+                        const res = await fetch("/api/profile/rekening", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(data),
+                        });
+
+                        if (!res.ok) {
+                          toast.error("Gagal menyimpan rekening.");
+                          return;
+                        }
+
+                        const json = await res.json();
+                        const agent = json.agent ?? data;
+
+                        setAgentData((prev: any) => ({
+                          ...prev,
+                          nama_bank: agent.nama_bank,
+                          nomor_rekening: agent.nomor_rekening,
+                          atas_nama_rekening: agent.atas_nama_rekening,
+                        }));
+
+                        toast.success("Rekening berhasil disimpan.");
+                      } catch (err) {
+                        console.error(err);
+                        toast.error(
+                          "Terjadi kesalahan saat menyimpan rekening."
+                        );
+                      }
+                    }}
+                  />
+                </>
               )}
 
               {activeTab === "booking" && <BookingHistory />}

@@ -31,7 +31,7 @@ export async function GET() {
     },
   });
 
-  // 3) Format tanggal_lahir
+  // 3) Format tanggal_lahir ke yyyy-MM-dd agar cocok dengan ProfileForm
   const formattedPengguna = {
     ...pengguna,
     tanggal_lahir: pengguna.tanggal_lahir
@@ -39,20 +39,19 @@ export async function GET() {
       : "",
   };
 
-  // 4) Contoh stats: bisa kamu hitung dari tabel lain
-  // Di sini dummy dulu untuk struktur, nanti tinggal ganti query-nya
+  // 4) Stats placeholder (silakan ganti dengan query asli kalau sudah siap)
   const stats = {
-    premierPoin: 0,          // nanti ambil dari tabel premier_poin (kalau sudah dibuat)
-    listingAktif: 0,         // hitung dari tabel listing
-    transaksiBerhasil: 0,    // hitung dari tabel transaksi
-    totalWishlist: 0,        // untuk USER biasa
+    premierPoin: 0,
+    listingAktif: 0,
+    transaksiBerhasil: 0,
+    totalWishlist: 0,
     totalTransaksi: 0,
     totalReferral: 0,
   };
 
   return NextResponse.json({
     pengguna: formattedPengguna,
-    agent,     // bisa null kalau bukan agent
+    agent, // bisa null kalau bukan agent
     stats,
   });
 }
@@ -65,6 +64,12 @@ export async function PUT(request: Request) {
   }
 
   const body = await request.json();
+  // body di sini berasal dari formData:
+  // {
+  //   nama_lengkap, email, nomor_telepon,
+  //   kota_asal, tanggal_lahir, foto_profil_url,
+  //   peran, kode_referral, id_agent
+  // }
 
   let tanggalLahirFixed: Date | null = null;
   if (body.tanggal_lahir && body.tanggal_lahir !== "") {
@@ -82,13 +87,12 @@ export async function PUT(request: Request) {
       data: {
         nama_lengkap: body.nama_lengkap,
         email: body.email,
+        nomor_telepon: body.nomor_telepon,
         kota_asal: body.kota_asal,
-        pekerjaan: body.pekerjaan,
-        jenis_kelamin: body.jenis_kelamin,
         tanggal_lahir: tanggalLahirFixed,
-        // kalau kamu mau simpan foto_profil_url di tabel pengguna juga,
-        // tambahkan di sini:
-        // foto_profil_url: body.foto_profil_url,
+        kode_referral: body.kode_referral || null,
+        // kalau di model pengguna ada kolom foto_profil_url dan kamu mau simpan:
+        // foto_profil_url: body.foto_profil_url || null,
       },
     });
 
@@ -96,6 +100,7 @@ export async function PUT(request: Request) {
   } catch (error: any) {
     console.error("🔥 ERROR PRISMA:", error);
 
+    // handle unique email (P2002)
     if (error.code === "P2002" && error.meta?.target?.includes("email")) {
       return NextResponse.json(
         { error: "Email sudah digunakan oleh akun lain." },
