@@ -103,13 +103,21 @@ const ProfileSidebar = ({ activeTab, setActiveTab, onSignOut, role }: Props) => 
           <div className="h-px bg-white/10 my-2 hidden lg:block" />
 
           <button
-            onClick={onSignOut}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl text-xs sm:text-sm font-bold text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-all w-full flex-shrink-0 lg:flex-shrink"
-          >
-            <Icon icon="solar:logout-2-bold" className="text-lg" />
-            <span className="hidden sm:inline">Keluar</span>
-            <span className="sm:hidden">Exit</span>
-          </button>
+  onClick={onSignOut}
+  className="
+    flex items-center gap-3 px-4 py-3 rounded-xl
+    text-xs sm:text-sm font-bold
+    text-red-400 hover:bg-red-500/10 hover:text-red-300
+    transition-all
+    flex-shrink-0      /* jadi pill di mobile */
+    lg:w-full lg:flex-shrink /* full width di lg ke atas */
+  "
+>
+  <Icon icon="solar:logout-2-bold" className="text-lg" />
+  <span className="hidden sm:inline">Keluar</span>
+  <span className="sm:hidden">Exit</span>
+</button>
+
         </nav>
       </div>
     </aside>

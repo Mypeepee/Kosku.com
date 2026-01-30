@@ -13,6 +13,12 @@ const homepageMenu = [
     icon: "solar:buildings-3-linear",
     href: "/dashboard/listings",
   },
+  // HRM di bawah Listings
+  {
+    label: "HRM",
+    icon: "solar:user-hand-up-linear",
+    href: "/dashboard/human-resource-management",
+  },
   {
     label: "Leads & Clients",
     icon: "solar:users-group-two-rounded-linear",
@@ -25,11 +31,12 @@ const homepageMenu = [
     href: "/dashboard/analytics",
   },
   {
-    label: "Tasks & HRM",
+    label: "Tasks",
     icon: "solar:clipboard-check-linear",
     href: "/dashboard/tasks",
   },
 ];
+
 
 const appsMenu = [
   { label: "E-commerce", icon: "solar:bag-4-linear" },
