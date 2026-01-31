@@ -5,15 +5,10 @@ import { Icon } from "@iconify/react";
 import { motion } from "framer-motion";
 
 interface HolidayData {
-  date: string;
-  localName: string;
-  name: string;
-  countryCode: string;
-  fixed: boolean;
-  global: boolean;
-  counties: string[] | null;
-  launchYear: number | null;
-  types: string[];
+  tanggal: string;
+  tanggal_display: string;
+  keterangan: string;
+  is_cuti: boolean;
 }
 
 interface EventData {
@@ -90,6 +85,14 @@ const eventIcons: Record<string, { icon: string; color: string; gradient: string
   },
 };
 
+// ✅ Helper function untuk convert Date ke YYYY-MM-DD string (tanpa timezone issues)
+const toLocalDateString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function Kalendar({
   currentDate,
   events,
@@ -102,18 +105,19 @@ export default function Kalendar({
   const [holidays, setHolidays] = useState<HolidayData[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch holidays from Nager.Date API (Accurate & Free)
+  // Fetch holidays from DayOff API (Indonesian specific)
   useEffect(() => {
     const fetchHolidays = async () => {
       setLoading(true);
       try {
         const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1; // 1-12
         
-        console.log(`Fetching holidays for ${year}...`);
+        console.log(`Fetching holidays for ${year}-${month}...`);
         
-        // Use Nager.Date API - More accurate and reliable
+        // Use DayOff API - Data dari tanggalan.com
         const response = await fetch(
-          `https://date.nager.at/api/v3/PublicHolidays/${year}/ID`,
+          `https://dayoffapi.vercel.app/api?month=${month}&year=${year}`,
           {
             headers: {
               'Accept': 'application/json',
@@ -172,15 +176,15 @@ export default function Kalendar({
 
   const isHoliday = (date: Date | null) => {
     if (!date) return false;
-    const dateStr = date.toISOString().split("T")[0];
-    return holidays.some((h) => h.date === dateStr);
+    const dateStr = toLocalDateString(date);
+    return holidays.some((h) => h.tanggal === dateStr);
   };
 
   const getHolidayName = (date: Date | null) => {
     if (!date) return null;
-    const dateStr = date.toISOString().split("T")[0];
-    const holiday = holidays.find((h) => h.date === dateStr);
-    return holiday?.localName || holiday?.name;
+    const dateStr = toLocalDateString(date);
+    const holiday = holidays.find((h) => h.tanggal === dateStr);
+    return holiday?.keterangan;
   };
 
   const isToday = (date: Date | null) => {
@@ -193,27 +197,33 @@ export default function Kalendar({
     );
   };
 
+  // ✅ FIX: Event matching dengan timezone-safe comparison
   const getEventsForDate = (date: Date | null) => {
     if (!date) return [];
-    const dateStr = date.toISOString().split("T")[0];
+    
+    // Format tanggal kalendar ke YYYY-MM-DD
+    const dateStr = toLocalDateString(date);
 
     return events.filter((event) => {
-      const eventStart = new Date(event.tanggal_mulai).toISOString().split("T")[0];
-      const eventEnd = new Date(event.tanggal_selesai).toISOString().split("T")[0];
+      // Ambil date part dari ISO string (ignore timezone)
+      // "2026-02-05T00:00:00.000Z" → "2026-02-05"
+      const eventStart = event.tanggal_mulai.substring(0, 10);
+      const eventEnd = event.tanggal_selesai.substring(0, 10);
+      
       return dateStr >= eventStart && dateStr <= eventEnd;
     });
   };
 
   return (
     <div className="space-y-4">
-      {/* Calendar Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      {/* Calendar Header - SINGLE ROW ON MOBILE */}
+      <div className="flex items-center justify-between gap-2">
         {/* Navigation Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={onPrevMonth}
             className="
-              group flex h-11 w-11 items-center justify-center
+              group flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center
               rounded-xl bg-gradient-to-br from-white/10 to-white/5
               border border-white/10 backdrop-blur-sm
               text-slate-300 transition-all duration-300
@@ -223,7 +233,7 @@ export default function Kalendar({
               active:scale-95
             "
           >
-            <Icon icon="solar:alt-arrow-left-bold" className="text-xl" />
+            <Icon icon="solar:alt-arrow-left-bold" className="text-lg sm:text-xl" />
           </button>
 
           <button
@@ -231,7 +241,7 @@ export default function Kalendar({
             className="
               rounded-xl bg-gradient-to-br from-white/10 to-white/5
               border border-white/10 backdrop-blur-sm
-              px-5 py-2.5 text-sm font-semibold text-slate-300
+              px-3 py-2 sm:px-5 sm:py-2.5 text-xs sm:text-sm font-semibold text-slate-300
               transition-all duration-300
               hover:from-emerald-500/20 hover:to-emerald-600/10
               hover:border-emerald-500/50 hover:text-emerald-300
@@ -245,7 +255,7 @@ export default function Kalendar({
           <button
             onClick={onNextMonth}
             className="
-              group flex h-11 w-11 items-center justify-center
+              group flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center
               rounded-xl bg-gradient-to-br from-white/10 to-white/5
               border border-white/10 backdrop-blur-sm
               text-slate-300 transition-all duration-300
@@ -255,14 +265,14 @@ export default function Kalendar({
               active:scale-95
             "
           >
-            <Icon icon="solar:alt-arrow-right-bold" className="text-xl" />
+            <Icon icon="solar:alt-arrow-right-bold" className="text-lg sm:text-xl" />
           </button>
         </div>
 
         {/* Month/Year Display + Add Button */}
-        <div className="flex items-center gap-4">
-          <div className="text-2xl font-bold text-white">
-            {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+        <div className="flex items-center gap-2 sm:gap-4">
+          <div className="text-base sm:text-2xl font-bold text-white whitespace-nowrap">
+            {monthNames[currentDate.getMonth()].substring(0, 3)} {currentDate.getFullYear()}
           </div>
 
           {/* Button Tambah Acara */}
@@ -271,7 +281,7 @@ export default function Kalendar({
             className="
               group relative overflow-hidden
               rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600
-              px-4 py-2.5 text-sm font-semibold text-white
+              px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm font-semibold text-white
               shadow-lg shadow-emerald-500/50
               transition-all duration-300
               hover:shadow-xl hover:shadow-emerald-500/60
@@ -280,24 +290,24 @@ export default function Kalendar({
             "
           >
             <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <div className="relative flex items-center gap-2">
-              <Icon icon="solar:add-circle-bold" className="text-lg" />
-              <span className="hidden sm:inline">Tambah Acara</span>
-              <span className="sm:hidden">Tambah</span>
+            <div className="relative flex items-center gap-1.5 sm:gap-2">
+              <Icon icon="solar:add-circle-bold" className="text-base sm:text-lg" />
+              <span className="hidden sm:inline">Tambah</span>
+              <span className="sm:hidden">+</span>
             </div>
           </button>
         </div>
       </div>
 
       {/* Calendar Grid */}
-      <div className="rounded-3xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 p-6 backdrop-blur-xl shadow-2xl relative">
+      <div className="rounded-3xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 p-3 sm:p-6 backdrop-blur-xl shadow-2xl relative isolate">
         {/* Day Headers */}
-        <div className="mb-4 grid grid-cols-7 gap-3">
+        <div className="mb-3 sm:mb-4 grid grid-cols-7 gap-2 sm:gap-3">
           {dayNames.map((day, idx) => (
             <div
               key={day}
               className={`
-                py-3 text-center text-xs font-bold uppercase tracking-widest
+                py-2 sm:py-3 text-center text-[10px] sm:text-xs font-bold uppercase tracking-widest
                 ${idx === 0 || idx === 6 ? "text-red-400" : "text-slate-400"}
               `}
             >
@@ -307,7 +317,7 @@ export default function Kalendar({
         </div>
 
         {/* Calendar Days */}
-        <div className="grid grid-cols-7 gap-3">
+        <div className="grid grid-cols-7 gap-2 sm:gap-3">
           {getDaysInMonth().map((date, idx) => {
             const isCurrentDay = isToday(date);
             const isWeekendDay = isWeekend(date);
@@ -323,8 +333,8 @@ export default function Kalendar({
                 whileTap={date ? { scale: 0.95 } : {}}
                 disabled={!date}
                 className={`
-                  group relative aspect-square rounded-2xl
-                  transition-all duration-300
+                  group relative aspect-square rounded-xl sm:rounded-2xl
+                  transition-all duration-300 isolate
                   ${!date ? "cursor-default opacity-0" : ""}
                   ${
                     isCurrentDay
@@ -353,13 +363,13 @@ export default function Kalendar({
                 {date && (
                   <>
                     {/* 3D Shadow Effect */}
-                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-b from-white/0 to-black/10 opacity-50" />
+                    <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-gradient-to-b from-white/0 to-black/10 opacity-50 z-0" />
 
                     {/* Date Number */}
-                    <div className="absolute top-2 left-2 z-10">
+                    <div className="absolute top-1 left-1 sm:top-2 sm:left-2 z-10">
                       <span
                         className={`
-                          text-sm font-bold drop-shadow-lg
+                          text-xs sm:text-sm font-bold drop-shadow-lg
                           ${isCurrentDay ? "text-emerald-300" : ""}
                           ${isWeekendDay || isHolidayDay ? "text-red-400" : "text-slate-200"}
                         `}
@@ -370,11 +380,11 @@ export default function Kalendar({
 
                     {/* Holiday Flag Indicator */}
                     {isHolidayDay && (
-                      <div className="absolute top-2 right-2 z-10">
-                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500/30 backdrop-blur-sm">
+                      <div className="absolute top-1 right-1 sm:top-2 sm:right-2 z-10">
+                        <div className="flex h-4 w-4 sm:h-5 sm:w-5 items-center justify-center rounded-full bg-red-500/30 backdrop-blur-sm">
                           <Icon
                             icon="solar:flag-bold"
-                            className="text-xs text-red-300 drop-shadow-lg"
+                            className="text-[10px] sm:text-xs text-red-300 drop-shadow-lg"
                           />
                         </div>
                       </div>
@@ -382,8 +392,8 @@ export default function Kalendar({
 
                     {/* Holiday Name Text - Positioned in Middle */}
                     {isHolidayDay && holidayName && (
-                      <div className="absolute inset-x-2 top-1/2 -translate-y-1/2 z-10 text-center">
-                        <p className="text-[9px] font-bold text-red-300 leading-tight line-clamp-2 drop-shadow-lg">
+                      <div className="absolute inset-x-1 sm:inset-x-2 top-1/2 -translate-y-1/2 z-10 text-center">
+                        <p className="text-[8px] sm:text-[9px] font-bold text-red-300 leading-tight line-clamp-2 drop-shadow-lg px-0.5">
                           {holidayName}
                         </p>
                       </div>
@@ -391,15 +401,15 @@ export default function Kalendar({
 
                     {/* Event Icons - Show up to 2 */}
                     {dayEvents.length > 0 && (
-                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 flex gap-1">
+                      <div className="absolute bottom-1 sm:bottom-2 left-1/2 -translate-x-1/2 z-10 flex gap-0.5 sm:gap-1">
                         {dayEvents.slice(0, 2).map((event) => {
                           const eventConfig = eventIcons[event.tipe_acara] || eventIcons.LAINNYA;
                           return (
                             <div
                               key={event.id_acara}
                               className={`
-                                flex h-6 w-6 items-center justify-center
-                                rounded-lg bg-gradient-to-br ${eventConfig.gradient}
+                                flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center
+                                rounded-md sm:rounded-lg bg-gradient-to-br ${eventConfig.gradient}
                                 shadow-lg backdrop-blur-sm
                                 transform transition-transform
                                 group-hover:scale-110
@@ -410,14 +420,14 @@ export default function Kalendar({
                             >
                               <Icon
                                 icon={eventConfig.icon}
-                                className="text-xs text-white drop-shadow-md"
+                                className="text-[10px] sm:text-xs text-white drop-shadow-md"
                               />
                             </div>
                           );
                         })}
                         {dayEvents.length > 2 && (
-                          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 shadow-lg">
-                            <span className="text-[10px] font-bold text-white">
+                          <div className="flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-md sm:rounded-lg bg-gradient-to-br from-slate-700 to-slate-800 shadow-lg">
+                            <span className="text-[9px] sm:text-[10px] font-bold text-white">
                               +{dayEvents.length - 2}
                             </span>
                           </div>
@@ -425,11 +435,11 @@ export default function Kalendar({
                       </div>
                     )}
 
-                    {/* Tooltip on Hover - FIXED Z-INDEX */}
+                    {/* Tooltip on Hover - SUPER HIGH Z-INDEX */}
                     {(holidayName || dayEvents.length > 0) && (
                       <div
                         className="
-                          pointer-events-none absolute -top-24 left-1/2 z-[9999]
+                          pointer-events-none absolute -top-24 left-1/2
                           -translate-x-1/2 whitespace-nowrap
                           rounded-xl bg-gradient-to-br from-slate-900 to-slate-800
                           border border-white/10 px-4 py-2.5
@@ -437,7 +447,7 @@ export default function Kalendar({
                           group-hover:opacity-100 group-hover:-top-28
                           max-w-xs backdrop-blur-xl
                         "
-                        style={{ zIndex: 9999 }}
+                        style={{ zIndex: 999999 }}
                       >
                         {holidayName && (
                           <div className="mb-1.5 flex items-center gap-2">
@@ -473,7 +483,7 @@ export default function Kalendar({
                     )}
 
                     {/* Shine Effect on Hover */}
-                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 transition-opacity group-hover:opacity-100" />
+                    <div className="absolute inset-0 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-0 transition-opacity group-hover:opacity-100 z-0" />
                   </>
                 )}
               </motion.button>
@@ -483,31 +493,31 @@ export default function Kalendar({
 
         {/* Loading Overlay */}
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm rounded-3xl z-30">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-sm rounded-3xl z-[100]">
             <Icon icon="solar:settings-linear" className="text-4xl text-emerald-400 animate-spin" />
           </div>
         )}
       </div>
 
       {/* Legend */}
-      <div className="rounded-2xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 p-4 backdrop-blur-xl">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="rounded-2xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 p-3 sm:p-4 backdrop-blur-xl">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
           <div className="flex items-center gap-2">
-            <div className="h-4 w-4 rounded-lg border-2 border-emerald-400 bg-emerald-500/20 shadow-lg shadow-emerald-500/20" />
-            <span className="text-xs text-slate-400">Hari Ini</span>
+            <div className="h-3 w-3 sm:h-4 sm:w-4 rounded-lg border-2 border-emerald-400 bg-emerald-500/20 shadow-lg shadow-emerald-500/20" />
+            <span className="text-[10px] sm:text-xs text-slate-400">Hari Ini</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex h-4 w-4 items-center justify-center rounded-lg bg-red-400 shadow-lg">
-              <Icon icon="solar:flag-bold" className="text-[8px] text-white" />
+            <div className="flex h-3 w-3 sm:h-4 sm:w-4 items-center justify-center rounded-lg bg-red-400 shadow-lg">
+              <Icon icon="solar:flag-bold" className="text-[6px] sm:text-[8px] text-white" />
             </div>
-            <span className="text-xs text-slate-400">Hari Libur</span>
+            <span className="text-[10px] sm:text-xs text-slate-400">Hari Libur</span>
           </div>
           {Object.entries(eventIcons).slice(0, 3).map(([key, config]) => (
             <div key={key} className="flex items-center gap-2">
-              <div className={`flex h-4 w-4 items-center justify-center rounded-lg bg-gradient-to-br ${config.gradient} shadow-lg`}>
-                <Icon icon={config.icon} className="text-[8px] text-white" />
+              <div className={`flex h-3 w-3 sm:h-4 sm:w-4 items-center justify-center rounded-lg bg-gradient-to-br ${config.gradient} shadow-lg`}>
+                <Icon icon={config.icon} className="text-[6px] sm:text-[8px] text-white" />
               </div>
-              <span className="text-xs text-slate-400 capitalize">
+              <span className="text-[10px] sm:text-xs text-slate-400 capitalize">
                 {key.replace("_", " ").toLowerCase()}
               </span>
             </div>

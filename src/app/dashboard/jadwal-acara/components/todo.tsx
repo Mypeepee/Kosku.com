@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useSession } from "next-auth/react";
 
 interface EventData {
   id_acara: string;
@@ -15,6 +16,12 @@ interface EventData {
   tipe_acara: string;
   lokasi?: string;
   status_acara: string;
+  agent?: {
+    id_agent: string;
+    pengguna: {
+      nama_lengkap: string;
+    };
+  };
 }
 
 interface TodoProps {
@@ -28,7 +35,7 @@ const eventConfig: Record<string, { icon: string; color: string; bgColor: string
     icon: "solar:users-group-rounded-bold",
     color: "#3b82f6",
     bgColor: "bg-blue-500/10",
-    label: "Meeting Buyer"
+    label: "Meeting"
   },
   SITE_VISIT: {
     icon: "solar:home-2-bold",
@@ -58,7 +65,7 @@ const eventConfig: Record<string, { icon: string; color: string; bgColor: string
     icon: "solar:case-round-bold",
     color: "#6366f1",
     bgColor: "bg-indigo-500/10",
-    label: "Meeting Internal"
+    label: "Internal"
   },
   TRAINING: {
     icon: "solar:book-bold",
@@ -70,7 +77,7 @@ const eventConfig: Record<string, { icon: string; color: string; bgColor: string
     icon: "solar:flag-bold",
     color: "#ef4444",
     bgColor: "bg-red-500/10",
-    label: "Event PEMILU"
+    label: "PEMILU"
   },
   LAINNYA: {
     icon: "solar:star-bold",
@@ -80,41 +87,96 @@ const eventConfig: Record<string, { icon: string; color: string; bgColor: string
   },
 };
 
-export default function Todo({ events, onEventClick }: TodoProps) {
-  const [filter, setFilter] = useState<"all" | "today" | "upcoming">("upcoming");
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+// ✅ Helper untuk format date ke YYYY-MM-DD
+const toLocalDateString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
-  // Get upcoming 7 days events
+export default function Todo({ events, onEventClick }: TodoProps) {
+  const { data: session } = useSession();
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // ✅ Update current time setiap 30 detik
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30000); // Update every 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // ✅ Check if user can edit event (creator atau OWNER)
+  const canEditEvent = (event: EventData): boolean => {
+    if (!session?.user) return false;
+
+    const currentAgentId = (session.user as any).agentId;
+    const eventCreatorId = event.agent?.id_agent;
+    const userRole = (session.user as any).role;
+
+    // OWNER bisa edit semua
+    if (userRole === "OWNER") return true;
+
+    // Creator bisa edit eventnya sendiri
+    if (currentAgentId && eventCreatorId && currentAgentId === eventCreatorId) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // ✅ CORRECT: Check if join button should be shown for PEMILU
+  const canJoinPemilu = (event: EventData): boolean => {
+    if (event.tipe_acara !== "PEMILU") return false;
+
+    // Ambil tanggal dan waktu event
+    const eventDateStr = event.tanggal_mulai.substring(0, 10);
+    const eventTime = event.waktu_mulai || "00:00";
+    const [hours, minutes] = eventTime.split(':').map(Number);
+
+    // Buat Date object untuk event start time
+    const [year, month, day] = eventDateStr.split('-').map(Number);
+    const eventStartTime = new Date(year, month - 1, day, hours, minutes, 0, 0);
+
+    const now = currentTime;
+
+    // ✅ Tombol JOIN muncul selama event BELUM dimulai
+    // Hilang begitu event SUDAH dimulai (>= waktu mulai)
+    return now < eventStartTime;
+  };
+
+  // ✅ Get upcoming 7 days events
   const upcomingEvents = useMemo(() => {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
     const sevenDaysLater = new Date();
     sevenDaysLater.setDate(today.getDate() + 7);
+    sevenDaysLater.setHours(23, 59, 59, 999);
 
-    let filteredEvents = events.filter((event) => {
-      const eventDate = new Date(event.tanggal_mulai);
-      return eventDate >= today && eventDate <= sevenDaysLater;
+    const filteredEvents = events.filter((event) => {
+      const eventDateStr = event.tanggal_mulai.substring(0, 10);
+      const eventDate = new Date(eventDateStr + 'T00:00:00');
+      
+      const todayStr = toLocalDateString(today);
+      const sevenDaysStr = toLocalDateString(sevenDaysLater);
+      
+      return eventDateStr >= todayStr && eventDateStr <= sevenDaysStr;
     });
-
-    // Apply filter
-    if (filter === "today") {
-      const todayStr = today.toISOString().split("T")[0];
-      filteredEvents = filteredEvents.filter((event) => {
-        const eventStart = new Date(event.tanggal_mulai).toISOString().split("T")[0];
-        return eventStart === todayStr;
-      });
-    }
 
     // Sort by date
     return filteredEvents.sort((a, b) => {
       return new Date(a.tanggal_mulai).getTime() - new Date(b.tanggal_mulai).getTime();
     });
-  }, [events, filter]);
+  }, [events]);
 
-  // Group events by date
+  // ✅ Group events by date
   const groupedEvents = useMemo(() => {
     const groups: Record<string, EventData[]> = {};
     upcomingEvents.forEach((event) => {
-      const dateKey = new Date(event.tanggal_mulai).toISOString().split("T")[0];
+      const dateKey = event.tanggal_mulai.substring(0, 10);
       if (!groups[dateKey]) {
         groups[dateKey] = [];
       }
@@ -125,17 +187,25 @@ export default function Todo({ events, onEventClick }: TodoProps) {
 
   // Format date
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
     const tomorrow = new Date();
     tomorrow.setDate(today.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
 
-    const dateOnly = date.toISOString().split("T")[0];
-    const todayOnly = today.toISOString().split("T")[0];
-    const tomorrowOnly = tomorrow.toISOString().split("T")[0];
+    const dateOnly = new Date(year, month - 1, day);
+    dateOnly.setHours(0, 0, 0, 0);
 
-    if (dateOnly === todayOnly) return "Hari Ini";
-    if (dateOnly === tomorrowOnly) return "Besok";
+    const todayTime = today.getTime();
+    const tomorrowTime = tomorrow.getTime();
+    const dateTime = dateOnly.getTime();
+
+    if (dateTime === todayTime) return "Hari Ini";
+    if (dateTime === tomorrowTime) return "Besok";
 
     const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
     const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -148,83 +218,88 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     return time.substring(0, 5); // HH:MM
   };
 
-  const getRelativeTime = (dateStr: string) => {
-    const eventDate = new Date(dateStr);
-    const now = new Date();
+  const getRelativeTime = (dateStr: string, timeStr?: string) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const eventDate = new Date(year, month - 1, day);
+    
+    if (timeStr) {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      eventDate.setHours(hours, minutes, 0, 0);
+    }
+    
+    const now = currentTime;
     const diffMs = eventDate.getTime() - now.getTime();
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffHours / 24);
 
-    if (diffHours < 1) return "Segera dimulai";
-    if (diffHours < 24) return `${diffHours} jam lagi`;
+    if (diffMs < 0) return "Sudah lewat";
+    if (diffHours < 1) return "Segera";
+    if (diffHours < 24) return `${diffHours}j lagi`;
     if (diffDays === 1) return "Besok";
-    return `${diffDays} hari lagi`;
+    return `${diffDays}h lagi`;
   };
 
+  // ✅ Handle join PEMILU
+  const handleJoinPemilu = async (event: EventData, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click
+    
+    console.log("Join PEMILU:", event);
+    window.location.href = `/dashboard/pemilu/${event.id_acara}`;
+  };
+
+  const todayCount = upcomingEvents.filter((e) => {
+    const today = new Date();
+    const todayStr = toLocalDateString(today);
+    const eventDateStr = e.tanggal_mulai.substring(0, 10);
+    return eventDateStr === todayStr;
+  }).length;
+
+  const tomorrowCount = upcomingEvents.filter((e) => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = toLocalDateString(tomorrow);
+    const eventDateStr = e.tanggal_mulai.substring(0, 10);
+    return eventDateStr === tomorrowStr;
+  }).length;
+
   return (
-    <div className="flex h-full flex-col rounded-3xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 backdrop-blur-xl shadow-2xl">
+    <div className="flex h-full max-h-[calc(100vh-200px)] flex-col rounded-3xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 backdrop-blur-xl shadow-2xl">
       {/* Header */}
-      <div className="border-b border-white/10 bg-white/5 px-6 py-5">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30">
-              <Icon icon="solar:calendar-mark-bold" className="text-xl text-emerald-300" />
+      <div className="flex-shrink-0 border-b border-white/10 bg-white/5 px-4 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30">
+              <Icon icon="solar:calendar-mark-bold" className="text-lg text-emerald-300" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white">Agenda Mendatang</h3>
-              <p className="text-xs text-slate-400">7 hari ke depan</p>
+              <h3 className="text-sm font-bold text-white">Agenda</h3>
+              <p className="text-[10px] text-slate-400">7 hari</p>
             </div>
           </div>
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-            <span className="text-sm font-bold text-emerald-300">{upcomingEvents.length}</span>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+            <span className="text-xs font-bold text-emerald-300">{upcomingEvents.length}</span>
           </div>
-        </div>
-
-        {/* Filter Tabs */}
-        <div className="flex gap-2 rounded-xl bg-white/5 p-1.5 border border-white/10">
-          {[
-            { value: "all", label: "Semua", icon: "solar:list-bold" },
-            { value: "today", label: "Hari Ini", icon: "solar:calendar-bold" },
-            { value: "upcoming", label: "Mendatang", icon: "solar:clock-circle-bold" },
-          ].map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setFilter(tab.value as any)}
-              className={`
-                flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2
-                text-xs font-semibold transition-all duration-200
-                ${
-                  filter === tab.value
-                    ? "bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 text-emerald-300 shadow-lg shadow-emerald-500/20"
-                    : "text-slate-400 hover:text-slate-300 hover:bg-white/5"
-                }
-              `}
-            >
-              <Icon icon={tab.icon} className="text-base" />
-              <span className="hidden sm:inline">{tab.label}</span>
-            </button>
-          ))}
         </div>
       </div>
 
       {/* Events List */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar">
         {Object.keys(groupedEvents).length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center py-12">
-            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-white/10">
-              <Icon icon="solar:inbox-line-bold-duotone" className="text-4xl text-slate-600" />
+          <div className="flex h-full flex-col items-center justify-center py-8">
+            <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-white/10">
+              <Icon icon="solar:inbox-line-bold-duotone" className="text-3xl text-slate-600" />
             </div>
-            <p className="text-sm font-semibold text-slate-500">Tidak ada acara</p>
-            <p className="text-xs text-slate-600">Belum ada acara untuk 7 hari ke depan</p>
+            <p className="text-xs font-semibold text-slate-500">Tidak ada acara</p>
+            <p className="text-[10px] text-slate-600">7 hari ke depan kosong</p>
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {Object.entries(groupedEvents).map(([date, dateEvents]) => (
               <div key={date}>
                 {/* Date Header */}
-                <div className="mb-3 flex items-center gap-2 px-2">
+                <div className="mb-2 flex items-center gap-2">
                   <div className="flex-1 h-px bg-gradient-to-r from-white/10 to-transparent" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                     {formatDate(date)}
                   </span>
                   <div className="flex-1 h-px bg-gradient-to-l from-white/10 to-transparent" />
@@ -235,117 +310,164 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                   <AnimatePresence mode="popLayout">
                     {dateEvents.map((event, idx) => {
                       const config = eventConfig[event.tipe_acara] || eventConfig.LAINNYA;
+                      const canEdit = canEditEvent(event);
+                      const showJoinButton = canJoinPemilu(event);
+
                       return (
-                        <motion.button
+                        <motion.div
                           key={event.id_acara}
-                          initial={{ opacity: 0, y: 20 }}
+                          initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, x: -100 }}
-                          transition={{ delay: idx * 0.05 }}
-                          onClick={() => onEventClick?.(event)}
+                          exit={{ opacity: 0, x: -50 }}
+                          transition={{ delay: idx * 0.03 }}
                           className="
-                            group relative w-full overflow-hidden
-                            rounded-2xl bg-gradient-to-br from-white/10 to-white/5
-                            border border-white/10 p-4
-                            transition-all duration-300
+                            group relative overflow-hidden
+                            rounded-xl bg-gradient-to-br from-white/10 to-white/5
+                            border border-white/10
+                            transition-all duration-200
                             hover:from-white/15 hover:to-white/10
                             hover:border-white/20
-                            hover:shadow-xl hover:shadow-black/20
-                            hover:-translate-y-1
-                            active:scale-[0.98]
+                            hover:shadow-lg hover:shadow-black/10
                           "
                         >
                           {/* 3D Shadow */}
-                          <div className="absolute inset-0 bg-gradient-to-b from-white/0 to-black/10 opacity-50" />
+                          <div className="absolute inset-0 bg-gradient-to-b from-white/0 to-black/5 opacity-50" />
 
-                          <div className="relative flex items-start gap-3">
-                            {/* Icon */}
-                            <div
-                              className={`
-                                flex h-11 w-11 flex-shrink-0 items-center justify-center
-                                rounded-xl ${config.bgColor} border
-                                shadow-lg
-                              `}
-                              style={{
-                                borderColor: `${config.color}40`,
-                                boxShadow: `0 4px 12px ${config.color}20`,
-                              }}
-                            >
-                              <Icon
-                                icon={config.icon}
-                                className="text-xl"
-                                style={{ color: config.color }}
-                              />
-                            </div>
-
-                            {/* Content */}
-                            <div className="flex-1 text-left">
-                              {/* Title */}
-                              <h4 className="mb-1 font-semibold text-white line-clamp-1 group-hover:text-emerald-300 transition-colors">
-                                {event.judul_acara}
-                              </h4>
-
-                              {/* Meta Info */}
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                                {/* Time */}
-                                {event.waktu_mulai && (
-                                  <div className="flex items-center gap-1">
-                                    <Icon icon="solar:clock-circle-bold" className="text-sm" />
-                                    <span>
-                                      {formatTime(event.waktu_mulai)}
-                                      {event.waktu_selesai && ` - ${formatTime(event.waktu_selesai)}`}
-                                    </span>
-                                  </div>
-                                )}
-
-                                {/* Location */}
-                                {event.lokasi && (
-                                  <>
-                                    <span className="text-slate-600">•</span>
-                                    <div className="flex items-center gap-1">
-                                      <Icon icon="solar:map-point-bold" className="text-sm" />
-                                      <span className="line-clamp-1">{event.lokasi}</span>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-
-                              {/* Description */}
-                              {event.deskripsi && (
-                                <p className="mt-2 text-xs text-slate-500 line-clamp-2">
-                                  {event.deskripsi}
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Badge */}
-                            <div className="flex flex-col items-end gap-2">
-                              {/* Type Badge */}
-                              <span
-                                className="rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wider"
+                          <div className="relative p-3">
+                            <div className="flex items-start gap-2">
+                              {/* Icon */}
+                              <div
+                                className={`
+                                  flex h-9 w-9 flex-shrink-0 items-center justify-center
+                                  rounded-lg ${config.bgColor} border
+                                  shadow-md
+                                `}
                                 style={{
-                                  backgroundColor: `${config.color}15`,
-                                  color: config.color,
+                                  borderColor: `${config.color}30`,
+                                  boxShadow: `0 2px 8px ${config.color}15`,
                                 }}
                               >
-                                {config.label}
-                              </span>
+                                <Icon
+                                  icon={config.icon}
+                                  className="text-base"
+                                  style={{ color: config.color }}
+                                />
+                              </div>
 
-                              {/* Relative Time */}
-                              <span className="text-[10px] font-semibold text-emerald-400">
-                                {getRelativeTime(event.tanggal_mulai)}
-                              </span>
+                              {/* Content */}
+                              <div className="flex-1 min-w-0">
+                                {/* Title */}
+                                <h4 className="text-xs font-semibold text-white line-clamp-1 mb-1">
+                                  {event.judul_acara}
+                                </h4>
+
+                                {/* Meta Info */}
+                                <div className="flex flex-col gap-0.5">
+                                  {/* Time */}
+                                  {event.waktu_mulai && (
+                                    <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                                      <Icon icon="solar:clock-circle-bold" className="text-xs" />
+                                      <span>
+                                        {formatTime(event.waktu_mulai)}
+                                        {event.waktu_selesai && ` - ${formatTime(event.waktu_selesai)}`}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {/* Location */}
+                                  {event.lokasi && (
+                                    <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                                      <Icon icon="solar:map-point-bold" className="text-xs" />
+                                      <span className="truncate">{event.lokasi}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Right Side: Badge */}
+                              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                                {/* Relative Time */}
+                                <span className="text-[9px] font-bold text-emerald-400">
+                                  {getRelativeTime(event.tanggal_mulai, event.waktu_mulai)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="mt-2 flex items-center gap-2">
+                              {/* ✅ Tombol Join PEMILU (Muncul sampai event dimulai) */}
+                              {showJoinButton && (
+                                <motion.button
+                                  initial={{ scale: 0.8, opacity: 0 }}
+                                  animate={{ scale: 1, opacity: 1 }}
+                                  onClick={(e) => handleJoinPemilu(event, e)}
+                                  className="
+                                    flex-1 flex items-center justify-center gap-1.5
+                                    rounded-lg bg-gradient-to-r from-red-500 to-red-600
+                                    px-3 py-2 text-xs font-bold text-white
+                                    shadow-lg shadow-red-500/50
+                                    transition-all duration-200
+                                    hover:shadow-xl hover:shadow-red-500/60
+                                    hover:scale-105
+                                    active:scale-95
+                                  "
+                                >
+                                  <Icon icon="solar:login-3-bold" className="text-sm" />
+                                  Join PEMILU
+                                </motion.button>
+                              )}
+
+                              {/* ✅ Tombol Edit (Owner atau Creator) */}
+                              {canEdit && (
+                                <button
+                                  onClick={() => onEventClick?.(event)}
+                                  className={`
+                                    flex items-center justify-center gap-1.5
+                                    rounded-lg bg-gradient-to-r from-blue-500/20 to-blue-600/10
+                                    border border-blue-500/30
+                                    text-xs font-semibold text-blue-300
+                                    transition-all duration-200
+                                    hover:from-blue-500/30 hover:to-blue-600/20
+                                    hover:border-blue-500/50
+                                    hover:scale-105
+                                    active:scale-95
+                                    ${showJoinButton 
+                                      ? "flex-shrink-0 w-10 h-10 px-0" 
+                                      : "flex-1 px-3 py-2"
+                                    }
+                                  `}
+                                >
+                                  <Icon icon="solar:pen-bold" className="text-base" />
+                                  {!showJoinButton && <span>Edit</span>}
+                                </button>
+                              )}
+
+                              {/* ✅ Tombol View (Jika tidak bisa edit dan bukan PEMILU yang bisa di-join) */}
+                              {!canEdit && !showJoinButton && (
+                                <button
+                                  onClick={() => onEventClick?.(event)}
+                                  className="
+                                    flex-1 flex items-center justify-center gap-1.5
+                                    rounded-lg bg-gradient-to-r from-slate-500/20 to-slate-600/10
+                                    border border-slate-500/30
+                                    px-3 py-2 text-xs font-semibold text-slate-300
+                                    transition-all duration-200
+                                    hover:from-slate-500/30 hover:to-slate-600/20
+                                    hover:border-slate-500/50
+                                    hover:scale-105
+                                    active:scale-95
+                                  "
+                                >
+                                  <Icon icon="solar:eye-bold" className="text-sm" />
+                                  Lihat Detail
+                                </button>
+                              )}
                             </div>
                           </div>
 
                           {/* Hover Shine */}
-                          <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/0 opacity-0 transition-opacity group-hover:opacity-100" />
-
-                          {/* Arrow Icon */}
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 transition-all group-hover:opacity-100 group-hover:translate-x-0 translate-x-2">
-                            <Icon icon="solar:alt-arrow-right-bold" className="text-emerald-400" />
-                          </div>
-                        </motion.button>
+                          <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/0 opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none" />
+                        </motion.div>
                       );
                     })}
                   </AnimatePresence>
@@ -357,33 +479,19 @@ export default function Todo({ events, onEventClick }: TodoProps) {
       </div>
 
       {/* Footer Stats */}
-      <div className="border-t border-white/10 bg-white/5 px-6 py-4">
-        <div className="grid grid-cols-3 gap-4">
+      <div className="flex-shrink-0 border-t border-white/10 bg-white/5 px-4 py-3">
+        <div className="grid grid-cols-3 gap-2">
           <div className="text-center">
-            <p className="text-xs text-slate-500 mb-1">Total</p>
-            <p className="text-lg font-bold text-white">{upcomingEvents.length}</p>
+            <p className="text-[9px] text-slate-500 mb-0.5">Total</p>
+            <p className="text-sm font-bold text-white">{upcomingEvents.length}</p>
           </div>
           <div className="text-center border-x border-white/10">
-            <p className="text-xs text-slate-500 mb-1">Hari Ini</p>
-            <p className="text-lg font-bold text-emerald-300">
-              {upcomingEvents.filter((e) => {
-                const today = new Date().toISOString().split("T")[0];
-                const eventDate = new Date(e.tanggal_mulai).toISOString().split("T")[0];
-                return eventDate === today;
-              }).length}
-            </p>
+            <p className="text-[9px] text-slate-500 mb-0.5">Hari Ini</p>
+            <p className="text-sm font-bold text-emerald-300">{todayCount}</p>
           </div>
           <div className="text-center">
-            <p className="text-xs text-slate-500 mb-1">Besok</p>
-            <p className="text-lg font-bold text-blue-300">
-              {upcomingEvents.filter((e) => {
-                const tomorrow = new Date();
-                tomorrow.setDate(tomorrow.getDate() + 1);
-                const tomorrowStr = tomorrow.toISOString().split("T")[0];
-                const eventDate = new Date(e.tanggal_mulai).toISOString().split("T")[0];
-                return eventDate === tomorrowStr;
-              }).length}
-            </p>
+            <p className="text-[9px] text-slate-500 mb-0.5">Besok</p>
+            <p className="text-sm font-bold text-blue-300">{tomorrowCount}</p>
           </div>
         </div>
       </div>

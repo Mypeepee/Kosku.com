@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 const prisma = new PrismaClient();
 
@@ -11,6 +12,12 @@ function serializeBigInt(obj: any): any {
       typeof value === "bigint" ? value.toString() : value
     )
   );
+}
+
+// Helper function untuk convert date ke UTC midnight (00:00:00)
+function toUTCDate(dateString: string): Date {
+  const date = new Date(dateString);
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0));
 }
 
 // GET - Ambil semua acara
@@ -58,7 +65,6 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // Serialize BigInt sebelum return
     return NextResponse.json(serializeBigInt(acara), { status: 200 });
   } catch (error) {
     console.error("Error fetching acara:", error);
@@ -85,37 +91,45 @@ export async function POST(request: NextRequest) {
     }
 
     // Get session untuk id_agent
-    const id_agent = null; // TODO: Ganti dengan session real
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Unauthorized. Silakan login terlebih dahulu." },
+        { status: 401 }
+      );
+    }
 
-    // Validasi tanggal
-    const tanggalMulai = new Date(body.tanggal_mulai);
-    const tanggalSelesai = new Date(body.tanggal_selesai);
+    console.log("Session data:", {
+      userId: session.user.id,
+      agentId: (session.user as any).agentId,
+    });
+
+    // ✅ FIX: Field name yang benar adalah id_pengguna
+    const agent = await prisma.agent.findFirst({
+      where: { id_pengguna: session.user.id }, // ✅ GANTI id_user → id_pengguna
+      select: { id_agent: true },
+    });
+
+    if (!agent) {
+      return NextResponse.json(
+        { error: "Agent tidak ditemukan untuk user ini. Pastikan Anda sudah terdaftar sebagai agent." },
+        { status: 404 }
+      );
+    }
+
+    const agentId = agent.id_agent;
+    console.log("Agent ID found:", agentId);
+
+    // Validasi tanggal (tanpa waktu, cuma date)
+    const tanggalMulai = toUTCDate(body.tanggal_mulai);
+    const tanggalSelesai = toUTCDate(body.tanggal_selesai);
 
     if (tanggalSelesai < tanggalMulai) {
       return NextResponse.json(
         { error: "Tanggal selesai tidak boleh lebih awal dari tanggal mulai" },
         { status: 400 }
       );
-    }
-
-    // Gabungkan tanggal dan waktu untuk timestamp
-    let timestampMulai: Date;
-    let timestampSelesai: Date;
-
-    if (body.waktu_mulai) {
-      const [hours, minutes] = body.waktu_mulai.split(":");
-      timestampMulai = new Date(tanggalMulai);
-      timestampMulai.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-    } else {
-      timestampMulai = tanggalMulai;
-    }
-
-    if (body.waktu_selesai) {
-      const [hours, minutes] = body.waktu_selesai.split(":");
-      timestampSelesai = new Date(tanggalSelesai);
-      timestampSelesai.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-    } else {
-      timestampSelesai = tanggalSelesai;
     }
 
     // Validasi tipe acara
@@ -138,16 +152,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Current timestamp untuk created/updated (dengan waktu)
+    const now = new Date();
+
     // Simpan ke database
     const acara = await prisma.acara.create({
       data: {
-        id_agent: id_agent,
+        id_agent: agentId,
         id_property: body.id_property || null,
         judul_acara: body.judul_acara.trim(),
         deskripsi: body.deskripsi?.trim() || null,
         tipe_acara: body.tipe_acara,
-        tanggal_mulai: timestampMulai,
-        tanggal_selesai: timestampSelesai,
+        tanggal_mulai: tanggalMulai,
+        tanggal_selesai: tanggalSelesai,
         waktu_mulai: body.waktu_mulai || null,
         waktu_selesai: body.waktu_selesai || null,
         lokasi: body.lokasi?.trim() || null,
@@ -155,6 +172,8 @@ export async function POST(request: NextRequest) {
         durasi_pilih: body.tipe_acara === "PEMILU" ? (body.durasi_pilih || 60) : null,
         status_acara: "SCHEDULED",
         reminder_sent: false,
+        tanggal_dibuat: now,
+        tanggal_diupdate: now,
       },
       include: {
         agent: {
@@ -170,7 +189,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Serialize BigInt sebelum return
+    console.log("Acara created successfully:", {
+      id: typeof acara.id_acara === 'bigint' ? acara.id_acara.toString() : acara.id_acara,
+      id_agent: typeof acara.id_agent === 'bigint' ? acara.id_agent.toString() : acara.id_agent,
+    });
+
     return NextResponse.json(
       {
         message: "Acara berhasil ditambahkan",
@@ -217,8 +240,17 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Unauthorized. Silakan login terlebih dahulu." },
+        { status: 401 }
+      );
+    }
+
     const existingAcara = await prisma.acara.findUnique({
-      where: { id_acara: BigInt(id_acara) },
+      where: { id_acara: id_acara },
     });
 
     if (!existingAcara) {
@@ -240,11 +272,11 @@ export async function PUT(request: NextRequest) {
     if (updateData.status_acara) dataToUpdate.status_acara = updateData.status_acara;
 
     if (updateData.tanggal_mulai) {
-      dataToUpdate.tanggal_mulai = new Date(updateData.tanggal_mulai);
+      dataToUpdate.tanggal_mulai = toUTCDate(updateData.tanggal_mulai);
     }
 
     if (updateData.tanggal_selesai) {
-      dataToUpdate.tanggal_selesai = new Date(updateData.tanggal_selesai);
+      dataToUpdate.tanggal_selesai = toUTCDate(updateData.tanggal_selesai);
     }
 
     if (updateData.waktu_mulai !== undefined) dataToUpdate.waktu_mulai = updateData.waktu_mulai;
@@ -255,7 +287,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const updatedAcara = await prisma.acara.update({
-      where: { id_acara: BigInt(id_acara) },
+      where: { id_acara: id_acara },
       data: dataToUpdate,
       include: {
         agent: {
@@ -271,7 +303,6 @@ export async function PUT(request: NextRequest) {
       },
     });
 
-    // Serialize BigInt sebelum return
     return NextResponse.json(
       {
         message: "Acara berhasil diperbarui",
@@ -303,8 +334,17 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    const session = await getServerSession(authOptions);
+    
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Unauthorized. Silakan login terlebih dahulu." },
+        { status: 401 }
+      );
+    }
+
     const existingAcara = await prisma.acara.findUnique({
-      where: { id_acara: BigInt(id_acara) },
+      where: { id_acara: id_acara },
     });
 
     if (!existingAcara) {
@@ -315,7 +355,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     await prisma.acara.delete({
-      where: { id_acara: BigInt(id_acara) },
+      where: { id_acara: id_acara },
     });
 
     return NextResponse.json(

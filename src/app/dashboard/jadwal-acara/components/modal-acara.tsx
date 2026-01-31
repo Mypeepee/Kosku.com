@@ -1,15 +1,31 @@
-// src/app/dashboard/jadwal-acara/components/modal-acara.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@iconify/react";
 import { createPortal } from "react-dom";
+
+interface EventData {
+  id_acara: string;
+  judul_acara: string;
+  deskripsi?: string;
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  waktu_mulai?: string;
+  waktu_selesai?: string;
+  tipe_acara: string;
+  lokasi?: string;
+  alamat_lengkap?: string;
+  status_acara: string;
+  id_property?: string;
+  durasi_pilih?: number;
+}
 
 interface ModalAcaraProps {
   open: boolean;
   onClose: () => void;
   selectedDate?: Date | null;
+  selectedEvent?: EventData | null;
   onSuccess?: () => void;
 }
 
@@ -25,20 +41,93 @@ const tipeAcaraOptions = [
   { value: "LAINNYA", label: "Lainnya", icon: "solar:star-linear", color: "bg-gray-500" },
 ];
 
-export default function ModalAcara({ open, onClose, selectedDate, onSuccess }: ModalAcaraProps) {
+// ✅ Helper function untuk format date ke YYYY-MM-DD (timezone-safe)
+const formatDateForInput = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export default function ModalAcara({ 
+  open, 
+  onClose, 
+  selectedDate, 
+  selectedEvent,
+  onSuccess 
+}: ModalAcaraProps) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
   const [formData, setFormData] = useState({
     judul_acara: "",
     deskripsi: "",
     tipe_acara: "BUYER_MEETING",
-    tanggal_mulai: selectedDate ? selectedDate.toISOString().split("T")[0] : "",
-    tanggal_selesai: selectedDate ? selectedDate.toISOString().split("T")[0] : "",
+    tanggal_mulai: "",
+    tanggal_selesai: "",
     waktu_mulai: "09:00",
     waktu_selesai: "10:00",
     lokasi: "",
     alamat_lengkap: "",
     durasi_pilih: 60,
+    id_property: "",
   });
+
+  // ✅ Set default date ketika selectedDate berubah (ADD MODE)
+  useEffect(() => {
+    if (selectedDate && open && !selectedEvent) {
+      const dateStr = formatDateForInput(selectedDate);
+      console.log("Setting default date:", dateStr);
+      
+      setFormData(prev => ({
+        ...prev,
+        tanggal_mulai: dateStr,
+        tanggal_selesai: dateStr,
+      }));
+    }
+  }, [selectedDate, open, selectedEvent]);
+
+  // ✅ Set form data ketika edit event (EDIT MODE)
+  useEffect(() => {
+    if (selectedEvent && open) {
+      console.log("Editing event:", selectedEvent);
+      
+      setFormData({
+        judul_acara: selectedEvent.judul_acara,
+        deskripsi: selectedEvent.deskripsi || "",
+        tipe_acara: selectedEvent.tipe_acara,
+        tanggal_mulai: selectedEvent.tanggal_mulai.substring(0, 10),
+        tanggal_selesai: selectedEvent.tanggal_selesai.substring(0, 10),
+        waktu_mulai: selectedEvent.waktu_mulai || "09:00",
+        waktu_selesai: selectedEvent.waktu_selesai || "10:00",
+        lokasi: selectedEvent.lokasi || "",
+        alamat_lengkap: selectedEvent.alamat_lengkap || "",
+        durasi_pilih: selectedEvent.durasi_pilih || 60,
+        id_property: selectedEvent.id_property || "",
+      });
+    } else if (!selectedEvent && open && !selectedDate) {
+      // ✅ Reset form jika bukan edit dan tidak ada selected date
+      resetForm();
+    }
+  }, [selectedEvent, open, selectedDate]);
+
+  // ✅ Reset form to default
+  const resetForm = () => {
+    setFormData({
+      judul_acara: "",
+      deskripsi: "",
+      tipe_acara: "BUYER_MEETING",
+      tanggal_mulai: "",
+      tanggal_selesai: "",
+      waktu_mulai: "09:00",
+      waktu_selesai: "10:00",
+      lokasi: "",
+      alamat_lengkap: "",
+      durasi_pilih: 60,
+      id_property: "",
+    });
+    setError(null);
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -48,48 +137,71 @@ export default function ModalAcara({ open, onClose, selectedDate, onSuccess }: M
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
     try {
+      // ✅ Validation
+      if (!formData.judul_acara.trim()) {
+        throw new Error("Judul acara wajib diisi");
+      }
+
+      if (!formData.tanggal_mulai || !formData.tanggal_selesai) {
+        throw new Error("Tanggal mulai dan selesai wajib diisi");
+      }
+
+      // ✅ Check if tanggal_selesai >= tanggal_mulai
+      if (formData.tanggal_selesai < formData.tanggal_mulai) {
+        throw new Error("Tanggal selesai tidak boleh lebih awal dari tanggal mulai");
+      }
+
+      const payload = {
+        ...formData,
+        id_acara: selectedEvent?.id_acara,
+      };
+
+      console.log("Submitting payload:", payload);
+
       const response = await fetch("/api/dashboard/acara", {
-        method: "POST",
+        method: selectedEvent ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        throw new Error("Gagal menyimpan acara");
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Gagal menyimpan acara");
       }
 
       const result = await response.json();
-      
-      // Reset form
-      setFormData({
-        judul_acara: "",
-        deskripsi: "",
-        tipe_acara: "BUYER_MEETING",
-        tanggal_mulai: "",
-        tanggal_selesai: "",
-        waktu_mulai: "09:00",
-        waktu_selesai: "10:00",
-        lokasi: "",
-        alamat_lengkap: "",
-        durasi_pilih: 60,
-      });
+      console.log("Success:", result);
 
+      // ✅ Reset form
+      resetForm();
+
+      // ✅ Callback success
       if (onSuccess) onSuccess();
       onClose();
-      alert("Acara berhasil ditambahkan!");
+
+      // ✅ Show success message (optional: replace with toast)
+      alert(selectedEvent ? "Acara berhasil diperbarui!" : "Acara berhasil ditambahkan!");
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error:", error);
-      alert("Gagal menyimpan acara. Silakan coba lagi.");
+      setError(error.message || "Gagal menyimpan acara. Silakan coba lagi.");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
   // Gunakan portal untuk render modal di luar DOM tree
   if (typeof window === "undefined") return null;
+
+  const isEditMode = !!selectedEvent;
 
   const modalContent = (
     <AnimatePresence>
@@ -100,13 +212,16 @@ export default function ModalAcara({ open, onClose, selectedDate, onSuccess }: M
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={handleClose}
             className="fixed inset-0 z-[9998] bg-black/60 backdrop-blur-sm"
             style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}
           />
 
-          {/* Modal - Tambahkan flex centering di container */}
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}>
+          {/* Modal - Centered */}
+          <div 
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4" 
+            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -124,25 +239,47 @@ export default function ModalAcara({ open, onClose, selectedDate, onSuccess }: M
               <div className="border-b border-white/10 bg-white/5 px-6 py-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/50">
-                      <Icon icon="solar:calendar-add-linear" className="text-xl text-emerald-300" />
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
+                      isEditMode 
+                        ? "bg-blue-500/20 border-blue-500/50" 
+                        : "bg-emerald-500/20 border-emerald-500/50"
+                    }`}>
+                      <Icon 
+                        icon={isEditMode ? "solar:pen-linear" : "solar:calendar-add-linear"} 
+                        className={`text-xl ${isEditMode ? "text-blue-300" : "text-emerald-300"}`} 
+                      />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-white">Tambah Acara Baru</h3>
-                      <p className="text-xs text-slate-400">Buat jadwal atau event baru</p>
+                      <h3 className="text-xl font-bold text-white">
+                        {isEditMode ? "Edit Acara" : "Tambah Acara Baru"}
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        {isEditMode ? "Perbarui detail acara" : "Buat jadwal atau event baru"}
+                      </p>
                     </div>
                   </div>
                   <button
-                    onClick={onClose}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+                    onClick={handleClose}
+                    disabled={loading}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-50"
                   >
                     <Icon icon="solar:close-circle-linear" className="text-2xl" />
                   </button>
                 </div>
               </div>
 
+              {/* Error Message */}
+              {error && (
+                <div className="mx-6 mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
+                  <div className="flex items-start gap-2">
+                    <Icon icon="solar:danger-circle-bold" className="text-red-400 text-lg flex-shrink-0 mt-0.5" />
+                    <span className="text-sm text-red-300">{error}</span>
+                  </div>
+                </div>
+              )}
+
               {/* Form */}
-              <form onSubmit={handleSubmit} className="overflow-y-auto max-h-[calc(90vh-180px)] px-6 py-4">
+              <form onSubmit={handleSubmit} className="overflow-y-auto max-h-[calc(90vh-180px)] px-6 py-4 custom-scrollbar">
                 <div className="space-y-5">
                   {/* Judul Acara */}
                   <div>
@@ -227,6 +364,7 @@ export default function ModalAcara({ open, onClose, selectedDate, onSuccess }: M
                         value={formData.tanggal_selesai}
                         onChange={handleChange}
                         required
+                        min={formData.tanggal_mulai}
                         className="
                           w-full rounded-xl border border-white/10 
                           bg-white/5 px-4 py-3 text-white
@@ -371,7 +509,7 @@ export default function ModalAcara({ open, onClose, selectedDate, onSuccess }: M
                 <div className="flex items-center justify-end gap-3">
                   <button
                     type="button"
-                    onClick={onClose}
+                    onClick={handleClose}
                     disabled={loading}
                     className="
                       rounded-xl border border-white/10 bg-white/5 
@@ -386,25 +524,29 @@ export default function ModalAcara({ open, onClose, selectedDate, onSuccess }: M
                     type="submit"
                     onClick={handleSubmit}
                     disabled={loading}
-                    className="
+                    className={`
                       group relative overflow-hidden
-                      rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600
+                      rounded-xl bg-gradient-to-r 
+                      ${isEditMode 
+                        ? "from-blue-500 to-blue-600 shadow-blue-500/50 hover:shadow-blue-500/60" 
+                        : "from-emerald-500 to-emerald-600 shadow-emerald-500/50 hover:shadow-emerald-500/60"
+                      }
                       px-6 py-2.5 text-sm font-semibold text-white
-                      shadow-lg shadow-emerald-500/50
+                      shadow-lg
                       transition-all duration-300
-                      hover:shadow-xl hover:shadow-emerald-500/60
+                      hover:shadow-xl
                       disabled:opacity-50 disabled:cursor-not-allowed
-                    "
+                    `}
                   >
                     {loading ? (
                       <span className="flex items-center gap-2">
                         <Icon icon="solar:settings-linear" className="animate-spin text-lg" />
-                        Menyimpan...
+                        {isEditMode ? "Memperbarui..." : "Menyimpan..."}
                       </span>
                     ) : (
                       <span className="flex items-center gap-2">
                         <Icon icon="solar:check-circle-bold" className="text-lg" />
-                        Simpan Acara
+                        {isEditMode ? "Perbarui Acara" : "Simpan Acara"}
                       </span>
                     )}
                   </button>

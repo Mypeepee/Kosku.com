@@ -66,13 +66,13 @@ export const authOptions: AuthOptions = {
           throw new Error("Kata sandi salah.");
         }
 
-        // Return Data User Manual
+        // Return Data User Manual (Convert BigInt to String)
         return {
-          id: user.id_pengguna,
+          id: user.id_pengguna.toString(),
           name: user.nama_lengkap,
           email: user.email,
           image: user.foto_profil_url,
-          role: user.peran, // Kirim role ke JWT
+          role: user.peran,
         };
       },
     }),
@@ -80,7 +80,7 @@ export const authOptions: AuthOptions = {
 
   pages: {
     signIn: "/signin",
-    error: "/signin", // Redirect error kembali ke halaman login
+    error: "/signin",
   },
 
   session: {
@@ -108,17 +108,22 @@ export const authOptions: AuthOptions = {
 
           // 2. JIKA BELUM ADA -> Buat User Baru
           if (!existingUser) {
-            await prisma.pengguna.create({
+            const newUser = await prisma.pengguna.create({
               data: {
                 nama_lengkap: profile.name || "Pengguna Google",
                 email: profile.email,
-                google_id: account.providerAccountId, // Simpan ID Google
+                google_id: account.providerAccountId,
                 foto_profil_url: profile.picture,
-                kata_sandi: null, // Password kosong
+                kata_sandi: null,
                 peran: "USER",
                 status_akun: "AKTIF",
                 wa_terverifikasi: true,
               },
+            });
+
+            console.log("✅ New Google user created:", {
+              id: newUser.id_pengguna.toString(),
+              email: newUser.email,
             });
           }
           // 3. JIKA SUDAH ADA (tapi belum link Google ID) -> Update
@@ -130,22 +135,24 @@ export const authOptions: AuthOptions = {
                 foto_profil_url: existingUser.foto_profil_url || profile.picture,
               },
             });
+
+            console.log("✅ Google ID linked to existing user:", existingUser.email);
           }
 
-          return true; // Lanjut login
+          return true;
         } catch (error) {
-          console.error("Error saving Google user:", error);
-          return false; // Gagal login (Access Denied)
+          console.error("❌ Error saving Google user:", error);
+          return false;
         }
       }
-      return true; // Login manual lanjut saja
+      return true;
     },
 
     // === CALLBACK 2: JWT ===
     async jwt({ token, user, account }: any) {
       // Saat pertama kali login (credentials)
       if (user) {
-        token.id = user.id;
+        token.id = user.id; // Sudah string dari authorize
         token.role = user.role;
       }
 
@@ -157,22 +164,37 @@ export const authOptions: AuthOptions = {
         });
 
         if (dbUser) {
-          token.id = dbUser.id_pengguna;
+          token.id = dbUser.id_pengguna.toString();
           token.role = dbUser.peran;
+          console.log("✅ JWT updated for Google user:", token.id);
         }
       }
 
-      // Tambahkan lookup agent berdasarkan id_pengguna
-      if (token.id) {
-        const agent = await prisma.agent.findUnique({
-          where: { id_pengguna: token.id as string },
-          select: { id_agent: true },
-        });
+      // ✅ FIX: Tambahkan lookup agent berdasarkan id_pengguna
+      if (token.id && !token.agentId) {
+        try {
+          const agent = await prisma.agent.findFirst({
+            where: { id_pengguna: token.id }, // ✅ FIXED: id_pengguna (STRING)
+            select: { id_agent: true },
+          });
 
-        if (agent) {
-          (token as any).agentId = agent.id_agent;
-        } else {
-          (token as any).agentId = null;
+          if (agent) {
+            // Handle BigInt conversion
+            token.agentId = typeof agent.id_agent === 'bigint' 
+              ? agent.id_agent.toString() 
+              : agent.id_agent;
+            
+            console.log("✅ Agent found:", {
+              userId: token.id,
+              agentId: token.agentId,
+            });
+          } else {
+            token.agentId = null;
+            console.log("⚠️ No agent found for user:", token.id);
+          }
+        } catch (error) {
+          console.error("❌ Error fetching agent:", error);
+          token.agentId = null;
         }
       }
 
@@ -183,8 +205,14 @@ export const authOptions: AuthOptions = {
     async session({ session, token }: any) {
       if (session.user) {
         session.user.id = token.id;
-        session.user.role = token.role; // Frontend bisa baca role user
-        (session.user as any).agentId = (token as any).agentId || null;
+        session.user.role = token.role;
+        session.user.agentId = token.agentId || null;
+        
+        console.log("✅ Session created:", {
+          id: session.user.id,
+          role: session.user.role,
+          agentId: session.user.agentId,
+        });
       }
       return session;
     },
