@@ -61,7 +61,7 @@ const config: Config = {
         darkmode: "#000510",
         darklight: "#0c372a",
         dark_border: "#959595",
-        tealGreen : "#477E70",
+        tealGreen: "#477E70",
         charcoalGray: "#666C78",
         deepSlate: "#282C36",
         slateGray: "#2F3543",
@@ -174,6 +174,66 @@ const config: Config = {
       }
     },
   },
-  plugins: [],
+  plugins: [
+    // Custom Scrollbar Plugin
+    function ({ addUtilities }: any) {
+      const newUtilities = {
+        // Custom Scrollbar - Emerald Theme
+        '.custom-scrollbar::-webkit-scrollbar': {
+          width: '6px',
+          height: '6px',
+        },
+        '.custom-scrollbar::-webkit-scrollbar-track': {
+          background: 'rgba(255, 255, 255, 0.05)',
+          borderRadius: '10px',
+        },
+        '.custom-scrollbar::-webkit-scrollbar-thumb': {
+          background: 'linear-gradient(to bottom, #10b981, #059669)',
+          borderRadius: '10px',
+        },
+        '.custom-scrollbar::-webkit-scrollbar-thumb:hover': {
+          background: 'linear-gradient(to bottom, #34d399, #10b981)',
+        },
+        // Firefox scrollbar
+        '.custom-scrollbar': {
+          scrollbarWidth: 'thin',
+          scrollbarColor: '#10b981 rgba(255, 255, 255, 0.05)',
+        },
+
+        // Alternative: Dark Scrollbar
+        '.dark-scrollbar::-webkit-scrollbar': {
+          width: '8px',
+          height: '8px',
+        },
+        '.dark-scrollbar::-webkit-scrollbar-track': {
+          background: '#1a1a1a',
+          borderRadius: '10px',
+        },
+        '.dark-scrollbar::-webkit-scrollbar-thumb': {
+          background: 'linear-gradient(to bottom, #404040, #262626)',
+          borderRadius: '10px',
+          border: '2px solid #1a1a1a',
+        },
+        '.dark-scrollbar::-webkit-scrollbar-thumb:hover': {
+          background: 'linear-gradient(to bottom, #525252, #404040)',
+        },
+        '.dark-scrollbar': {
+          scrollbarWidth: 'thin',
+          scrollbarColor: '#404040 #1a1a1a',
+        },
+
+        // Hide Scrollbar
+        '.hide-scrollbar::-webkit-scrollbar': {
+          display: 'none',
+        },
+        '.hide-scrollbar': {
+          '-ms-overflow-style': 'none',
+          'scrollbar-width': 'none',
+        },
+      };
+      addUtilities(newUtilities);
+    },
+  ],
 };
+
 export default config;

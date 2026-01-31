@@ -5,15 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@iconify/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const homepageMenu = [
-  { label: "Dashboard", icon: "solar:widget-5-linear", href: "/dashboard" },
-  { label: "Listings", icon: "solar:buildings-3-linear", href: "/dashboard/listings" },
-  { label: "Leads & Clients", icon: "solar:users-group-two-rounded-linear", href: "/dashboard/leads" },
-  { label: "Agents", icon: "solar:user-id-linear", href: "/dashboard/agents" },
-  { label: "Analytics", icon: "solar:chart-square-linear", href: "/dashboard/analytics" },
-  { label: "Tasks & HRM", icon: "solar:clipboard-check-linear", href: "/dashboard/tasks" },
-];
+import { homepageMenu, appsMenu, type MenuItem } from "./list-menu";
 
 type MobileSidebarProps = {
   open: boolean;
@@ -27,6 +19,7 @@ export default function MobileSidebar({ open, onClose }: MobileSidebarProps) {
     <AnimatePresence>
       {open && (
         <>
+          {/* Backdrop */}
           <motion.div
             className="fixed inset-0 z-40 bg-black/50 md:hidden"
             onClick={onClose}
@@ -35,11 +28,12 @@ export default function MobileSidebar({ open, onClose }: MobileSidebarProps) {
             exit={{ opacity: 0 }}
           />
 
+          {/* Sidebar */}
           <motion.aside
             className="
               fixed inset-y-0 left-0 z-50 w-72
               bg-[#040608] border-r border-white/10
-              px-5 py-6
+              px-5 py-6 overflow-y-auto
               md:hidden
             "
             initial={{ x: -280 }}
@@ -47,6 +41,7 @@ export default function MobileSidebar({ open, onClose }: MobileSidebarProps) {
             exit={{ x: -280 }}
             transition={{ type: "tween", duration: 0.2 }}
           >
+            {/* Header */}
             <div className="mb-6 flex items-center justify-between">
               <span className="text-lg font-bold text-white">
                 Premier <span className="text-emerald-400">Asset</span>
@@ -59,42 +54,98 @@ export default function MobileSidebar({ open, onClose }: MobileSidebarProps) {
               </button>
             </div>
 
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Homepage
-            </p>
-            <nav className="space-y-1.5">
-              {homepageMenu.map((item) => {
-                const active = pathname === item.href;
-                return (
-                  <Link
-                    key={item.label}
-                    href={item.href}
-                    onClick={onClose}
-                    className={[
-                      "flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm transition-all duration-150",
-                      active
-                        ? "bg-emerald-500/12 text-emerald-200 border border-emerald-400/40"
-                        : "text-slate-300 border border-transparent hover:bg-white/5 hover:text-emerald-200",
-                    ].join(" ")}
-                  >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#050608] border border-white/10">
-                      <Icon
-                        icon={item.icon}
-                        className={
-                          active
-                            ? "text-emerald-300 text-[20px]"
-                            : "text-slate-400 text-[20px]"
-                        }
-                      />
-                    </div>
-                    <span className="truncate">{item.label}</span>
-                  </Link>
-                );
-              })}
+            {/* Homepage Section */}
+            <SectionLabel>Homepage</SectionLabel>
+            <nav className="mb-6 space-y-1.5">
+              {homepageMenu.map((item) => (
+                <MobileSidebarItem
+                  key={item.label}
+                  item={item}
+                  active={pathname === item.href}
+                  onClose={onClose}
+                />
+              ))}
+            </nav>
+
+            {/* Divider */}
+            <div className="my-3 h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+
+            {/* Apps Section */}
+            <SectionLabel>Apps</SectionLabel>
+            <nav className="mb-2 space-y-1.5">
+              {appsMenu.map((item) => (
+                <MobileSidebarItem
+                  key={item.label}
+                  item={item}
+                  active={pathname === item.href}
+                  onClose={onClose}
+                />
+              ))}
             </nav>
           </motion.aside>
         </>
       )}
     </AnimatePresence>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+      {children}
+    </p>
+  );
+}
+
+function MobileSidebarItem({
+  item,
+  active,
+  onClose,
+}: {
+  item: MenuItem;
+  active?: boolean;
+  onClose: () => void;
+}) {
+  const isLink = Boolean(item.href);
+  const base =
+    "flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm transition-all duration-150";
+  const state = active
+    ? "bg-emerald-500/12 text-emerald-200 border border-emerald-400/40"
+    : "text-slate-300 border border-transparent hover:bg-white/5 hover:text-emerald-200";
+
+  const content = (
+    <>
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#050608] border border-white/10">
+        <Icon
+          icon={item.icon}
+          className={
+            active
+              ? "text-emerald-300 text-[20px]"
+              : "text-slate-400 text-[20px]"
+          }
+        />
+      </div>
+      <span className="truncate text-[0.95rem]">{item.label}</span>
+      {item.href && (
+        <Icon
+          icon="solar:alt-arrow-right-linear"
+          className="ml-auto text-[16px] text-slate-500"
+        />
+      )}
+    </>
+  );
+
+  if (isLink) {
+    return (
+      <Link href={item.href!} onClick={onClose} className={`${base} ${state}`}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onClose} className={`${base} ${state}`}>
+      {content}
+    </button>
   );
 }

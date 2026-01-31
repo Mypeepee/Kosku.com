@@ -5,50 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Icon } from "@iconify/react";
 import { usePathname } from "next/navigation";
-
-const homepageMenu = [
-  { label: "Dashboard", icon: "solar:widget-5-linear", href: "/dashboard" },
-  {
-    label: "Listings",
-    icon: "solar:buildings-3-linear",
-    href: "/dashboard/listings",
-  },
-  // HRM di bawah Listings
-  {
-    label: "HRM",
-    icon: "solar:user-hand-up-linear",
-    href: "/dashboard/human-resource-management",
-  },
-  {
-    label: "Leads & Clients",
-    icon: "solar:users-group-two-rounded-linear",
-    href: "/dashboard/leads",
-  },
-  { label: "Agents", icon: "solar:user-id-linear", href: "/dashboard/agents" },
-  {
-    label: "Analytics",
-    icon: "solar:chart-square-linear",
-    href: "/dashboard/analytics",
-  },
-  {
-    label: "Tasks",
-    icon: "solar:clipboard-check-linear",
-    href: "/dashboard/tasks",
-  },
-];
-
-
-const appsMenu = [
-  { label: "E-commerce", icon: "solar:bag-4-linear" },
-  { label: "CRM", icon: "solar:card-linear" },
-  { label: "Invoice", icon: "solar:bill-list-linear" },
-  { label: "E-mail", icon: "solar:letter-linear" },
-  { label: "Events", icon: "solar:calendar-linear" },
-  { label: "Kanban", icon: "solar:rows-3-linear" },
-  { label: "Hiring", icon: "solar:briefcase-linear" },
-  { label: "Chat", icon: "solar:chat-round-dots-linear" },
-  { label: "Social", icon: "solar:share-circle-linear" },
-];
+import { homepageMenu, appsMenu, type MenuItem } from "./list-menu";
 
 export function OwnerSidebar() {
   const pathname = usePathname();
@@ -138,7 +95,11 @@ export function OwnerSidebar() {
       <SectionLabel>Apps</SectionLabel>
       <nav className="mb-2 space-y-1.5">
         {appsMenu.map((item) => (
-          <SidebarItem key={item.label} item={item} />
+          <SidebarItem 
+            key={item.label} 
+            item={item}
+            active={pathname === item.href}
+          />
         ))}
       </nav>
     </aside>
@@ -157,7 +118,7 @@ function SidebarItem({
   item,
   active,
 }: {
-  item: { label: string; icon: string; href?: string };
+  item: MenuItem;
   active?: boolean;
 }) {
   const isLink = Boolean(item.href);

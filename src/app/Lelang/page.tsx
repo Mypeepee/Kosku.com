@@ -6,9 +6,11 @@ import SortBar from "./sortbar";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 
+
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
 };
+
 
 // mapping string dari URL -> enum kategori_properti_enum di Prisma
 const KATEGORI_MAP: Record<string, Prisma.kategori_properti_enum> = {
@@ -23,14 +25,18 @@ const KATEGORI_MAP: Record<string, Prisma.kategori_properti_enum> = {
   VILLA: "HOTEL_DAN_VILLA",
 };
 
+
 export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
   const kota = typeof searchParams.kota === "string" ? searchParams.kota : undefined;
+
 
   const formatText = (text?: string) =>
     text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
 
+
   let title = "Lelang Properti Terpercaya | Premier";
   if (kota) title = `Lelang Properti di ${formatText(kota)} Harga Terbaik | Premier`;
+
 
   return {
     title,
@@ -43,7 +49,9 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
   };
 }
 
+
 const hasToken = (parts: string[], token: string) => parts.includes(token);
+
 
 export default async function SearchPage({ searchParams }: Props) {
   const page =
@@ -52,6 +60,7 @@ export default async function SearchPage({ searchParams }: Props) {
     typeof searchParams.kota === "string" ? searchParams.kota : undefined;
   const tipe =
     typeof searchParams.tipe === "string" ? searchParams.tipe : undefined;
+
 
   const minKT =
     typeof searchParams.minKT === "string"
@@ -78,6 +87,7 @@ export default async function SearchPage({ searchParams }: Props) {
       ? searchParams.legalitas
       : undefined;
 
+
   // tambahan dari SearchHero
   const minHarga =
     typeof searchParams.minHarga === "string"
@@ -96,53 +106,66 @@ export default async function SearchPage({ searchParams }: Props) {
       ? Number(searchParams.maxLT)
       : undefined;
 
+
   const sortRaw =
     typeof searchParams.sort === "string"
       ? searchParams.sort
       : "auction_asc";
   const sortParts = sortRaw.split("_").filter(Boolean);
 
+
   const limit = 18;
   const skip = (page - 1) * limit;
 
+
   // mapping tipe -> enum kategori
   const mappedKategori = tipe ? KATEGORI_MAP[tipe.toUpperCase()] : undefined;
+
 
   const whereClause: Prisma.ListingWhereInput = {
     jenis_transaksi: "LELANG",
     status_tayang: "TERSEDIA",
 
+
     ...(kota && {
       kota: { contains: kota, mode: "insensitive" },
     }),
+
 
     ...(mappedKategori && {
       kategori: { equals: mappedKategori },
     }),
 
+
     ...(minKT && {
       kamar_tidur: { gte: minKT },
     }),
+
 
     ...(minKM && {
       kamar_mandi: { gte: minKM },
     }),
 
+
     ...(lantai && {
       jumlah_lantai: { gte: lantai },
     }),
+
 
     ...(hadap && {
       hadap_bangunan: { contains: hadap, mode: "insensitive" },
     }),
 
+
     ...(kondisi && {
       kondisi_interior: { contains: kondisi, mode: "insensitive" },
     }),
 
+
     ...(legalitas && {
       legalitas: { equals: legalitas as any },
     }),
+
 
     ...(minHarga && {
       harga: {
@@ -150,6 +173,7 @@ export default async function SearchPage({ searchParams }: Props) {
         ...(maxHarga && { lte: maxHarga }),
       },
     }),
+
 
     ...(minLT && {
       luas_tanah: {
@@ -159,13 +183,16 @@ export default async function SearchPage({ searchParams }: Props) {
     }),
   };
 
+
   const orderByArray: Prisma.ListingOrderByWithRelationInput[] = [];
+
 
   if (hasToken(sortParts, "auction") && hasToken(sortParts, "desc")) {
     orderByArray.push({ tanggal_lelang: "desc" });
   } else {
     orderByArray.push({ tanggal_lelang: "asc" });
   }
+
 
   if (hasToken(sortParts, "price")) {
     if (hasToken(sortParts, "asc")) {
@@ -175,6 +202,7 @@ export default async function SearchPage({ searchParams }: Props) {
     }
   }
 
+
   if (hasToken(sortParts, "land")) {
     if (hasToken(sortParts, "asc")) {
       orderByArray.push({ luas_tanah: "asc" });
@@ -183,10 +211,12 @@ export default async function SearchPage({ searchParams }: Props) {
     }
   }
 
+
   const orderBy:
     | Prisma.ListingOrderByWithRelationInput
     | Prisma.ListingOrderByWithRelationInput[] =
     orderByArray.length > 0 ? orderByArray : [{ tanggal_lelang: "asc" }];
+
 
   const [totalItems, propertiesRaw] = await prisma.$transaction([
     prisma.listing.count({ where: whereClause }),
@@ -197,20 +227,26 @@ export default async function SearchPage({ searchParams }: Props) {
       orderBy,
       include: {
         agent: {
-          include: {
+          select: {
+            nama_kantor: true,
+            foto_profil_url: true,
             pengguna: {
               select: {
                 nama_lengkap: true,
-                foto_profil_url: true,
               },
             },
           },
         },
       },
     }),
-  ]);
+  ]).catch((error) => {
+    console.error("Prisma Error:", error);
+    throw error;
+  });
+
 
   const totalPages = Math.ceil(totalItems / limit);
+
 
   const formattedData = propertiesRaw.map((item) => {
     const rawGambar = item.gambar || "";
@@ -222,6 +258,7 @@ export default async function SearchPage({ searchParams }: Props) {
             .filter((s) => s.length > 0)
         : [];
 
+
     return {
       id_property: item.id_property,
       slug: item.slug,
@@ -232,17 +269,21 @@ export default async function SearchPage({ searchParams }: Props) {
       jenis_transaksi: item.jenis_transaksi,
       kategori: item.kategori,
 
+
       gambar: foto_list[0] || "/images/hero/banner.jpg",
       foto_list,
+
 
       luas_tanah: Number(item.luas_tanah ?? 0),
       luas_bangunan: Number(item.luas_bangunan ?? 0),
       kamar_tidur: item.kamar_tidur ?? 0,
       kamar_mandi: item.kamar_mandi ?? 0,
 
+
       agent_name: item.agent.pengguna.nama_lengkap,
-      agent_photo: item.agent.pengguna.foto_profil_url || "",
+      agent_photo: item.agent.foto_profil_url || "",
       agent_office: item.agent.nama_kantor,
+
 
       tanggal_lelang: item.tanggal_lelang
         ? item.tanggal_lelang.toISOString()
@@ -250,9 +291,11 @@ export default async function SearchPage({ searchParams }: Props) {
     };
   });
 
+
   return (
     <main className="bg-[#0F0F0F] min-h-screen pb-20">
       <SearchHero />
+
 
       <section className="container mx-auto px-4 mt-6">
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
@@ -265,10 +308,12 @@ export default async function SearchPage({ searchParams }: Props) {
             </p>
           </div>
 
+
           <div className="w-full md:w-auto">
             <SortBar />
           </div>
         </div>
+
 
         <ProductList
           initialData={formattedData}
