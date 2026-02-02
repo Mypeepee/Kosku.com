@@ -22,15 +22,56 @@ function mapKategori(tipe) {
   return 'RUMAH';
 }
 
-// generate slug: lelang-{kategori}-{kota}
-// contoh: lelang-gudang-kota-surabaya
-function generateSlug(kategori, kota) {
-  const kat = (kategori || 'lainnya').toLowerCase();
-  let city = (kota || 'tanpa kota').toLowerCase().trim();
-  city = city.replace(/[^a-z0-9\s-]/g, '');
+// Generate slug: {kategori}-{alamat-pendek}-{kota}-{id}
+// alamat-pendek diambil dari lokasi, dibersihkan dan dipotong
+function generateSlugFromAlamat(kategori, alamat, kota, idListing) {
+  const cat = (kategori || 'lainnya').toLowerCase();
+
+  // 1) Normalisasi alamat (lokasi)
+  let baseAlamat = (alamat || '').toLowerCase();
+
+  // buang isi dalam kurung (biasanya penjelasan panjang)
+  baseAlamat = baseAlamat.replace(/\(.*?\)/g, ' ');
+
+  // ganti koma & titik jadi spasi
+  baseAlamat = baseAlamat.replace(/[.,]/g, ' ');
+
+  // buang kata-kata administratif yang kurang penting untuk slug
+  baseAlamat = baseAlamat.replace(
+    /\b(kelurahan|kel\.?|kecamatan|kec\.?|kabupaten|kab\.?|desa|ds\.?|provinsi|propinsi|jl\.?|jalan|no\.?|blok|cluster|perumahan)\b/gi,
+    ' ',
+  );
+
+  // buang karakter non alnum, rapikan spasi
+  baseAlamat = baseAlamat.replace(/[^a-z0-9\s-]/g, ' ');
+  baseAlamat = baseAlamat.replace(/\s+/g, ' ').trim();
+
+  // ambil maksimal 6 kata pertama
+  const words = baseAlamat.split(' ').filter(Boolean);
+  const selectedWords = words.slice(0, 6);
+  let alamatSlug = selectedWords.join('-');
+
+  // 2) Normalisasi kota
+  let city = (kota || '').toLowerCase().trim();
+  city = city.replace(/^(kota|kab\.?|kabupaten)\s+/i, ''); // buang awalan
+  city = city.replace(/[^a-z0-9\s-]/g, ' ');
   city = city.replace(/\s+/g, '-');
   city = city.replace(/-+/g, '-');
-  return `lelang-${kat}-kota-${city}`;
+
+  // 3) Susun bagian teks
+  let base = cat;
+  if (alamatSlug) base += `-${alamatSlug}`;
+  if (city) base += `-${city}`;
+
+  // 4) Batasi panjang base (tanpa id) misal max 80 karakter
+  const MAX_BASE_LENGTH = 80;
+  if (base.length > MAX_BASE_LENGTH) {
+    base = base.slice(0, MAX_BASE_LENGTH);
+    base = base.replace(/-+$/g, '');
+  }
+
+  // 5) Tambah id supaya unik
+  return `${base}-${idListing}`;
 }
 
 // balik kenaikan harga 27,8% → harga_limit asli
@@ -105,7 +146,9 @@ async function migrateProperties() {
 
         if (mapRes.rowCount === 0) {
           skippedNoAgent++;
-          console.warn(`SKIP (agent tidak ditemukan): property ${id_listing}, agent ${id_agent}`);
+          console.warn(
+            `SKIP (agent tidak ditemukan): property ${id_listing}, agent ${id_agent}`,
+          );
           continue;
         }
 
@@ -116,10 +159,16 @@ async function migrateProperties() {
         const hargaLimitAsli = revertHarga(harga);
         const jaminanAsli = revertJaminan(uang_jaminan);
         const judulFinal =
-          (judul && judul.trim().length > 0) ? judul : `Listing ${id_listing}`;
+          judul && judul.trim().length > 0 ? judul : `Listing ${id_listing}`;
         const kotaFinal =
-          (kota && kota.trim().length > 0) ? kota : 'KOTA TIDAK DIKETAHUI';
-        const slug = generateSlug(kategori, kotaFinal);
+          kota && kota.trim().length > 0 ? kota : 'KOTA TIDAK DIKETAHUI';
+
+        const slug = generateSlugFromAlamat(
+          kategori,
+          lokasi || '',
+          kotaFinal,
+          id_listing,
+        );
 
         await client.query(
           `
@@ -155,7 +204,10 @@ async function migrateProperties() {
             $5::jenis_transaksi_enum,
             $6::kategori_properti_enum,
             $7,
-            CASE WHEN UPPER(TRIM(COALESCE($8, ''))) = 'TERJUAL' THEN 'TERJUAL'::status_properti_enum ELSE 'TERSEDIA'::status_properti_enum END,
+            CASE WHEN UPPER(TRIM(COALESCE($8, ''))) = 'TERJUAL'
+              THEN 'TERJUAL'::status_properti_enum
+              ELSE 'TERSEDIA'::status_properti_enum
+            END,
             $9,
             NULL,
             $10,
@@ -174,30 +226,31 @@ async function migrateProperties() {
             $21,
             $22
           )
+          ON CONFLICT (slug) DO NOTHING
         `,
           [
-            idAgentBaru,                    // 1
-            judulFinal,                     // 2
-            slug,                           // 3
-            deskripsi || null,              // 4
-            jenisTransaksi,                 // 5
-            kategori,                       // 6
-            vendor || null,                 // 7
-            status || null,                 // 8 (untuk mapping TERJUAL/TERSEDIA)
-            hargaLimitAsli,                 // 9 -> harga
-            batas_akhir_penawaran || null,  // 10 -> tanggal_lelang
-            jaminanAsli,                    // 11 -> uang_jaminan
-            hargaLimitAsli,                 // 12 -> nilai_limit_lelang
-            link || null,                   // 13
-            lokasi || null,                 // 14
-            provinsi || null,               // 15
-            kotaFinal,                      // 16
-            kecamatan || null,              // 17
-            kelurahan || null,              // 18
-            luas ? Number(luas) : null,     // 19 -> luas_tanah
-            gambar || null,                 // 20
-            tanggal_dibuat,                 // 21
-            tanggal_diupdate,               // 22
+            idAgentBaru, // 1
+            judulFinal, // 2
+            slug, // 3
+            deskripsi || null, // 4
+            jenisTransaksi, // 5
+            kategori, // 6
+            vendor || null, // 7
+            status || null, // 8 (untuk mapping TERJUAL/TERSEDIA)
+            hargaLimitAsli, // 9 -> harga
+            batas_akhir_penawaran || null, // 10 -> tanggal_lelang
+            jaminanAsli, // 11 -> uang_jaminan
+            hargaLimitAsli, // 12 -> nilai_limit_lelang
+            link || null, // 13
+            lokasi || null, // 14
+            provinsi || null, // 15
+            kotaFinal, // 16
+            kecamatan || null, // 17
+            kelurahan || null, // 18
+            luas ? Number(luas) : null, // 19 -> luas_tanah
+            gambar || null, // 20
+            tanggal_dibuat, // 21
+            tanggal_diupdate, // 22
           ],
         );
 
@@ -210,7 +263,14 @@ async function migrateProperties() {
     }
 
     console.log('Migrasi property selesai');
-    console.log('Sukses:', success, 'Skip tanpa agent:', skippedNoAgent, 'Gagal:', fail);
+    console.log(
+      'Sukses:',
+      success,
+      'Skip tanpa agent:',
+      skippedNoAgent,
+      'Gagal:',
+      fail,
+    );
   } finally {
     await client.end();
     console.log('PostgreSQL connection closed (properties)');

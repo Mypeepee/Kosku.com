@@ -1,6 +1,6 @@
 // src/app/dashboard/listings/lib/property-stats.ts
 
-import { prisma } from "@/lib/prisma";
+import prisma from "@/lib/prisma";
 
 export type KategoriEnum =
   | "RUMAH"
@@ -27,15 +27,15 @@ export async function fetchListingHeaderStats(
   idAgent: string,
 ): Promise<ListingHeaderStats> {
   // Total semua listing tersedia milik agent
-  const total = await prisma.property.count({
+  const total = await prisma.listing.count({
     where: {
       id_agent: idAgent,
-      status_tayang: "TERSEDIA", // status_properti_enum
+      status_tayang: "TERSEDIA",
     },
   });
 
   // Listing untuk dijual (PRIMARY + SECONDARY)
-  const totalForSale = await prisma.property.count({
+  const totalForSale = await prisma.listing.count({
     where: {
       id_agent: idAgent,
       status_tayang: "TERSEDIA",
@@ -46,7 +46,7 @@ export async function fetchListingHeaderStats(
   });
 
   // Listing untuk disewa (SEWA)
-  const totalForRent = await prisma.property.count({
+  const totalForRent = await prisma.listing.count({
     where: {
       id_agent: idAgent,
       status_tayang: "TERSEDIA",
@@ -55,7 +55,7 @@ export async function fetchListingHeaderStats(
   });
 
   // Hot deal
-  const totalHotDeal = await prisma.property.count({
+  const totalHotDeal = await prisma.listing.count({
     where: {
       id_agent: idAgent,
       status_tayang: "TERSEDIA",
@@ -64,7 +64,7 @@ export async function fetchListingHeaderStats(
   });
 
   // Group by kategori
-  const byCategory = await prisma.property.groupBy({
+  const byCategory = await prisma.listing.groupBy({
     by: ["kategori"],
     _count: { _all: true },
     where: {
@@ -80,7 +80,7 @@ export async function fetchListingHeaderStats(
   });
 
   // Total viewed: sum kolom dilihat untuk semua listing agent ini
-  const viewedAgg = await prisma.property.aggregate({
+  const viewedAgg = await prisma.listing.aggregate({
     where: {
       id_agent: idAgent,
       status_tayang: "TERSEDIA",

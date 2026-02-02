@@ -1,4 +1,4 @@
-// app/Lelang/[slug]/[agentId]/page.tsx
+// app/Lelang/[slugId]/[agentId]/page.tsx
 import React from "react";
 import { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
@@ -7,28 +7,62 @@ import DetailClient from "../DetailClient";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
+// --- TYPES ---
 interface ParamsShape {
-  slug?: string;
-  agentId?: string;
+  slugId: string;   // contoh: "toko-lintas-...-78675"
+  agentId: string;  // contoh: "AG1"
 }
 
 interface Props {
-  params: Promise<ParamsShape>; // ← treat params as Promise
+  params: ParamsShape;
 }
 
-// Ambil id_property (UUID v4) dari slug-id => 5 segmen terakhir
-function extractIdPropertyFromSlug(
-  slug: string | undefined | null
-): string | null {
-  if (!slug) return null;
-  const parts = slug.split("-");
-  if (parts.length < 5) return null;
-  const uuidParts = parts.slice(-5);
-  return uuidParts.join("-");
+// --- HELPER: extract id_property (bigint) dari slugId (angka di akhir) ---
+function extractIdFromSlugId(slugId: string | undefined | null): bigint | null {
+  if (!slugId) return null;
+  const parts = slugId.split("-");
+  if (parts.length < 2) return null;
+  const last = parts[parts.length - 1];
+  if (!/^\d+$/.test(last)) return null;
+  try {
+    return BigInt(last);
+  } catch {
+    return null;
+  }
 }
 
-async function getProperty(id: string) {
-  const product = await prisma.property.findUnique({
+// --- HELPER: konversi BigInt di object Prisma jadi plain object siap dikirim ke client ---
+function serializePrisma<T>(data: T): any {
+  return JSON.parse(
+    JSON.stringify(
+      data,
+      (_key, value) => (typeof value === "bigint" ? value.toString() : value)
+    )
+  );
+}
+
+// --- HELPER: normalisasi foto agent dari Google Drive ID ---
+function normalizeAgentPhoto(fileId: string | null | undefined): string {
+  if (!fileId || fileId.trim() === "") {
+    return "/images/default-profile.png";
+  }
+
+  const trimmed = fileId.trim();
+
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("/")
+  ) {
+    return trimmed;
+  }
+
+  return `https://drive.google.com/thumbnail?id=${trimmed}&sz=w64`;
+}
+
+// --- QUERY DETAIL dari tabel listing ---
+async function getProperty(id: bigint) {
+  const product = await prisma.listing.findUnique({
     where: { id_property: id },
     include: {
       agent: {
@@ -40,10 +74,10 @@ async function getProperty(id: string) {
           nomor_whatsapp: true,
           kota_area: true,
           jabatan: true,
+          foto_profil_url: true,
           pengguna: {
             select: {
               nama_lengkap: true,
-              foto_profil_url: true,
               nomor_telepon: true,
               email: true,
             },
@@ -53,16 +87,16 @@ async function getProperty(id: string) {
     },
   });
 
-  if (product && product.status_tayang !== "TERSEDIA") {
-    return null;
-  }
+  if (!product) return null;
+  if (product.status_tayang !== "TERSEDIA") return null;
 
   return product;
 }
 
+// --- QUERY SIMILAR dari listing ---
 async function getSimilarProperties(currentProperty: any) {
   try {
-    const similarProperties = await prisma.property.findMany({
+    const similarProperties = await prisma.listing.findMany({
       where: {
         AND: [
           { id_property: { not: currentProperty.id_property } },
@@ -79,16 +113,17 @@ async function getSimilarProperties(currentProperty: any) {
       include: {
         agent: {
           select: {
+            id_agent: true,
             nama_kantor: true,
             rating: true,
             jumlah_closing: true,
             nomor_whatsapp: true,
             kota_area: true,
             jabatan: true,
+            foto_profil_url: true,
             pengguna: {
               select: {
                 nama_lengkap: true,
-                foto_profil_url: true,
                 nomor_telepon: true,
                 email: true,
               },
@@ -97,10 +132,7 @@ async function getSimilarProperties(currentProperty: any) {
         },
       },
       take: 50,
-      orderBy: [
-        { is_hot_deal: "desc" },
-        { tanggal_dibuat: "desc" },
-      ],
+      orderBy: [{ is_hot_deal: "desc" }, { tanggal_dibuat: "desc" }],
     });
 
     return similarProperties;
@@ -110,18 +142,19 @@ async function getSimilarProperties(currentProperty: any) {
   }
 }
 
+// --- METADATA ---
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { slug } = await params; // ← di‑await
-  const idProperty = extractIdPropertyFromSlug(slug);
+  const { slugId } = params;
+  const id = extractIdFromSlugId(slugId);
 
-  if (!idProperty) {
+  if (!id) {
     return {
       title: "Properti Tidak Ditemukan | Premier Asset",
       description: "Halaman properti yang Anda cari tidak ditemukan.",
     };
   }
 
-  const product = await getProperty(idProperty);
+  const product = await getProperty(id);
 
   if (!product) {
     return {
@@ -162,8 +195,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       : [];
   const firstImage = fotoArray[0] || "/images/hero/banner.jpg";
 
-  const safeSlug = slug || `${product.slug}-${product.id_property}`;
-  const canonicalUrl = `https://premierasset.com/Lelang/${safeSlug}`;
+  const safeSlugId =
+    slugId || `${product.slug}-${product.id_property.toString()}`;
+  const canonicalUrl = `https://premierasset.com/Lelang/${safeSlugId}`;
 
   return {
     title: `${product.judul} - ${hargaFormatted} | Premier Asset`,
@@ -217,24 +251,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
+// --- PAGE ---
 export default async function DetailPage({ params }: Props) {
-  const { slug, agentId } = await params; // ← di‑await
+  const { slugId, agentId } = params;
 
-  const idProperty = extractIdPropertyFromSlug(slug);
-  if (!idProperty) {
+  const id = extractIdFromSlugId(slugId);
+  if (!id) {
     notFound();
   }
 
-  const product = await getProperty(idProperty!);
+  const product = await getProperty(id as bigint);
   if (!product) {
     notFound();
   }
 
-  // Self-healing slug: kalau slug berubah, tetap pertahankan agentId
+  // Self-healing slugId: kalau slug berubah, tetap pertahankan agentId
   if (product.slug && product.id_property) {
-    const expectedSlug = `${product.slug}-${product.id_property}`;
-    if (expectedSlug !== slug) {
-      return redirect(`/Lelang/${expectedSlug}/${agentId}`);
+    const expectedSlugId = `${product.slug}-${product.id_property.toString()}`;
+    if (expectedSlugId !== slugId) {
+      return redirect(`/Lelang/${expectedSlugId}/${agentId}`);
     }
   }
 
@@ -242,7 +277,6 @@ export default async function DetailPage({ params }: Props) {
   const session = await getServerSession(authOptions);
   const loggedInAgentId = (session?.user as any)?.agentId || null;
 
-  // Hanya kalau agent yang login sama dengan agentId di URL → aktifkan panel agent
   const currentAgentId =
     loggedInAgentId && loggedInAgentId === agentId
       ? loggedInAgentId
@@ -272,18 +306,34 @@ export default async function DetailPage({ params }: Props) {
             .filter((s) => s.length > 0)
         : ["/images/hero/banner.jpg"];
 
+    const agentPhotoUrl = normalizeAgentPhoto(prop.agent?.foto_profil_url);
+
     return {
       ...prop,
       foto_list: propFotoArray,
+      agent_photo: agentPhotoUrl,
     };
   });
+
+  const productAgentPhoto = normalizeAgentPhoto(
+    product.agent?.foto_profil_url
+  );
+
+  const productForClient = serializePrisma({
+    ...product,
+    agent: {
+      ...product.agent,
+      foto_profil_url: productAgentPhoto,
+    },
+  });
+  const similarForClient = serializePrisma(similarProperties);
 
   return (
     <main className="bg-[#0F0F0F] min-h-screen text-white">
       <DetailClient
-        product={JSON.parse(JSON.stringify(product))}
+        product={productForClient}
         fotoArray={finalFotoArray}
-        similarProperties={JSON.parse(JSON.stringify(similarProperties))}
+        similarProperties={similarForClient}
         currentAgentId={currentAgentId}
       />
     </main>

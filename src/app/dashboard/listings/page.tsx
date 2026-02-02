@@ -1,5 +1,5 @@
 // app/dashboard/listings/page.tsx
-import { prisma } from "@/lib/prisma";
+import prisma from "@/lib/prisma";
 import ListingsPage from "./components/listings-page";
 import { fetchListingHeaderStats } from "./lib/property-stats";
 import { getServerSession } from "next-auth";
@@ -19,7 +19,7 @@ export default async function DashboardListingsPage() {
 
   const headerStats = await fetchListingHeaderStats(agentId);
 
-  const properties = await prisma.property.findMany({
+  const properties = await prisma.listing.findMany({
     where: { id_agent: agentId },
     orderBy: { tanggal_diupdate: "desc" },
     take: 50,
@@ -28,16 +28,14 @@ export default async function DashboardListingsPage() {
   const listings = properties.map((p) => ({
     // gunakan id_property sebagai ID utama
     id: p.id_property,
-    // tambahkan slug-id lengkap untuk detail publik
-    slug: p.slug
-      ? `${p.slug}-${p.id_property}`
-      : p.id_property, // fallback kalau slug kosong
+    // slug untuk detail publik (slug di DB sudah mengandung teks, tidak perlu tambah id lagi)
+    slug: p.slug,
     title: p.judul,
     status: mapStatus(p.status_tayang),
     category: p.kategori,
     transactionType: p.jenis_transaksi, // "LELANG" | "PRIMARY" | ...
     city: p.kota,
-    area: p.area_lokasi ?? "",
+    area: (p as any).area_lokasi ?? "", // kalau kolom ini tidak ada di listing, boleh dihapus
     address: p.alamat_lengkap ?? "",
     price: formatRupiah(Number(p.harga)),
     thumbnailUrl: p.gambar
