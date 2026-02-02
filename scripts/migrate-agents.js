@@ -5,7 +5,7 @@ const { Client } = pg;
 
 // SESUAIKAN koneksi
 const connectionString =
-  process.env.DATABASE_URL || 'postgres://postgres:password@127.0.0.1:5432/kosku';
+  process.env.DATABASE_URL || 'postgresql://postgres:01082003Jason@127.0.0.1:5432/kosku?schema=public';
 
 function normalizePhone(phone) {
   if (!phone) return null;
@@ -61,10 +61,12 @@ async function migrateAgents() {
   console.log('Connected to PostgreSQL (agents)');
 
   try {
+    // Ambil semua agent_tampungan dengan email (seperti script lama)
     const { rows } = await client.query(`
       SELECT *
       FROM public.agent_tampungan
       WHERE email IS NOT NULL
+      ORDER BY id_account
     `);
 
     console.log('Total agent_tampungan ditemukan:', rows.length);
@@ -88,7 +90,6 @@ async function migrateAgents() {
         picture,
         status,
         rating,
-        comment,
         jumlah_penjualan,
         lokasi_kerja,
         gambar_ktp,
@@ -97,19 +98,19 @@ async function migrateAgents() {
       } = row;
 
       try {
-        // 1) cari pengguna berdasarkan email
-        const userRes = await client.query(
-          `SELECT id_pengguna FROM public.pengguna WHERE email = $1`,
-          [email],
+        // 1) Ambil id_pengguna baru dari mapping_pengguna (bukan cari by email)
+        const mapUserRes = await client.query(
+          `SELECT id_pengguna_baru FROM public.mapping_pengguna WHERE id_account_lama = $1`,
+          [id_account],
         );
-        if (userRes.rowCount === 0) {
+        if (mapUserRes.rowCount === 0) {
           skippedNoUser++;
           console.warn(
-            `SKIP (tidak ada pengguna): ${id_account} (${email})`,
+            `SKIP (tidak ada mapping pengguna): ${id_account} (${email})`,
           );
           continue;
         }
-        const idPenggunaBaru = userRes.rows[0].id_pengguna;
+        const idPenggunaBaru = mapUserRes.rows[0].id_pengguna_baru;
 
         // 2) ambil roles dari account untuk jabatan
         const accRes = await client.query(
@@ -119,7 +120,7 @@ async function migrateAgents() {
         const rolesAccount = accRes.rowCount ? accRes.rows[0].roles : roles;
         const jabatanFinal = mapJabatanFromRoles(rolesAccount);
 
-        // 3) nama_kantor & kota_area
+        // 3) nama_kantor & kota_area (logika lama dipertahankan)
         let kantorFinal;
         if (upline_id === 'AG023' || id_agent === 'AG023') {
           kantorFinal = 'Ray White Diponegoro';
@@ -142,8 +143,8 @@ async function migrateAgents() {
 
         const idAgentLama = id_agent; // AG001 lama
 
-        // 4) INSERT ke agent
-        await client.query(
+        // 4) INSERT ke agent (schema baru, TANPA kolom id_agent_lama)
+        const insertRes = await client.query(
           `
           INSERT INTO public.agent (
             id_pengguna,
@@ -155,6 +156,7 @@ async function migrateAgents() {
             jumlah_closing,
             total_omset,
             nomor_whatsapp,
+            poin,
             foto_ktp_url,
             foto_npwp_url,
             foto_profil_url,
@@ -165,45 +167,55 @@ async function migrateAgents() {
             link_tiktok,
             link_facebook,
             status_keanggotaan,
-            tanggal_gabung,
-            id_agent_lama
+            tanggal_gabung
           )
           VALUES (
-            $1, $2, $3, $4, $5,
-            $6, $7, $8, $9,
-            $10, $11, $12,
-            $13, $14, $15,
-            $16, $17, $18,
-            $19, $20, $21
+            $1, $2, $3, $4, NULL,
+            $5, $6, $7, $8,
+            0,
+            $9, $10, $11,
+            NULL, NULL, $12,
+            $13, NULL, $14,
+            $15, $16
           )
+          RETURNING id_agent
         `,
           [
-            idPenggunaBaru,       // 1
-            kantorFinal,          // 2
-            kotaAreaFinal,        // 3
-            jabatanFinal,         // 4
-            null,                 // 5: id_upline (sementara NULL)
-            ratingNum,            // 6
-            jumlahClosingInt,     // 7
-            totalOmsetNum,        // 8
-            wa,                   // 9
-            gambar_ktp,           // 10
-            gambar_npwp,          // 11
-            picture,              // 12
-            null,                 // 13
-            null,                 // 14
-            nama,                 // 15
-            instagram,            // 16
-            null,                 // 17
-            facebook,             // 18
-            statusFinal,          // 19
-            tanggalGabungFinal,   // 20
-            idAgentLama,          // 21
+            idPenggunaBaru,      // 1
+            kantorFinal,         // 2
+            kotaAreaFinal,       // 3
+            jabatanFinal,        // 4
+            ratingNum,           // 5
+            jumlahClosingInt,    // 6
+            totalOmsetNum,       // 7
+            wa,                  // 8
+            gambar_ktp,          // 9
+            gambar_npwp,         // 10
+            picture,             // 11
+            nama,                // 12 (atas_nama_rekening)
+            instagram,           // 13
+            facebook,            // 14
+            statusFinal,         // 15
+            tanggalGabungFinal,  // 16
           ],
         );
 
+        const idAgentBaru = insertRes.rows[0].id_agent;
+
+        // 5) Simpan mapping agent lama -> baru
+        if (idAgentLama) {
+          await client.query(
+            `
+            INSERT INTO public.mapping_agent (id_agent_lama, id_agent_baru)
+            VALUES ($1, $2)
+            ON CONFLICT (id_agent_lama) DO NOTHING
+          `,
+            [idAgentLama, idAgentBaru],
+          );
+        }
+
         success++;
-        console.log(`OK agent: ${id_account} (${email})`);
+        console.log(`OK agent: ${id_account} (${email}) => ${idAgentBaru}`);
       } catch (err) {
         fail++;
         console.error(`FAIL agent: ${id_account} (${email}):`, err.message);

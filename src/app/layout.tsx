@@ -13,6 +13,7 @@ import ChatWidget from "@/components/Chat/ChatWidget";
 import { ChatProvider } from "@/context/ChatContext";
 import NextAuthProvider from "@/providers/NextAuthProvider";
 import { Toaster } from "react-hot-toast";
+import LoadingBar from "@/components/LoadingBar"; // <- tambahkan ini
 
 const font = DM_Sans({ subsets: ["latin"] });
 
@@ -20,7 +21,8 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"
   ),
-  title: "Premier Asset - Satu Aplikasi untuk Semua Kebutuhan Properti Anda",
+  title:
+    "Premier Asset - Satu Aplikasi untuk Semua Kebutuhan Properti Anda",
   description:
     "Platform terintegrasi untuk jual beli properti Primary, Secondary, dan Aset Lelang. Temukan investasi properti terbaik dan aman bersama Premier Asset.",
   icons: {
@@ -36,6 +38,9 @@ export default function RootLayout({
   return (
     <html lang="id" suppressHydrationWarning>
       <body className={font.className}>
+        {/* Global loading bar */}
+        <LoadingBar />
+
         <ThemeProvider
           attribute="class"
           enableSystem={true}

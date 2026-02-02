@@ -7,6 +7,7 @@ import DetailClient from "./DetailClient";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
+// --- TYPES ---
 type ParamsShape = {
   slugId: string; // contoh: "rumahdigambut-32"
 };
@@ -34,10 +35,30 @@ function serializePrisma<T>(data: T): any {
   return JSON.parse(
     JSON.stringify(
       data,
-      (_key, value) =>
-        typeof value === "bigint" ? value.toString() : value // BigInt → string
+      (_key, value) => (typeof value === "bigint" ? value.toString() : value) // BigInt → string
     )
   );
+}
+
+// --- HELPER: normalisasi foto agent dari Google Drive ID ---
+function normalizeAgentPhoto(fileId: string | null | undefined): string {
+  if (!fileId || fileId.trim() === "") {
+    return "/images/default-profile.png"; // pastikan file ini ada di /public/images
+  }
+
+  const trimmed = fileId.trim();
+
+  // Jika sudah URL penuh, pakai langsung
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("/")
+  ) {
+    return trimmed;
+  }
+
+  // Asumsi: ini Google Drive file ID
+  return `https://drive.google.com/thumbnail?id=${trimmed}&sz=w64`;
 }
 
 // --- QUERY DETAIL ---
@@ -54,10 +75,10 @@ async function getProperty(id: bigint) {
           nomor_whatsapp: true,
           kota_area: true,
           jabatan: true,
+          foto_profil_url: true, // <-- di Agent
           pengguna: {
             select: {
               nama_lengkap: true,
-              foto_profil_url: true,
               nomor_telepon: true,
               email: true,
             },
@@ -100,10 +121,10 @@ async function getSimilarProperties(currentProperty: any) {
             nomor_whatsapp: true,
             kota_area: true,
             jabatan: true,
+            foto_profil_url: true,
             pengguna: {
               select: {
                 nama_lengkap: true,
-                foto_profil_url: true,
                 nomor_telepon: true,
                 email: true,
               },
@@ -296,14 +317,29 @@ export default async function DetailPage({ params }: Props) {
             .filter((s) => s.length > 0)
         : ["/images/hero/banner.jpg"];
 
+    // normalisasi foto agent di similar
+    const agentPhotoUrl = normalizeAgentPhoto(prop.agent?.foto_profil_url);
+
     return {
       ...prop,
       foto_list: propFotoArray,
+      agent_photo: agentPhotoUrl,
     };
   });
 
+  // Normalisasi foto agent di product utama
+  const productAgentPhoto = normalizeAgentPhoto(
+    product.agent?.foto_profil_url
+  );
+
   // --- SERIALIZE UNTUK CLIENT COMPONENT (hapus BigInt) ---
-  const productForClient = serializePrisma(product);
+  const productForClient = serializePrisma({
+    ...product,
+    agent: {
+      ...product.agent,
+      foto_profil_url: productAgentPhoto,
+    },
+  });
   const similarForClient = serializePrisma(similarProperties);
 
   const jsonLd = {

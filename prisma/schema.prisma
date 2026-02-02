@@ -20,9 +20,9 @@ model Pengguna {
   status_akun      status_akun_enum  @default(AKTIF)
   wa_terverifikasi Boolean           @default(false)
   kode_referral    String?           @db.VarChar(20)
-  login_terakhir   DateTime?         @db.Timestamp(6)
-  dibuat_pada      DateTime?         @default(now()) @db.Timestamp(6)
-  diperbarui_pada  DateTime?         @default(now()) @db.Timestamp(6)
+  login_terakhir   DateTime?         @db.Timestamptz(6)
+  dibuat_pada      DateTime?         @default(now()) @db.Timestamptz(6)
+  diperbarui_pada  DateTime?         @default(now()) @db.Timestamptz(6)
   agent            Agent?
   transaksiKlien   Transaksi[]       @relation("TransaksiKlien")
   komentarBerita   KomentarBerita[]
@@ -55,8 +55,8 @@ model Agent {
   link_facebook      String?            @db.VarChar(100)
   status_keanggotaan status_agent_enum  @default(PENDING)
   tanggal_gabung     DateTime?          @default(dbgenerated("CURRENT_DATE")) @db.Date
-  dibuat_pada        DateTime?          @default(now()) @db.Timestamp(6)
-  diperbarui_pada    DateTime?          @default(now()) @db.Timestamp(6)
+  dibuat_pada        DateTime?          @default(now()) @db.Timestamptz(6)
+  diperbarui_pada    DateTime?          @default(now()) @db.Timestamptz(6)
   pengguna           Pengguna           @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade)
   upline             Agent?             @relation("AgentUpline", fields: [id_upline], references: [id_agent])
   downlines          Agent[]            @relation("AgentUpline")
@@ -68,7 +68,6 @@ model Agent {
   riwayatPoin        RiwayatPoin[]
   acara              Acara[]
   pesertaAcara       PesertaAcara[]
-  unitPemilu         UnitPemilu[]
   pilihanPemilu      PilihanPemilu[]
 
   @@index([jabatan], map: "idx_agent_jabatan")
@@ -88,7 +87,7 @@ model Listing {
   status_tayang      status_properti_enum   @default(TERSEDIA)
   harga              Decimal                @db.Decimal(20, 2)
   harga_promo        Decimal?               @db.Decimal(20, 2)
-  tanggal_lelang     DateTime?              @db.Timestamp(6)
+  tanggal_lelang     DateTime?              @db.Timestamptz(6)
   uang_jaminan       Decimal?               @db.Decimal(20, 2)
   nilai_limit_lelang Decimal?               @db.Decimal(20, 2)
   link               String?                @db.VarChar(500)
@@ -115,13 +114,13 @@ model Listing {
   dilihat            Int                    @default(0)
   wa_click_count     Int                    @default(0)
   is_hot_deal        Boolean                @default(false)
-  tanggal_dibuat     DateTime?              @default(now()) @db.Timestamp(6)
-  tanggal_diupdate   DateTime?              @default(now()) @db.Timestamp(6)
+  tanggal_dibuat     DateTime?              @default(now()) @db.Timestamptz(6)
+  tanggal_diupdate   DateTime?              @default(now()) @db.Timestamptz(6)
   agent              Agent                  @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
   listingBoosts      ListingBoost[]
   transaksi          Transaksi[]
   acara              Acara[]
-  unitPemilu         UnitPemilu[]
+  pilihanPemilu      PilihanPemilu[]
 
   @@index([kota], map: "idx_property_lokasi")
   @@index([jenis_transaksi], map: "idx_property_jenis")
@@ -155,8 +154,8 @@ model Transaksi {
   rating              Int?
   comment             String?              @db.VarChar(250)
   catatan             String?
-  dibuat_pada         DateTime             @default(now()) @db.Timestamp(6)
-  diperbarui_pada     DateTime             @default(now()) @db.Timestamp(6)
+  dibuat_pada         DateTime             @default(now()) @db.Timestamptz(6)
+  diperbarui_pada     DateTime             @default(now()) @db.Timestamptz(6)
   detail              DetailTransaksi[]
   agent               Agent                @relation("TransaksiAgent", fields: [id_agent], references: [id_agent], map: "transaksi_agent_fk")
   klien               Pengguna?            @relation("TransaksiKlien", fields: [id_klien], references: [id_pengguna], map: "transaksi_klien_fk")
@@ -188,10 +187,10 @@ model ListingBoost {
   id_listing      BigInt
   jenis_boost     String   @db.VarChar(30)
   sumber          String   @db.VarChar(30)
-  tanggal_mulai   DateTime @db.Timestamp(6)
-  tanggal_selesai DateTime @db.Timestamp(6)
+  tanggal_mulai   DateTime @db.Timestamptz(6)
+  tanggal_selesai DateTime @db.Timestamptz(6)
   status          String   @default("SCHEDULED") @db.VarChar(20)
-  created_at      DateTime @default(now()) @db.Timestamp(6)
+  tanggal_dibuat  DateTime @default(now()) @db.Timestamptz(6)
   listing         Listing  @relation(fields: [id_listing], references: [id_property], onDelete: Cascade, map: "listing_boost_listing_fk")
 
   @@index([id_listing], map: "listing_boost_listing_idx")
@@ -218,9 +217,9 @@ model Berita {
   berita_utama     Boolean            @default(false)
   views            Int                @default(0)
   share            Int                @default(0)
-  tanggal_publish  DateTime?          @db.Timestamp(6)
-  tanggal_dibuat   DateTime           @default(now()) @db.Timestamp(6)
-  tanggal_diupdate DateTime           @default(now()) @db.Timestamp(6)
+  tanggal_publish  DateTime?          @db.Timestamptz(6)
+  tanggal_dibuat   DateTime           @default(now()) @db.Timestamptz(6)
+  tanggal_diupdate DateTime           @default(now()) @db.Timestamptz(6)
   agent            Agent?             @relation(fields: [id_agent], references: [id_agent], onDelete: SetNull)
   komentar         KomentarBerita[]
 
@@ -239,7 +238,7 @@ model KomentarBerita {
   email_komentar   String?   @db.VarChar(150)
   isi_komentar     String
   status_disetujui Boolean   @default(false)
-  tanggal_komentar DateTime  @default(now()) @db.Timestamp(6)
+  tanggal_komentar DateTime  @default(now()) @db.Timestamptz(6)
   berita           Berita    @relation(fields: [id_berita], references: [id_berita], onDelete: Cascade)
   pengguna         Pengguna? @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: SetNull)
 
@@ -257,8 +256,8 @@ model RewardPoin {
   poin_dibutuhkan  Int
   stok             Int?
   aktif            Boolean         @default(true)
-  tanggal_dibuat   DateTime        @default(now()) @db.Timestamp(6)
-  tanggal_diupdate DateTime        @default(now()) @db.Timestamp(6)
+  tanggal_dibuat   DateTime        @default(now()) @db.Timestamptz(6)
+  tanggal_diupdate DateTime        @default(now()) @db.Timestamptz(6)
   penukaran        PenukaranPoin[]
 
   @@index([kategori_reward], map: "idx_reward_kategori")
@@ -281,10 +280,10 @@ model PenukaranPoin {
   status_penukaran  status_penukaran_enum  @default(PENDING)
   nomor_resi        String?                @db.VarChar(100)
   kurir             String?                @db.VarChar(50)
-  tanggal_penukaran DateTime               @default(now()) @db.Timestamp(6)
-  tanggal_diproses  DateTime?              @db.Timestamp(6)
-  tanggal_dikirim   DateTime?              @db.Timestamp(6)
-  tanggal_selesai   DateTime?              @db.Timestamp(6)
+  tanggal_penukaran DateTime               @default(now()) @db.Timestamptz(6)
+  tanggal_diproses  DateTime?              @db.Timestamptz(6)
+  tanggal_dikirim   DateTime?              @db.Timestamptz(6)
+  tanggal_selesai   DateTime?              @db.Timestamptz(6)
   agent             Agent                  @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
   reward            RewardPoin             @relation(fields: [id_reward], references: [id_reward], onDelete: Restrict)
 
@@ -306,7 +305,7 @@ model RiwayatPoin {
   tabel_referensi String?        @db.VarChar(50)
   saldo_sebelum   Int
   saldo_sesudah   Int
-  tanggal_dibuat  DateTime       @default(now()) @db.Timestamp(6)
+  tanggal_dibuat  DateTime       @default(now()) @db.Timestamptz(6)
   agent           Agent          @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
 
   @@index([id_agent], map: "idx_riwayat_agent")
@@ -322,21 +321,17 @@ model Acara {
   judul_acara      String            @db.VarChar(255)
   deskripsi        String?
   tipe_acara       tipe_acara_enum
-  tanggal_mulai    DateTime          @db.Timestamp(6)
-  tanggal_selesai  DateTime          @db.Timestamp(6)
-  waktu_mulai      String?           @db.VarChar(10)
-  waktu_selesai    String?           @db.VarChar(10)
+  tanggal_mulai    DateTime          @db.Timestamptz(6)
+  tanggal_selesai  DateTime          @db.Timestamptz(6)
   lokasi           String?           @db.VarChar(255)
-  alamat_lengkap   String?           @db.VarChar(500)
   durasi_pilih     Int?
   status_acara     status_acara_enum @default(DRAFT)
   reminder_sent    Boolean           @default(false)
-  tanggal_dibuat   DateTime          @default(now()) @db.Timestamp(6)
-  tanggal_diupdate DateTime          @default(now()) @db.Timestamp(6)
+  tanggal_dibuat   DateTime          @default(now()) @db.Timestamptz(6)
+  tanggal_diupdate DateTime          @default(now()) @db.Timestamptz(6)
   agent            Agent?            @relation(fields: [id_agent], references: [id_agent], onDelete: SetNull)
   listing          Listing?          @relation(fields: [id_property], references: [id_property], onDelete: SetNull)
   pesertaAcara     PesertaAcara[]
-  unitPemilu       UnitPemilu[]
   pilihanPemilu    PilihanPemilu[]
 
   @@index([id_agent], map: "idx_acara_agent")
@@ -351,9 +346,9 @@ model PesertaAcara {
   id_agent            String                @db.VarChar(20)
   nomor_urut          Int?
   status_peserta      status_peserta_enum   @default(TERDAFTAR)
-  waktu_daftar        DateTime              @default(now()) @db.Timestamp(6)
-  waktu_mulai_pilih   DateTime?             @db.Timestamp(6)
-  waktu_selesai_pilih DateTime?             @db.Timestamp(6)
+  waktu_daftar        DateTime              @default(now()) @db.Timestamptz(6)
+  waktu_mulai_pilih   DateTime?             @db.Timestamptz(6)
+  waktu_selesai_pilih DateTime?             @db.Timestamptz(6)
   sisa_waktu          Int?
   acara               Acara                 @relation(fields: [id_acara], references: [id_acara], onDelete: Cascade)
   agent               Agent                 @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
@@ -365,37 +360,19 @@ model PesertaAcara {
   @@map("peserta_acara")
 }
 
-model UnitPemilu {
-  id_unit       Int              @id @default(autoincrement())
-  id_acara      BigInt
-  id_agent      String?          @db.VarChar(20)
-  id_property   BigInt
-  acara         Acara            @relation(fields: [id_acara], references: [id_acara], onDelete: Cascade)
-  agent         Agent?           @relation(fields: [id_agent], references: [id_agent], onDelete: SetNull)
-  listing       Listing          @relation(fields: [id_property], references: [id_property], onDelete: Restrict)
-  pilihanPemilu PilihanPemilu[]
-
-  @@index([id_acara], map: "idx_unit_acara")
-  @@index([id_agent], map: "idx_unit_agent")
-  @@map("unit_pemilu")
-}
-
 model PilihanPemilu {
-  id_pilihan    BigInt   @id @default(autoincrement())
-  id_acara      BigInt
-  id_agent      String   @db.VarChar(20)
-  id_unit       Int
-  nomor_urut    Int
-  waktu_memilih DateTime @default(now()) @db.Timestamp(6)
-  durasi_detik  Int?
-  acara         Acara    @relation(fields: [id_acara], references: [id_acara], onDelete: Cascade)
-  agent         Agent    @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
-  unit          UnitPemilu @relation(fields: [id_unit], references: [id_unit], onDelete: Restrict)
+  id_pilihan Int      @default(autoincrement())
+  id_acara   BigInt
+  id_agent   String   @db.VarChar(20)
+  id_listing BigInt
+  acara      Acara    @relation(fields: [id_acara], references: [id_acara], onDelete: Cascade)
+  agent      Agent    @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
+  listing    Listing  @relation(fields: [id_listing], references: [id_property], onDelete: Restrict)
 
-  @@unique([id_acara, id_unit])
+  @@id([id_acara, id_pilihan])
+  @@unique([id_acara, id_listing])
   @@index([id_acara], map: "idx_pilihan_acara")
   @@index([id_agent], map: "idx_pilihan_agent")
-  @@index([waktu_memilih], map: "idx_pilihan_waktu")
   @@map("pilihan_pemilu")
 }
 

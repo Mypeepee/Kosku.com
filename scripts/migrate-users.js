@@ -4,11 +4,9 @@ import bcrypt from 'bcrypt';
 
 const { Client } = pg;
 
-// Pakai env DATABASE_URL, fallback kalau perlu
 const connectionString =
-  process.env.DATABASE_URL || 'postgres://postgres:password@127.0.0.1:5432/kosku';
+  process.env.DATABASE_URL || 'postgresql://postgres:01082003Jason@127.0.0.1:5432/kosku?schema=public';
 
-// Hanya dua role di sistem baru: USER dan AGENT
 function mapRoleToNewRole(oldRole) {
   switch (oldRole) {
     case 'Agent':
@@ -27,12 +25,11 @@ function mapRoleToNewRole(oldRole) {
 
 async function migrate() {
   const client = new Client({ connectionString });
-
   await client.connect();
   console.log('Connected to PostgreSQL (users)');
 
   try {
-    // Ambil semua account yang punya password dan minimal email atau nomor_telepon
+    // Ambil semua account
     const { rows } = await client.query(`
       SELECT
         id_account,
@@ -66,23 +63,18 @@ async function migrate() {
         tanggal_lahir,
         password,
         kota,
-        kecamatan,
         nomor_telepon,
         roles,
         kode_referal,
-        provinsi,
       } = acc;
 
       try {
         const hashedPassword = await bcrypt.hash(password, 10);
         const peran = mapRoleToNewRole(roles);
-
         const namaLengkap = nama || username || email || nomor_telepon;
 
-        // PENTING: kode_referal dibiarkan apa adanya (AG001, dst)
-        const kodeReferralBaru = kode_referal || null;
-
-        await client.query(
+        // JANGAN langsung isi kode_referral (nanti update setelah agent selesai)
+        const insertRes = await client.query(
           `
           INSERT INTO public.pengguna (
             nama_lengkap,
@@ -95,31 +87,34 @@ async function migrate() {
             status_akun,
             kode_referral
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'AKTIF', $8)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'AKTIF', NULL)
           ON CONFLICT (email) DO NOTHING
+          RETURNING id_pengguna
         `,
-          [
-            namaLengkap,
-            email,
-            nomor_telepon,
-            hashedPassword,
-            kota,
-            tanggal_lahir,
-            peran,
-            kodeReferralBaru,
-          ],
+          [namaLengkap, email, nomor_telepon, hashedPassword, kota, tanggal_lahir, peran]
         );
 
-        successCount++;
-        console.log(
-          `OK: ${id_account} -> ${email || nomor_telepon} (role: ${peran})`,
-        );
+        if (insertRes.rowCount > 0) {
+          const idPenggunaBaru = insertRes.rows[0].id_pengguna;
+
+          // Simpan mapping
+          await client.query(
+            `
+            INSERT INTO public.mapping_pengguna (id_account_lama, id_pengguna_baru)
+            VALUES ($1, $2)
+            ON CONFLICT (id_account_lama) DO NOTHING
+          `,
+            [id_account, idPenggunaBaru]
+          );
+
+          successCount++;
+          console.log(`OK: ${id_account} -> ${idPenggunaBaru} (${email || nomor_telepon})`);
+        } else {
+          console.log(`SKIP (conflict): ${id_account}`);
+        }
       } catch (err) {
         failCount++;
-        console.error(
-          `FAIL: ${id_account} -> ${email || nomor_telepon}:`,
-          err.message,
-        );
+        console.error(`FAIL: ${id_account}:`, err.message);
       }
     }
 
