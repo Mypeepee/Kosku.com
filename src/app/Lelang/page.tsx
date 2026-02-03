@@ -10,7 +10,7 @@ type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
 };
 
-// mapping string dari URL -> enum kategori_properti_enum di Prisma
+// ✅ mapping string dari URL -> enum kategori_properti_enum di Prisma
 const KATEGORI_MAP: Record<string, Prisma.kategori_properti_enum> = {
   RUMAH: "RUMAH",
   TANAH: "TANAH",
@@ -19,18 +19,26 @@ const KATEGORI_MAP: Record<string, Prisma.kategori_properti_enum> = {
   PABRIK: "PABRIK",
   RUKO: "RUKO",
   TOKO: "TOKO",
-  HOTEL: "HOTEL_DAN_VILLA",
-  VILLA: "HOTEL_DAN_VILLA",
+  HOTEL_DAN_VILLA: "HOTEL_DAN_VILLA",
 };
 
-export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
-  const kota = typeof searchParams.kota === "string" ? searchParams.kota : undefined;
+// ✅ Format kategori untuk display (HOTEL_DAN_VILLA → HOTEL DAN VILLA)
+const formatKategoriDisplay = (kategori: string): string => {
+  return kategori.replace(/_/g, " ");
+};
+
+export async function generateMetadata({
+  searchParams,
+}: Props): Promise<Metadata> {
+  const kota =
+    typeof searchParams.kota === "string" ? searchParams.kota : undefined;
 
   const formatText = (text?: string) =>
     text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
 
   let title = "Lelang Properti Terpercaya | Premier";
-  if (kota) title = `Lelang Properti di ${formatText(kota)} Harga Terbaik | Premier`;
+  if (kota)
+    title = `Lelang Properti di ${formatText(kota)} Harga Terbaik | Premier`;
 
   return {
     title,
@@ -43,23 +51,24 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
   };
 }
 
-const hasToken = (parts: string[], token: string) => parts.includes(token);
-
 // helper: validasi URL gambar listing
 function isValidImageUrl(url: string): boolean {
   if (!url || url.trim() === "") return false;
-  return url.startsWith("http://") || url.startsWith("https://") || url.startsWith("/");
+  return (
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("/")
+  );
 }
 
 // helper: normalisasi foto agent dari Google Drive ID
 function normalizeAgentPhoto(fileId: string | null | undefined): string {
   if (!fileId || fileId.trim() === "") {
-    return "/images/default-profile.png"; // sesuaikan dengan file default Anda di /public
+    return "/images/default-profile.png";
   }
 
   const trimmed = fileId.trim();
 
-  // Kalau sudah URL penuh, langsung pakai
   if (
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
@@ -68,7 +77,6 @@ function normalizeAgentPhoto(fileId: string | null | undefined): string {
     return trimmed;
   }
 
-  // Asumsi: ini Google Drive file ID
   return `https://drive.google.com/thumbnail?id=${trimmed}&sz=w64`;
 }
 
@@ -93,9 +101,7 @@ export default async function SearchPage({ searchParams }: Props) {
       ? Number(searchParams.lantai)
       : undefined;
   const hadap =
-    typeof searchParams.hadap === "string"
-      ? searchParams.hadap
-      : undefined;
+    typeof searchParams.hadap === "string" ? searchParams.hadap : undefined;
   const kondisi =
     typeof searchParams.kondisi === "string"
       ? searchParams.kondisi
@@ -105,7 +111,7 @@ export default async function SearchPage({ searchParams }: Props) {
       ? searchParams.legalitas
       : undefined;
 
-  // tambahan dari SearchHero
+  // ✅ Filter harga dan luas tanah dari SearchHero
   const minHarga =
     typeof searchParams.minHarga === "string"
       ? Number(searchParams.minHarga)
@@ -123,17 +129,21 @@ export default async function SearchPage({ searchParams }: Props) {
       ? Number(searchParams.maxLT)
       : undefined;
 
+  // ✅ Sort parameter (default: lelang-terdekat)
   const sortRaw =
     typeof searchParams.sort === "string"
       ? searchParams.sort
-      : "auction_asc";
-  const sortParts = sortRaw.split("_").filter(Boolean);
+      : "lelang-terdekat";
 
   const limit = 18;
   const skip = (page - 1) * limit;
 
-  // mapping tipe -> enum kategori
+  // ✅ mapping tipe -> enum kategori
   const mappedKategori = tipe ? KATEGORI_MAP[tipe.toUpperCase()] : undefined;
+
+  // ✅ Tanggal hari ini (awal hari untuk comparison yang fair)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   const whereClause: Prisma.ListingWhereInput = {
     jenis_transaksi: "LELANG",
@@ -171,75 +181,97 @@ export default async function SearchPage({ searchParams }: Props) {
       legalitas: { equals: legalitas as any },
     }),
 
-    ...(minHarga && {
-      harga: {
-        ...(minHarga && { gte: minHarga }),
-        ...(maxHarga && { lte: maxHarga }),
+    // ✅ Filter HARGA pakai nilai_limit_lelang (BUKAN harga)
+    ...((minHarga !== undefined || maxHarga !== undefined) && {
+      nilai_limit_lelang: {
+        ...(minHarga !== undefined && { gte: minHarga }),
+        ...(maxHarga !== undefined && { lte: maxHarga }),
       },
     }),
 
-    ...(minLT && {
+    // ✅ Filter LUAS TANAH
+    ...((minLT !== undefined || maxLT !== undefined) && {
       luas_tanah: {
-        ...(minLT && { gte: minLT }),
-        ...(maxLT && { lte: maxLT }),
+        ...(minLT !== undefined && { gte: minLT }),
+        ...(maxLT !== undefined && { lte: maxLT }),
       },
+    }),
+
+    // ✅ FILTER berdasarkan waktu lelang
+    ...(sortRaw === "lelang-terdekat" && {
+      tanggal_lelang: { gte: today }, // Lelang yang akan datang
+    }),
+    ...(sortRaw === "lelang-terjauh" && {
+      tanggal_lelang: { gte: today }, // Lelang yang akan datang
+    }),
+    ...(sortRaw === "lelang-berlalu" && {
+      tanggal_lelang: { lt: today }, // Lelang yang sudah lewat
     }),
   };
 
-  const orderByArray: Prisma.ListingOrderByWithRelationInput[] = [];
+  // ✅ Switch-based sorting
+  let orderBy: Prisma.ListingOrderByWithRelationInput[] = [];
 
-  if (hasToken(sortParts, "auction") && hasToken(sortParts, "desc")) {
-    orderByArray.push({ tanggal_lelang: "desc" });
-  } else {
-    orderByArray.push({ tanggal_lelang: "asc" });
+  switch (sortRaw) {
+    case "lelang-terdekat":
+      // Lelang yang akan datang, dari yang paling dekat
+      orderBy = [{ tanggal_lelang: "asc" }];
+      break;
+    case "lelang-terjauh":
+      // Lelang yang akan datang, dari yang paling jauh
+      orderBy = [{ tanggal_lelang: "desc" }];
+      break;
+    case "lelang-berlalu":
+      // Lelang yang sudah lewat, dari yang baru lewat
+      orderBy = [{ tanggal_lelang: "desc" }];
+      break;
+    case "termurah":
+      orderBy = [{ nilai_limit_lelang: "asc" }];
+      break;
+    case "termahal":
+      orderBy = [{ nilai_limit_lelang: "desc" }];
+      break;
+    case "terluas":
+      orderBy = [{ luas_tanah: "desc" }];
+      break;
+    case "terkecil":
+      orderBy = [{ luas_tanah: "asc" }];
+      break;
+    case "terpopuler":
+      orderBy = [{ dilihat: "desc" }];
+      break;
+    default:
+      // terbaru = default (sort by created date)
+      orderBy = [{ tanggal_dibuat: "desc" }];
   }
 
-  if (hasToken(sortParts, "price")) {
-    if (hasToken(sortParts, "asc")) {
-      orderByArray.push({ harga: "asc" });
-    } else if (hasToken(sortParts, "desc")) {
-      orderByArray.push({ harga: "desc" });
-    }
-  }
-
-  if (hasToken(sortParts, "land")) {
-    if (hasToken(sortParts, "asc")) {
-      orderByArray.push({ luas_tanah: "asc" });
-    } else if (hasToken(sortParts, "desc")) {
-      orderByArray.push({ luas_tanah: "desc" });
-    }
-  }
-
-  const orderBy:
-    | Prisma.ListingOrderByWithRelationInput
-    | Prisma.ListingOrderByWithRelationInput[] =
-    orderByArray.length > 0 ? orderByArray : [{ tanggal_lelang: "asc" }];
-
-  const [totalItems, propertiesRaw] = await prisma.$transaction([
-    prisma.listing.count({ where: whereClause }),
-    prisma.listing.findMany({
-      where: whereClause,
-      take: limit,
-      skip,
-      orderBy,
-      include: {
-        agent: {
-          select: {
-            nama_kantor: true,
-            foto_profil_url: true, // ini berisi Google Drive ID
-            pengguna: {
-              select: {
-                nama_lengkap: true,
+  const [totalItems, propertiesRaw] = await prisma
+    .$transaction([
+      prisma.listing.count({ where: whereClause }),
+      prisma.listing.findMany({
+        where: whereClause,
+        take: limit,
+        skip,
+        orderBy,
+        include: {
+          agent: {
+            select: {
+              nama_kantor: true,
+              foto_profil_url: true,
+              pengguna: {
+                select: {
+                  nama_lengkap: true,
+                },
               },
             },
           },
         },
-      },
-    }),
-  ]).catch((error) => {
-    console.error("Prisma Error:", error);
-    throw error;
-  });
+      }),
+    ])
+    .catch((error) => {
+      console.error("Prisma Error:", error);
+      throw error;
+    });
 
   const totalPages = Math.ceil(totalItems / limit);
 
@@ -261,9 +293,16 @@ export default async function SearchPage({ searchParams }: Props) {
       judul: item.judul,
       kota: item.kota,
       alamat_lengkap: item.alamat_lengkap ?? "",
-      harga: Number(item.harga),
+
+      // ✅ Display harga pakai nilai_limit_lelang
+      harga: item.nilai_limit_lelang
+        ? Number(item.nilai_limit_lelang)
+        : Number(item.harga),
+
       jenis_transaksi: item.jenis_transaksi,
-      kategori: item.kategori,
+
+      // ✅ Format kategori untuk display (HOTEL_DAN_VILLA → HOTEL DAN VILLA)
+      kategori: formatKategoriDisplay(item.kategori),
 
       gambar: foto_list[0] || "/images/hero/banner.jpg",
       foto_list,
