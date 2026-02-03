@@ -273,14 +273,13 @@ export default async function DetailPage({ params }: Props) {
     }
   }
 
-  // Ambil session dan cocokan dengan agentId di URL
+  // Ambil session
   const session = await getServerSession(authOptions);
   const loggedInAgentId = (session?.user as any)?.agentId || null;
+  const role = (session?.user as any)?.role || null;
 
-  const currentAgentId =
-    loggedInAgentId && loggedInAgentId === agentId
-      ? loggedInAgentId
-      : null;
+  // currentAgentId: id agent yang login (kalau ada)
+  const currentAgentId = loggedInAgentId;
 
   const rawGambar = product.gambar || "";
   const fotoArray =
@@ -335,6 +334,7 @@ export default async function DetailPage({ params }: Props) {
         fotoArray={finalFotoArray}
         similarProperties={similarForClient}
         currentAgentId={currentAgentId}
+        currentRole={role}   // ✅ kirim role ke DetailClient
       />
     </main>
   );

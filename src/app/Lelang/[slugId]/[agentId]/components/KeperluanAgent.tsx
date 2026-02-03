@@ -3,9 +3,11 @@
 
 import React from "react";
 import { Icon } from "@iconify/react";
+import Link from "next/link";
 
 interface KeperluanAgentProps {
   data: any;
+  currentAgentId?: string | null;
 }
 
 const formatMoney = (value: number): string => {
@@ -49,7 +51,7 @@ const calcPengosongan = (limit: number): number => {
   return 1_250_000_000 + 50_000_000;
 };
 
-export default function KeperluanAgent({ data }: KeperluanAgentProps) {
+export default function KeperluanAgent({ data, currentAgentId }: KeperluanAgentProps) {
   const rawLimit =
     data?.nilai_limit_lelang || data?.harga || data?.priceRates?.monthly || 0;
 
@@ -60,6 +62,10 @@ export default function KeperluanAgent({ data }: KeperluanAgentProps) {
 
   const biayaDokumen = limit * 0.085 + 7_000_000;
   const biayaPengosongan = calcPengosongan(limit);
+
+  // ✅ Check Ownership
+  const ownerId: string = data?.owner?.id || "";
+  const isOwner = !!currentAgentId && !!ownerId && currentAgentId === ownerId;
 
   const handleDownloadImages = () => {
     const urls: string[] = data?.foto_list || [];
@@ -179,6 +185,60 @@ export default function KeperluanAgent({ data }: KeperluanAgentProps) {
         {/* TOMBOL AKSI */}
         <div className="px-5 pb-4 pt-2 bg-slate-950/95 border-t border-white/5">
           <div className="flex flex-col gap-2">
+            {/* ✅ TOMBOL EDIT - HANYA UNTUK OWNER */}
+            {isOwner && (
+              <Link
+                href={`/dashboard/properties/edit/${data.slug}`}
+                className="group relative w-full overflow-hidden rounded-2xl
+                  bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600
+                  p-[1px] shadow-[0_0_30px_rgba(168,85,247,0.5)]
+                  hover:shadow-[0_0_40px_rgba(168,85,247,0.7)]
+                  transition-all duration-300 active:scale-[0.98]"
+              >
+                <div className="relative w-full h-full bg-slate-950 rounded-2xl px-4 py-3
+                  flex items-center justify-center gap-2.5
+                  group-hover:bg-gradient-to-r group-hover:from-violet-600/10 group-hover:via-fuchsia-600/10 group-hover:to-pink-600/10
+                  transition-all duration-300">
+                  
+                  {/* Animated Background Glow */}
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                    <div className="absolute top-0 left-0 w-20 h-20 bg-violet-500/30 rounded-full blur-2xl animate-pulse" />
+                    <div className="absolute bottom-0 right-0 w-20 h-20 bg-pink-500/30 rounded-full blur-2xl animate-pulse delay-75" />
+                  </div>
+
+                  {/* Icon with Glow */}
+                  <div className="relative flex items-center justify-center w-8 h-8 rounded-xl
+                    bg-gradient-to-br from-violet-500/20 to-pink-500/20
+                    border border-violet-400/40
+                    group-hover:border-violet-300/70
+                    transition-all duration-300">
+                    <Icon
+                      icon="solar:pen-new-square-bold-duotone"
+                      className="text-violet-200 text-lg group-hover:text-white group-hover:scale-110 transition-all duration-300"
+                    />
+                  </div>
+
+                  {/* Text */}
+                  <div className="relative text-left flex-1">
+                    <p className="text-[12px] font-bold bg-gradient-to-r from-violet-200 via-fuchsia-200 to-pink-200 bg-clip-text text-transparent
+                      group-hover:from-white group-hover:via-violet-100 group-hover:to-pink-100
+                      transition-all duration-300">
+                      Edit Properti Saya
+                    </p>
+                    <p className="text-[9px] text-slate-400 group-hover:text-slate-300 transition-colors duration-300">
+                      Kelola listing & data properti
+                    </p>
+                  </div>
+
+                  {/* Arrow Icon */}
+                  <Icon
+                    icon="solar:arrow-right-linear"
+                    className="relative text-violet-300 text-base opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300"
+                  />
+                </div>
+              </Link>
+            )}
+
             <button
               onClick={handleDownloadImages}
               className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl
@@ -306,6 +366,31 @@ export default function KeperluanAgent({ data }: KeperluanAgentProps) {
         </div>
 
         <div className="px-4 py-2.5 flex gap-2">
+          {/* ✅ TOMBOL EDIT DI MOBILE */}
+          {isOwner && (
+            <Link
+              href={`/dashboard/properties/edit/${data.slug}`}
+              className="flex-1 relative overflow-hidden rounded-xl
+                bg-gradient-to-r from-violet-600 to-pink-600
+                shadow-[0_0_20px_rgba(168,85,247,0.4)]
+                hover:shadow-[0_0_30px_rgba(168,85,247,0.6)]
+                transition-all active:scale-[0.97]
+                flex justify-center items-center gap-1.5 py-2.5"
+            >
+              <Icon
+                icon="solar:pen-new-square-bold-duotone"
+                className="text-white text-base drop-shadow-lg"
+              />
+              <span className="font-bold text-[11px] text-white drop-shadow-lg">
+                Edit
+              </span>
+              
+              {/* Shine Effect */}
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent
+                translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000" />
+            </Link>
+          )}
+
           <button
             onClick={handleDownloadImages}
             className="flex-1 bg-sky-500/20 border border-sky-400/60 text-sky-50 font-semibold text-[11px] py-2.5 rounded-xl hover:bg-sky-500/30 transition-all active:scale-[0.97] flex justify-center items-center gap-1.5"

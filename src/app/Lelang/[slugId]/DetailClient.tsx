@@ -69,7 +69,8 @@ interface DetailClientProps {
   product: ProductData;
   fotoArray: string[];
   similarProperties?: ProductData[];
-  currentAgentId?: string | null;
+  currentAgentId?: string | null;   // id agent yang login (jika ada)
+  currentRole?: "AGENT" | "OWNER" | "USER" | string | null; // role user
 }
 
 export default function DetailClient({
@@ -77,6 +78,7 @@ export default function DetailClient({
   fotoArray,
   similarProperties = [],
   currentAgentId,
+  currentRole,
 }: DetailClientProps) {
   // ========= INCREMENT VIEW SETIAP HALAMAN DETAIL DIBUKA =========
   useEffect(() => {
@@ -183,8 +185,10 @@ export default function DetailClient({
       product.agent?.pengguna?.foto_profil_url ||
       "/images/user/user-01.png",
 
+    // owner dengan id_agent
     owner: product.agent
       ? {
+          id: product.agent.id_agent || "", // penting untuk cek kepemilikan
           name: product.agent.pengguna?.nama_lengkap || "Agent Premier",
           avatar: product.agent.pengguna?.foto_profil_url || "",
           phone: product.agent.nomor_whatsapp || "",
@@ -195,6 +199,7 @@ export default function DetailClient({
           join: "2024",
         }
       : {
+          id: "",
           name: "Agent Premier",
           avatar: "",
           phone: "",
@@ -237,7 +242,16 @@ export default function DetailClient({
     is_hot_deal: p.is_hot_deal ?? false,
   }));
 
-  const isOwnerAgent = !!currentAgentId;
+  const ownerId: string = (propertyData as any).owner?.id || "";
+
+  // boleh edit jika:
+  // - currentRole OWNER (admin/owner sistem), ATAU
+  // - currentRole AGENT dan currentAgentId === ownerId
+  const canEdit =
+    currentRole === "OWNER" ||
+    (currentRole === "AGENT" && !!currentAgentId && currentAgentId === ownerId);
+
+  const isAgent = currentRole === "AGENT";
 
   return (
     <div className="text-white font-sans bg-[#0F0F0F]">
@@ -246,7 +260,7 @@ export default function DetailClient({
 
       {/* BREADCRUMB */}
       <div className="container mx-auto px-4 mb-4 lg:mb-6">
-        <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+        <div className="flex items-center gap-2 text-[10px] sm:text[11px] font-bold text-gray-500 uppercase tracking-wider">
           <Link href="/" className="hover:text-[#86efac] transition-colors">
             Home
           </Link>
@@ -278,10 +292,19 @@ export default function DetailClient({
             currentAgentId={currentAgentId}
           />
 
-          {isOwnerAgent ? (
-            <KeperluanAgent data={propertyData as any} />
+          {isAgent ? (
+            // Semua agent selalu lihat KeperluanAgent
+            <KeperluanAgent
+              data={propertyData as any}
+              currentAgentId={currentAgentId}
+              canEdit={canEdit} // di dalamnya tombol Edit hanya muncul jika canEdit true
+            />
           ) : (
-            <BookingSidebar data={propertyData as any} />
+            // Non-agent (buyer biasa) lihat BookingSidebar
+            <BookingSidebar
+              data={propertyData as any}
+              currentAgentId={currentAgentId}
+            />
           )}
         </div>
       </div>
