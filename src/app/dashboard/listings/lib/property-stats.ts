@@ -1,5 +1,4 @@
 // src/app/dashboard/listings/lib/property-stats.ts
-
 import prisma from "@/lib/prisma";
 
 export type KategoriEnum =
@@ -16,31 +15,36 @@ export type ListingTypeCounts = Partial<Record<KategoriEnum, number>>;
 
 export type ListingHeaderStats = {
   total: number;
-  totalForSale: number;     // PRIMARY + SECONDARY
-  totalForRent: number;     // SEWA
-  totalHotDeal: number;     // is_hot_deal = true
-  totalViewed: number;      // SUM(dilihat) semua listing agent
+  totalForSale: number;
+  totalForRent: number;
+  totalHotDeal: number;
+  totalViewed: number;
   countsByCategory: ListingTypeCounts;
 };
 
 export async function fetchListingHeaderStats(
-  idAgent: string,
+  userRole: string,
+  idAgent?: string,
 ): Promise<ListingHeaderStats> {
-  // Total semua listing tersedia milik agent
+  // Conditional where clause berdasarkan role [web:20][web:23]
+  const baseWhere = userRole === "OWNER"
+    ? { status_tayang: "TERSEDIA" as const }
+    : { 
+        id_agent: idAgent!,
+        status_tayang: "TERSEDIA" as const 
+      };
+
+  // Total semua listing tersedia
   const total = await prisma.listing.count({
-    where: {
-      id_agent: idAgent,
-      status_tayang: "TERSEDIA",
-    },
+    where: baseWhere,
   });
 
   // Listing untuk dijual (PRIMARY + SECONDARY)
   const totalForSale = await prisma.listing.count({
     where: {
-      id_agent: idAgent,
-      status_tayang: "TERSEDIA",
+      ...baseWhere,
       jenis_transaksi: {
-        in: ["PRIMARY", "SECONDARY"], // jenis_transaksi_enum
+        in: ["PRIMARY", "SECONDARY"],
       },
     },
   });
@@ -48,8 +52,7 @@ export async function fetchListingHeaderStats(
   // Listing untuk disewa (SEWA)
   const totalForRent = await prisma.listing.count({
     where: {
-      id_agent: idAgent,
-      status_tayang: "TERSEDIA",
+      ...baseWhere,
       jenis_transaksi: "SEWA",
     },
   });
@@ -57,8 +60,7 @@ export async function fetchListingHeaderStats(
   // Hot deal
   const totalHotDeal = await prisma.listing.count({
     where: {
-      id_agent: idAgent,
-      status_tayang: "TERSEDIA",
+      ...baseWhere,
       is_hot_deal: true,
     },
   });
@@ -67,10 +69,7 @@ export async function fetchListingHeaderStats(
   const byCategory = await prisma.listing.groupBy({
     by: ["kategori"],
     _count: { _all: true },
-    where: {
-      id_agent: idAgent,
-      status_tayang: "TERSEDIA",
-    },
+    where: baseWhere,
   });
 
   const countsByCategory: ListingTypeCounts = {};
@@ -79,12 +78,9 @@ export async function fetchListingHeaderStats(
     countsByCategory[key] = row._count._all;
   });
 
-  // Total viewed: sum kolom dilihat untuk semua listing agent ini
+  // Total viewed
   const viewedAgg = await prisma.listing.aggregate({
-    where: {
-      id_agent: idAgent,
-      status_tayang: "TERSEDIA",
-    },
+    where: baseWhere,
     _sum: {
       dilihat: true,
     },

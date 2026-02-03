@@ -56,6 +56,7 @@ interface ProductData {
     nomor_whatsapp?: string | null;
     kota_area?: string | null;
     jabatan?: string | null;
+    foto_profil_url?: string | null; // <- SUDAH DINORMALISASI DI page.tsx
     pengguna?: {
       nama_lengkap?: string | null;
       foto_profil_url?: string | null;
@@ -161,6 +162,7 @@ export default function DetailClient({
     gambar: fotoArray[0] || "/images/hero/banner.jpg",
     foto_list: fotoArray,
 
+    // ✅ GUNAKAN foto_profil_url DARI agent (SUDAH JADI URL THUMB)
     agent: product.agent
       ? {
           nama: product.agent.pengguna?.nama_lengkap || "Agent Premier",
@@ -171,7 +173,10 @@ export default function DetailClient({
           whatsapp: product.agent.nomor_whatsapp || "",
           email: product.agent.pengguna?.email || "",
           kantor: product.agent.nama_kantor || "Premier Asset",
-          foto_url: product.agent.pengguna?.foto_profil_url || "",
+          foto_url:
+            product.agent.foto_profil_url ||        // utama: dari kolom agent (sudah normalize)
+            product.agent.pengguna?.foto_profil_url || // fallback jika ada di pengguna
+            "",
           rating: product.agent.rating ?? 5,
           jumlah_closing: product.agent.jumlah_closing ?? 0,
           kota_area: product.agent.kota_area || "",
@@ -182,15 +187,19 @@ export default function DetailClient({
     agent_name:
       product.agent?.pengguna?.nama_lengkap || "Agent Premier",
     agent_photo:
+      product.agent?.foto_profil_url ||            // pakai yang sudah normalize
       product.agent?.pengguna?.foto_profil_url ||
       "/images/user/user-01.png",
 
-    // owner dengan id_agent
+    // owner dengan id_agent + avatar yang benar
     owner: product.agent
       ? {
           id: product.agent.id_agent || "", // penting untuk cek kepemilikan
           name: product.agent.pengguna?.nama_lengkap || "Agent Premier",
-          avatar: product.agent.pengguna?.foto_profil_url || "",
+          avatar:
+            product.agent.foto_profil_url ||        // <== INI YANG DIBACA AgentSidebar
+            product.agent.pengguna?.foto_profil_url ||
+            "",
           phone: product.agent.nomor_whatsapp || "",
           office: product.agent.nama_kantor || "Premier Asset",
           rating: product.agent.rating ?? 5.0,
@@ -235,6 +244,7 @@ export default function DetailClient({
     agent_name:
       p.agent?.pengguna?.nama_lengkap || "Agent Premier",
     agent_photo:
+      p.agent?.foto_profil_url ||                  // gunakan thumbnail agent juga di similar
       p.agent?.pengguna?.foto_profil_url ||
       "/images/user/user-01.png",
     harga: convertToNumber(p.harga),
@@ -260,7 +270,7 @@ export default function DetailClient({
 
       {/* BREADCRUMB */}
       <div className="container mx-auto px-4 mb-4 lg:mb-6">
-        <div className="flex items-center gap-2 text-[10px] sm:text[11px] font-bold text-gray-500 uppercase tracking-wider">
+        <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-bold text-gray-500 uppercase tracking-wider">
           <Link href="/" className="hover:text-[#86efac] transition-colors">
             Home
           </Link>

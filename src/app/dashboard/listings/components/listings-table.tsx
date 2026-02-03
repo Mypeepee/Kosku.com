@@ -14,11 +14,11 @@ export type ListingStatus =
 
 export type Listing = {
   id: string;                  // id_property
-  slug: string;                // slug-id lengkap untuk detail
+  slug: string;                // slugId (slug-id_property)
   title: string;
   status: ListingStatus | string;
   category: string;
-  transactionType: string;     // "LELANG" | "PRIMARY" | "SECONDARY" | "SEWA" dll
+  transactionType: string;     // "LELANG" | "PRIMARY" | "SECONDARY" | "SEWA"
   city: string;
   area: string;
   address: string;
@@ -42,16 +42,21 @@ interface ListingsTableProps {
 // Helper: tentukan URL publik detail
 const getPublicDetailUrl = (item: Listing, currentAgentId?: string | null) => {
   const tx = item.transactionType?.toUpperCase();
-  const baseSlug = item.slug; // pastikan sudah slug-id dari server
+  const slugId = item.slug; // sudah slugId dari server
 
-  const agentSegment = currentAgentId ? `/${currentAgentId}` : "";
-
-  if (tx === "LELANG") {
-    return `/Lelang/${baseSlug}${agentSegment}`;
+  // Kalau tidak ada agentId (fallback ke detail publik tanpa agentId)
+  if (!currentAgentId) {
+    if (tx === "LELANG") {
+      return `/Lelang/${slugId}`;
+    }
+    return `/Jual/${slugId}`;
   }
 
-  // PRIMARY / SECONDARY / SEWA → Jual
-  return `/Jual/${baseSlug}${agentSegment}`;
+  // Dengan agentId → /Lelang/[slugId]/[agentId] atau /Jual/[slugId]/[agentId]
+  if (tx === "LELANG") {
+    return `/Lelang/${slugId}/${currentAgentId}`;
+  }
+  return `/Jual/${slugId}/${currentAgentId}`;
 };
 
 export default function ListingsTable({
@@ -194,11 +199,11 @@ export default function ListingsTable({
                   onChange={toggleSelectAll}
                 />
               </th>
-              <th className="w-10 px-2 py-3">Aksi</th>
               <th className="w-32 px-4 py-3">ID Listing</th>
               <th className="w-16 px-2 py-3">Foto</th>
               <th className="px-4 py-3">Kategori</th>
-              <th className="px-4 py-3">Transaksi</th>
+              <th className="px-4 py-3">Jenis</th>
+              <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Alamat</th>
               <th className="px-4 py-3">Harga</th>
               <th className="px-3 py-3 text-right">Dilihat</th>
@@ -223,16 +228,6 @@ export default function ListingsTable({
                       checked={checked}
                       onChange={() => toggleRow(item.id)}
                     />
-                  </td>
-
-                  {/* tombol view/detail */}
-                  <td className="px-2 py-3 align-top">
-                    <Link
-                      href={detailHref}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
-                    >
-                      <Icon icon="solar:eye-linear" className="text-sm" />
-                    </Link>
                   </td>
 
                   {/* ID listing */}
@@ -275,6 +270,11 @@ export default function ListingsTable({
                     {item.transactionType}
                   </td>
 
+                  {/* status_tayang */}
+                  <td className="px-4 py-3 align-top text-xs text-slate-200">
+                    {item.status}
+                  </td>
+
                   {/* alamat */}
                   <td className="px-4 py-3 align-top text-xs text-slate-300">
                     <Link href={detailHref} className="flex flex-col gap-0.5">
@@ -298,7 +298,7 @@ export default function ListingsTable({
                     {formatViews(item.views)}
                   </td>
 
-                  {/* tombol edit (dashboard) */}
+                  {/* tombol edit */}
                   <td className="px-4 py-3 align-top text-right">
                     <Link
                       href={`/dashboard/listings/${item.id}`}

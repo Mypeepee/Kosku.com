@@ -7,17 +7,15 @@ import DetailClient from "../DetailClient";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
-// --- TYPES ---
 interface ParamsShape {
-  slugId: string;   // contoh: "toko-lintas-...-78675"
-  agentId: string;  // contoh: "AG1"
+  slugId: string;
+  agentId: string;
 }
 
 interface Props {
   params: ParamsShape;
 }
 
-// --- HELPER: extract id_property (bigint) dari slugId (angka di akhir) ---
 function extractIdFromSlugId(slugId: string | undefined | null): bigint | null {
   if (!slugId) return null;
   const parts = slugId.split("-");
@@ -31,7 +29,6 @@ function extractIdFromSlugId(slugId: string | undefined | null): bigint | null {
   }
 }
 
-// --- HELPER: konversi BigInt di object Prisma jadi plain object siap dikirim ke client ---
 function serializePrisma<T>(data: T): any {
   return JSON.parse(
     JSON.stringify(
@@ -41,7 +38,6 @@ function serializePrisma<T>(data: T): any {
   );
 }
 
-// --- HELPER: normalisasi foto agent dari Google Drive ID ---
 function normalizeAgentPhoto(fileId: string | null | undefined): string {
   if (!fileId || fileId.trim() === "") {
     return "/images/default-profile.png";
@@ -60,7 +56,7 @@ function normalizeAgentPhoto(fileId: string | null | undefined): string {
   return `https://drive.google.com/thumbnail?id=${trimmed}&sz=w64`;
 }
 
-// --- QUERY DETAIL dari tabel listing ---
+// ✅ PERBAIKAN: hapus foto_profil_url dari select pengguna
 async function getProperty(id: bigint) {
   const product = await prisma.listing.findUnique({
     where: { id_property: id },
@@ -74,12 +70,13 @@ async function getProperty(id: bigint) {
           nomor_whatsapp: true,
           kota_area: true,
           jabatan: true,
-          foto_profil_url: true,
+          foto_profil_url: true,      // foto agent dari tabel agent
           pengguna: {
             select: {
               nama_lengkap: true,
               nomor_telepon: true,
               email: true,
+              // ❌ HAPUS foto_profil_url karena tidak ada di tabel Pengguna
             },
           },
         },
@@ -93,7 +90,6 @@ async function getProperty(id: bigint) {
   return product;
 }
 
-// --- QUERY SIMILAR dari listing ---
 async function getSimilarProperties(currentProperty: any) {
   try {
     const similarProperties = await prisma.listing.findMany({
@@ -126,6 +122,7 @@ async function getSimilarProperties(currentProperty: any) {
                 nama_lengkap: true,
                 nomor_telepon: true,
                 email: true,
+                // ❌ HAPUS foto_profil_url
               },
             },
           },
@@ -142,7 +139,6 @@ async function getSimilarProperties(currentProperty: any) {
   }
 }
 
-// --- METADATA ---
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slugId } = params;
   const id = extractIdFromSlugId(slugId);
@@ -251,7 +247,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-// --- PAGE ---
 export default async function DetailPage({ params }: Props) {
   const { slugId, agentId } = params;
 
@@ -265,7 +260,6 @@ export default async function DetailPage({ params }: Props) {
     notFound();
   }
 
-  // Self-healing slugId: kalau slug berubah, tetap pertahankan agentId
   if (product.slug && product.id_property) {
     const expectedSlugId = `${product.slug}-${product.id_property.toString()}`;
     if (expectedSlugId !== slugId) {
@@ -273,12 +267,10 @@ export default async function DetailPage({ params }: Props) {
     }
   }
 
-  // Ambil session
   const session = await getServerSession(authOptions);
   const loggedInAgentId = (session?.user as any)?.agentId || null;
   const role = (session?.user as any)?.role || null;
 
-  // currentAgentId: id agent yang login (kalau ada)
   const currentAgentId = loggedInAgentId;
 
   const rawGambar = product.gambar || "";
@@ -334,7 +326,7 @@ export default async function DetailPage({ params }: Props) {
         fotoArray={finalFotoArray}
         similarProperties={similarForClient}
         currentAgentId={currentAgentId}
-        currentRole={role}   // ✅ kirim role ke DetailClient
+        currentRole={role}
       />
     </main>
   );
