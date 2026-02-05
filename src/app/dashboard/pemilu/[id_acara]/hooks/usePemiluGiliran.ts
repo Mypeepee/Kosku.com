@@ -16,7 +16,7 @@ export function usePemiluGiliran(
 
   const isTransitioning = useRef(false);
 
-  // 🔥 TAMBAHAN: polling status kalau activeAgentId null
+  // Polling status kalau activeAgentId null (event belum mulai / sudah selesai)
   useEffect(() => {
     if (activeAgentId !== null) return;
 
@@ -25,7 +25,8 @@ export function usePemiluGiliran(
         const res = await fetch(`/api/pemilu/${id_acara}/status`);
         if (!res.ok) return;
         const data = await res.json();
-        
+
+        // Hanya set kalau ada activeAgentId yang valid dari server
         if (data.activeAgentId) {
           setActiveAgentId(data.activeAgentId);
           setCountdown(data.remainingSeconds ?? 0);
@@ -33,12 +34,12 @@ export function usePemiluGiliran(
       } catch (err) {
         console.error("Error polling status:", err);
       }
-    }, 5000); // poll setiap 5 detik
+    }, 5000);
 
     return () => clearInterval(poll);
   }, [activeAgentId, id_acara]);
 
-  // countdown lokal
+  // Countdown lokal
   useEffect(() => {
     if (!activeAgentId || countdown <= 0) return;
 
@@ -49,26 +50,36 @@ export function usePemiluGiliran(
     return () => clearInterval(timer);
   }, [activeAgentId, countdown]);
 
-  // kalau countdown habis, minta server pindah giliran
+  // Kalau countdown habis DAN ada activeAgentId, minta server pindah giliran
   useEffect(() => {
-    if (countdown === 0 && activeAgentId && !isTransitioning.current) {
-      isTransitioning.current = true;
+    // ✅ Guard: jangan panggil /next kalau countdown masih jalan atau sudah transisi
+    if (countdown !== 0 || !activeAgentId || isTransitioning.current) return;
 
-      fetch(`/api/pemilu/${id_acara}/giliran/next`, {
-        method: "POST",
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          console.log("✅ Next giliran response:", data);
-        })
-        .catch((err) => {
-          console.error("❌ Error next giliran:", err);
+    isTransitioning.current = true;
+
+    fetch(`/api/pemilu/${id_acara}/giliran/next`, {
+      method: "POST",
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        console.log("✅ Next giliran response:", data);
+
+        // Kalau server balikin error (acara belum mulai / sudah selesai), reset state
+        if (!res.ok) {
+          console.warn("⚠️ Server tolak /next:", data);
+          setActiveAgentId(null);
+          setCountdown(0);
           isTransitioning.current = false;
-        });
-    }
+        }
+        // Kalau sukses, tunggu event Pusher untuk update state
+      })
+      .catch((err) => {
+        console.error("❌ Error next giliran:", err);
+        isTransitioning.current = false;
+      });
   }, [countdown, activeAgentId, id_acara]);
 
-  // subscribe ke Pusher
+  // Subscribe Pusher
   useEffect(() => {
     const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,

@@ -42,18 +42,45 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // ✅ CEK BATAS WAKTU ACARA
+    // ✅ 1. CEK: Acara belum mulai
+    if (acara.tanggal_mulai && now < acara.tanggal_mulai) {
+      console.log(
+        `⏸ Acara ${id_acara} belum mulai (tanggal_mulai: ${acara.tanggal_mulai.toISOString()})`
+      );
+      return NextResponse.json(
+        {
+          error: "Acara belum mulai",
+          activeAgentId: null,
+          remainingSeconds: null,
+        },
+        { status: 400 }
+      );
+    }
+
+    // ✅ 2. CEK: Acara sudah selesai
     if (acara.tanggal_selesai && now >= acara.tanggal_selesai) {
       console.log(
-        `🏁 Acara ${id_acara} sudah lewat tanggal_selesai (${acara.tanggal_selesai.toISOString()})`
+        `🏁 Acara ${id_acara} sudah selesai (${acara.tanggal_selesai.toISOString()})`
       );
+
+      // Reset semua peserta ke TERDAFTAR
+      await prisma.pesertaAcara.updateMany({
+        where: { id_acara },
+        data: {
+          status_peserta: status_peserta_enum.TERDAFTAR,
+          waktu_mulai_pilih: null,
+          waktu_selesai_pilih: null,
+        },
+      });
+
       await pusher.trigger(`pemilu-${id_acara}`, "giliran-update", {
         id_agent: null,
         remainingSeconds: null,
       });
+
       return NextResponse.json(
         {
-          message: "Acara sudah selesai (lewat tanggal_selesai)",
+          message: "Acara sudah selesai, peserta direset ke TERDAFTAR",
           activeAgentId: null,
           remainingSeconds: null,
         },
@@ -88,7 +115,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       `✅ Peserta aktif: ${pesertaAktif.id_agent} (nomor ${pesertaAktif.nomor_urut})`
     );
 
-    // 1) tandai aktif → SUDAH_MEMILIH
+    // 3) Tandai aktif → SUDAH_MEMILIH
     const selesai = await prisma.pesertaAcara.updateMany({
       where: {
         id_peserta: pesertaAktif.id_peserta,
@@ -107,7 +134,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // 2) peserta valid = punya nomor_urut, tidak DQ, tidak SKIP
+    // 4) Peserta valid
     const pesertaValid = acara.pesertaAcara.filter(
       (p) =>
         p.nomor_urut != null &&
@@ -131,14 +158,13 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // 3) cari yang nomor_urut > aktif (TANPA cek SUDAH_MEMILIH)
+    // 5) Cari next
     let nextPeserta =
       pesertaValid.find(
         (p) => p.nomor_urut! > (pesertaAktif.nomor_urut ?? 0)
       ) ?? null;
 
     if (!nextPeserta) {
-      // aktif tadi adalah urutan terakhir valid → wrap ke nomor paling kecil
       nextPeserta =
         pesertaValid.sort(
           (a, b) => (a.nomor_urut ?? 0) - (b.nomor_urut ?? 0)
@@ -163,7 +189,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // 4) set semua peserta lain → MENUNGGU_GILIRAN
+    // 6) Set semua lain → MENUNGGU_GILIRAN
     await prisma.pesertaAcara.updateMany({
       where: {
         id_acara,
@@ -182,7 +208,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       },
     });
 
-    // 5) aktifkan nextPeserta → SEDANG_MEMILIH
+    // 7) Aktifkan nextPeserta → SEDANG_MEMILIH
     const start = now;
     const end = new Date(start.getTime() + durasi * 1000);
 
