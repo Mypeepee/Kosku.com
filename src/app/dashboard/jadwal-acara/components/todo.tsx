@@ -4,7 +4,6 @@ import { useMemo, useState, useEffect } from "react";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSession } from "next-auth/react";
-import { supabase } from "@/lib/supabaseClient";
 
 interface EventData {
   id_acara: string;
@@ -12,8 +11,6 @@ interface EventData {
   deskripsi?: string;
   tanggal_mulai: string;
   tanggal_selesai: string;
-  waktu_mulai?: string;
-  waktu_selesai?: string;
   tipe_acara: string;
   lokasi?: string;
   status_acara: string;
@@ -97,12 +94,22 @@ const toLocalDateString = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+const formatTimeFromDateTime = (dateTimeStr?: string) => {
+  if (!dateTimeStr) return "";
+  const d = new Date(dateTimeStr);
+  if (Number.isNaN(d.getTime())) return "";
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+};
+
 export default function Todo({ events, onEventClick }: TodoProps) {
   const { data: session } = useSession();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [joiningId, setJoiningId] = useState<string | null>(null);
+  const [registeredEvents, setRegisteredEvents] = useState<Set<string>>(new Set());
+  const [loadingRegistrations, setLoadingRegistrations] = useState(true);
 
-  // Update current time setiap 30 detik
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(new Date());
@@ -110,7 +117,51 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Cek boleh edit event
+  // Fetch apakah user sudah terdaftar di PEMILU-PEMILU yang ada
+  useEffect(() => {
+    const fetchRegistrations = async () => {
+      if (!session?.user) {
+        setLoadingRegistrations(false);
+        return;
+      }
+
+      const pemiluEvents = events.filter((e) => e.tipe_acara === "PEMILU");
+      if (pemiluEvents.length === 0) {
+        setLoadingRegistrations(false);
+        return;
+      }
+
+      try {
+        // Hit API untuk cek status registrasi semua pemilu
+        const checks = await Promise.all(
+          pemiluEvents.map(async (event) => {
+            try {
+              const res = await fetch(`/api/pemilu/${event.id_acara}/check-registration`);
+              if (!res.ok) return { id_acara: event.id_acara, registered: false };
+              const data = await res.json();
+              return { id_acara: event.id_acara, registered: data.registered || false };
+            } catch {
+              return { id_acara: event.id_acara, registered: false };
+            }
+          })
+        );
+
+        const registeredSet = new Set<string>();
+        checks.forEach((c) => {
+          if (c.registered) registeredSet.add(c.id_acara);
+        });
+
+        setRegisteredEvents(registeredSet);
+      } catch (error) {
+        console.error("Error fetching registrations:", error);
+      } finally {
+        setLoadingRegistrations(false);
+      }
+    };
+
+    fetchRegistrations();
+  }, [events, session]);
+
   const canEditEvent = (event: EventData): boolean => {
     if (!session?.user) return false;
     const currentAgentId = (session.user as any).agentId;
@@ -123,19 +174,40 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     return false;
   };
 
-  // Cek tombol join PEMILU tampil atau tidak
-  const canJoinPemilu = (event: EventData): boolean => {
+  const canAccessPemilu = (event: EventData): boolean => {
     if (event.tipe_acara !== "PEMILU") return false;
-    const eventDateStr = event.tanggal_mulai.substring(0, 10);
-    const eventTime = event.waktu_mulai || "00:00";
-    const [hours, minutes] = eventTime.split(":").map(Number);
-    const [year, month, day] = eventDateStr.split("-").map(Number);
-    const eventStartTime = new Date(year, month - 1, day, hours, minutes, 0, 0);
+
+    const eventStart = new Date(event.tanggal_mulai);
+    const eventEnd = new Date(event.tanggal_selesai);
     const now = currentTime;
-    return now < eventStartTime;
+
+    const isRegistered = registeredEvents.has(event.id_acara);
+
+    // Sebelum event mulai: siapa saja bisa join (daftar)
+    if (now < eventStart) return true;
+
+    // Setelah event mulai sampai selesai: hanya yang sudah terdaftar bisa masuk
+    if (now >= eventStart && now <= eventEnd) {
+      return isRegistered;
+    }
+
+    // Setelah event selesai: tidak bisa akses lagi
+    return false;
   };
 
-  // Upcoming 7 hari
+  const getPemiluButtonLabel = (event: EventData): string => {
+    const eventStart = new Date(event.tanggal_mulai);
+    const now = currentTime;
+    const isRegistered = registeredEvents.has(event.id_acara);
+
+    if (now < eventStart) {
+      return isRegistered ? "Masuk PEMILU" : "Join PEMILU";
+    }
+
+    // Setelah mulai, hanya yang registered bisa masuk
+    return "Masuk PEMILU";
+  };
+
   const upcomingEvents = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -158,7 +230,6 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     );
   }, [events]);
 
-  // Group per tanggal
   const groupedEvents = useMemo(() => {
     const groups: Record<string, EventData[]> = {};
     upcomingEvents.forEach((event) => {
@@ -172,83 +243,49 @@ export default function Todo({ events, onEventClick }: TodoProps) {
   const formatDate = (dateStr: string) => {
     const [year, month, day] = dateStr.split("-").map(Number);
     const date = new Date(year, month - 1, day);
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date();
     tomorrow.setDate(today.getDate() + 1);
     tomorrow.setHours(0, 0, 0, 0);
+
     const dateOnly = new Date(year, month - 1, day);
     dateOnly.setHours(0, 0, 0, 0);
+
     const todayTime = today.getTime();
     const tomorrowTime = tomorrow.getTime();
     const dateTime = dateOnly.getTime();
+
     if (dateTime === todayTime) return "Hari Ini";
     if (dateTime === tomorrowTime) return "Besok";
-    const days = [
-      "Minggu",
-      "Senin",
-      "Selasa",
-      "Rabu",
-      "Kamis",
-      "Jumat",
-      "Sabtu",
-    ];
-    const months = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "Mei",
-      "Jun",
-      "Jul",
-      "Agu",
-      "Sep",
-      "Okt",
-      "Des",
-    ];
-    return `${days[date.getDay()]}, ${date.getDate()} ${
-      months[date.getMonth()]
-    }`;
+
+    const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+    const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+    return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]}`;
   };
 
-  const formatTime = (time?: string) => {
-    if (!time) return "";
-    return time.substring(0, 5);
-  };
-
-  const getRelativeTime = (dateStr: string, timeStr?: string) => {
-    const [year, month, day] = dateStr.split("-").map(Number);
-    const eventDate = new Date(year, month - 1, day);
-    if (timeStr) {
-      const [hours, minutes] = timeStr.split(":").map(Number);
-      eventDate.setHours(hours, minutes, 0, 0);
-    }
+  const getRelativeTime = (dateTimeStr: string) => {
+    const eventDate = new Date(dateTimeStr);
+    if (Number.isNaN(eventDate.getTime())) return "";
     const now = currentTime;
     const diffMs = eventDate.getTime() - now.getTime();
+    if (diffMs < 0) return "Berlangsung";
+
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffHours / 24);
-    if (diffMs < 0) return "Sudah lewat";
+
     if (diffHours < 1) return "Segera";
     if (diffHours < 24) return `${diffHours}j lagi`;
     if (diffDays === 1) return "Besok";
     return `${diffDays}h lagi`;
   };
 
-  // Join PEMILU → insert ke peserta_acara lalu redirect (dengan logging error detail)
-  const handleJoinPemilu = async (
-    event: EventData,
-    e: React.MouseEvent
-  ) => {
+  const handleJoinPemilu = async (event: EventData, e: React.MouseEvent) => {
     e.stopPropagation();
 
     if (!session?.user) {
       alert("Silakan login terlebih dahulu.");
-      return;
-    }
-
-    const agentId = (session.user as any).agentId;
-    if (!agentId) {
-      alert("Akun ini belum terdaftar sebagai agent.");
       return;
     }
 
@@ -259,99 +296,40 @@ export default function Todo({ events, onEventClick }: TodoProps) {
       return;
     }
 
+    const isRegistered = registeredEvents.has(event.id_acara);
+    const eventStart = new Date(event.tanggal_mulai);
+    const now = currentTime;
+
+    // Kalau sudah registered, langsung redirect (tidak perlu hit API join lagi)
+    if (isRegistered || now >= eventStart) {
+      window.location.href = `/dashboard/pemilu/${event.id_acara}`;
+      return;
+    }
+
+    // Kalau belum registered dan masih sebelum event mulai, hit API join
     try {
       setJoiningId(event.id_acara);
 
-      console.log("JOIN PEMILU start", {
-        id_acara: idAcaraNum,
-        agentId,
+      const response = await fetch(`/api/pemilu/${idAcaraNum}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
 
-      // 1. Cek sudah terdaftar atau belum
-      const { data: existing, error: existingError } = await supabase
-        .from("peserta_acara")
-        .select("id_acara, id_agent, nomor_urut, status_peserta")
-        .eq("id_acara", idAcaraNum)
-        .eq("id_agent", agentId)
-        .maybeSingle();
+      const result = await response.json();
 
-      if (existingError) {
-        console.error("Error cek peserta_acara:", existingError);
-        alert(
-          `Error cek peserta_acara: ${existingError.message} (${existingError.code})`
-        );
-        setJoiningId(null);
-        return;
+      if (!response.ok) {
+        throw new Error(result.error || "Gagal join PEMILU");
       }
 
-      if (existing) {
-        console.log("Peserta sudah terdaftar:", existing);
-        window.location.href = `/dashboard/pemilu/${event.id_acara}`;
-        return;
-      }
+      // Update state registered
+      setRegisteredEvents((prev) => new Set(prev).add(event.id_acara));
 
-      // 2. Cari nomor_urut terakhir
-      const { data: maxRow, error: maxError } = await supabase
-        .from("peserta_acara")
-        .select("nomor_urut")
-        .eq("id_acara", idAcaraNum)
-        .order("nomor_urut", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (maxError) {
-        console.error("Error ambil nomor_urut terakhir:", maxError);
-        alert(
-          `Error ambil nomor_urut: ${maxError.message} (${maxError.code})`
-        );
-        setJoiningId(null);
-        return;
-      }
-
-      const nextOrder = maxRow?.nomor_urut ? maxRow.nomor_urut + 1 : 1;
-      console.log("Nomor urut berikutnya:", nextOrder);
-
-      // 3. Insert peserta baru
-      const { data: insertData, error: insertError, status, statusText } =
-        await supabase
-          .from("peserta_acara")
-          .insert(
-            {
-              id_acara: idAcaraNum,
-              id_agent: agentId,
-              nomor_urut: nextOrder,
-            },
-            { returning: "minimal" }
-          );
-
-      console.log("Insert response:", {
-        status,
-        statusText,
-        data: insertData,
-        error: insertError,
-      });
-
-      if (insertError) {
-        console.error(
-          "Error insert peserta_acara:",
-          insertError.code,
-          insertError.message,
-          insertError.details,
-          insertError.hint
-        );
-        alert(
-          `Gagal join PEMILU: ${insertError.message}\nCode: ${insertError.code}\nDetails: ${insertError.details || "-"
-          }`
-        );
-        setJoiningId(null);
-        return;
-      }
-
-      // 4. Redirect ke halaman PEMILU
+      // Redirect
       window.location.href = `/dashboard/pemilu/${event.id_acara}`;
     } catch (err: any) {
-      console.error("Unexpected error join PEMILU:", err);
-      alert(`Terjadi kesalahan tidak terduga: ${err?.message || err}`);
+      console.error("Error join PEMILU:", err);
+      alert(`Gagal join PEMILU: ${err.message}`);
       setJoiningId(null);
     }
   };
@@ -373,7 +351,6 @@ export default function Todo({ events, onEventClick }: TodoProps) {
 
   return (
     <div className="flex h-full max-h-[calc(100vh-200px)] flex-col rounded-3xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 backdrop-blur-xl shadow-2xl">
-      {/* Header */}
       <div className="flex-shrink-0 border-b border-white/10 bg-white/5 px-4 py-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -393,28 +370,19 @@ export default function Todo({ events, onEventClick }: TodoProps) {
         </div>
       </div>
 
-      {/* Events List */}
       <div className="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar">
         {Object.keys(groupedEvents).length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center py-8">
             <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-white/10">
-              <Icon
-                icon="solar:inbox-line-bold-duotone"
-                className="text-3xl text-slate-600"
-              />
+              <Icon icon="solar:inbox-line-bold-duotone" className="text-3xl text-slate-600" />
             </div>
-            <p className="text-xs font-semibold text-slate-500">
-              Tidak ada acara
-            </p>
-            <p className="text-[10px] text-slate-600">
-              7 hari ke depan kosong
-            </p>
+            <p className="text-xs font-semibold text-slate-500">Tidak ada acara</p>
+            <p className="text-[10px] text-slate-600">7 hari ke depan kosong</p>
           </div>
         ) : (
           <div className="space-y-4">
             {Object.entries(groupedEvents).map(([date, dateEvents]) => (
               <div key={date}>
-                {/* Date Header */}
                 <div className="mb-2 flex items-center gap-2">
                   <div className="flex-1 h-px bg-gradient-to-r from-white/10 to-transparent" />
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -423,15 +391,14 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                   <div className="flex-1 h-px bg-gradient-to-l from-white/10 to-transparent" />
                 </div>
 
-                {/* Events for this date */}
                 <div className="space-y-2">
                   <AnimatePresence mode="popLayout">
                     {dateEvents.map((event, idx) => {
-                      const config =
-                        eventConfig[event.tipe_acara] || eventConfig.LAINNYA;
+                      const config = eventConfig[event.tipe_acara] || eventConfig.LAINNYA;
                       const canEdit = canEditEvent(event);
-                      const showJoinButton = canJoinPemilu(event);
+                      const showPemiluButton = canAccessPemilu(event);
                       const isJoining = joiningId === event.id_acara;
+                      const pemiluLabel = getPemiluButtonLabel(event);
 
                       return (
                         <motion.div
@@ -440,178 +407,94 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, x: -50 }}
                           transition={{ delay: idx * 0.03 }}
-                          className="
-                            group relative overflow-hidden
-                            rounded-xl bg-gradient-to-br from-white/10 to-white/5
-                            border border-white/10
-                            transition-all duration-200
-                            hover:from-white/15 hover:to-white/10
-                            hover:border-white/20
-                            hover:shadow-lg hover:shadow-black/10
-                          "
+                          className="group relative overflow-hidden rounded-xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 transition-all duration-200 hover:from-white/15 hover:to-white/10 hover:border-white/20 hover:shadow-lg hover:shadow-black/10"
                         >
                           <div className="absolute inset-0 bg-gradient-to-b from-white/0 to-black/5 opacity-50" />
 
                           <div className="relative p-3">
                             <div className="flex items-start gap-2">
-                              {/* Icon */}
                               <div
-                                className={`
-                                  flex h-9 w-9 flex-shrink-0 items-center justify-center
-                                  rounded-lg ${config.bgColor} border
-                                  shadow-md
-                                `}
+                                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${config.bgColor} border shadow-md`}
                                 style={{
                                   borderColor: `${config.color}30`,
                                   boxShadow: `0 2px 8px ${config.color}15`,
                                 }}
                               >
-                                <Icon
-                                  icon={config.icon}
-                                  className="text-base"
-                                  style={{ color: config.color }}
-                                />
+                                <Icon icon={config.icon} className="text-base" style={{ color: config.color }} />
                               </div>
 
-                              {/* Content */}
                               <div className="flex-1 min-w-0">
-                                <h4 className="text-xs font-semibold text-white line-clamp-1 mb-1">
+                                <h4 className="mb-1 line-clamp-1 text-xs font-semibold text-white">
                                   {event.judul_acara}
                                 </h4>
 
                                 <div className="flex flex-col gap-0.5">
-                                  {event.waktu_mulai && (
-                                    <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                                      <Icon
-                                        icon="solar:clock-circle-bold"
-                                        className="text-xs"
-                                      />
-                                      <span>
-                                        {formatTime(event.waktu_mulai)}
-                                        {event.waktu_selesai &&
-                                          ` - ${formatTime(
-                                            event.waktu_selesai
-                                          )}`}
-                                      </span>
-                                    </div>
-                                  )}
+                                  <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                                    <Icon icon="solar:clock-circle-bold" className="text-xs" />
+                                    <span>
+                                      {formatTimeFromDateTime(event.tanggal_mulai)}
+                                      {event.tanggal_selesai && ` - ${formatTimeFromDateTime(event.tanggal_selesai)}`}
+                                    </span>
+                                  </div>
 
                                   {event.lokasi && (
                                     <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                                      <Icon
-                                        icon="solar:map-point-bold"
-                                        className="text-xs"
-                                      />
-                                      <span className="truncate">
-                                        {event.lokasi}
-                                      </span>
+                                      <Icon icon="solar:map-point-bold" className="text-xs" />
+                                      <span className="truncate">{event.lokasi}</span>
                                     </div>
                                   )}
                                 </div>
                               </div>
 
-                              {/* Right Side: Badge */}
                               <div className="flex flex-col items-end gap-1 flex-shrink-0">
                                 <span className="text-[9px] font-bold text-emerald-400">
-                                  {getRelativeTime(
-                                    event.tanggal_mulai,
-                                    event.waktu_mulai
-                                  )}
+                                  {getRelativeTime(event.tanggal_mulai)}
                                 </span>
                               </div>
                             </div>
 
-                            {/* Action Buttons */}
                             <div className="mt-2 flex items-center gap-2">
-                              {/* Join PEMILU */}
-                              {showJoinButton && (
+                              {showPemiluButton && (
                                 <motion.button
                                   initial={{ scale: 0.8, opacity: 0 }}
                                   animate={{ scale: 1, opacity: 1 }}
                                   onClick={(e) => handleJoinPemilu(event, e)}
-                                  disabled={isJoining}
-                                  className={`
-                                    flex-1 flex items-center justify-center gap-1.5
-                                    rounded-lg bg-gradient-to-r from-red-500 to-red-600
-                                    px-3 py-2 text-xs font-bold text-white
-                                    shadow-lg shadow-red-500/50
-                                    transition-all duration-200
-                                    hover:shadow-xl hover:shadow-red-500/60
-                                    hover:scale-105
-                                    active:scale-95
-                                    disabled:opacity-60 disabled:cursor-not-allowed
-                                  `}
+                                  disabled={isJoining || loadingRegistrations}
+                                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-red-500 to-red-600 px-3 py-2 text-xs font-bold text-white shadow-lg shadow-red-500/50 transition-all duration-200 hover:shadow-xl hover:shadow-red-500/60 hover:scale-105 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
                                 >
                                   <Icon
-                                    icon={
-                                      isJoining
-                                        ? "solar:loading-3-bold"
-                                        : "solar:login-3-bold"
-                                    }
-                                    className={`text-sm ${
-                                      isJoining ? "animate-spin" : ""
-                                    }`}
+                                    icon={isJoining ? "solar:loading-3-bold" : "solar:login-3-bold"}
+                                    className={`text-sm ${isJoining ? "animate-spin" : ""}`}
                                   />
-                                  {isJoining ? "Joining..." : "Join PEMILU"}
+                                  {isJoining ? "Loading..." : pemiluLabel}
                                 </motion.button>
                               )}
 
-                              {/* Edit */}
                               {canEdit && (
                                 <button
                                   onClick={() => onEventClick?.(event)}
-                                  className={`
-                                    flex items-center justify-center gap-1.5
-                                    rounded-lg bg-gradient-to-r from-blue-500/20 to-blue-600/10
-                                    border border-blue-500/30
-                                    text-xs font-semibold text-blue-300
-                                    transition-all duration-200
-                                    hover:from-blue-500/30 hover:to-blue-600/20
-                                    hover:border-blue-500/50
-                                    hover:scale-105
-                                    active:scale-95
-                                    ${
-                                      showJoinButton
-                                        ? "flex-shrink-0 w-10 h-10 px-0"
-                                        : "flex-1 px-3 py-2"
-                                    }
-                                  `}
+                                  className={`flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-blue-600/10 border border-blue-500/30 text-xs font-semibold text-blue-300 transition-all duration-200 hover:from-blue-500/30 hover:to-blue-600/20 hover:border-blue-500/50 hover:scale-105 active:scale-95 ${
+                                    showPemiluButton ? "flex-shrink-0 w-10 h-10 px-0" : "flex-1 px-3 py-2"
+                                  }`}
                                 >
-                                  <Icon
-                                    icon="solar:pen-bold"
-                                    className="text-base"
-                                  />
-                                  {!showJoinButton && <span>Edit</span>}
+                                  <Icon icon="solar:pen-bold" className="text-base" />
+                                  {!showPemiluButton && <span>Edit</span>}
                                 </button>
                               )}
 
-                              {/* View */}
-                              {!canEdit && !showJoinButton && (
+                              {!canEdit && !showPemiluButton && (
                                 <button
                                   onClick={() => onEventClick?.(event)}
-                                  className="
-                                    flex-1 flex items-center justify-center gap-1.5
-                                    rounded-lg bg-gradient-to-r from-slate-500/20 to-slate-600/10
-                                    border border-slate-500/30
-                                    px-3 py-2 text-xs font-semibold text-slate-300
-                                    transition-all duration-200
-                                    hover:from-slate-500/30 hover:to-slate-600/20
-                                    hover:border-slate-500/50
-                                    hover:scale-105
-                                    active:scale-95
-                                  "
+                                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-slate-500/20 to-slate-600/10 border border-slate-500/30 px-3 py-2 text-xs font-semibold text-slate-300 transition-all duration-200 hover:from-slate-500/30 hover:to-slate-600/20 hover:border-slate-500/50 hover:scale-105 active:scale-95"
                                 >
-                                  <Icon
-                                    icon="solar:eye-bold"
-                                    className="text-sm"
-                                  />
+                                  <Icon icon="solar:eye-bold" className="text-sm" />
                                   Lihat Detail
                                 </button>
                               )}
                             </div>
                           </div>
 
-                          <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/0 opacity-0 transition-opacity group-hover:opacity-100 pointer-events-none" />
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-white/0 via-white/5 to-white/0 opacity-0 transition-opacity group-hover:opacity-100" />
                         </motion.div>
                       );
                     })}
@@ -623,21 +506,18 @@ export default function Todo({ events, onEventClick }: TodoProps) {
         )}
       </div>
 
-      {/* Footer Stats */}
       <div className="flex-shrink-0 border-t border-white/10 bg-white/5 px-4 py-3">
         <div className="grid grid-cols-3 gap-2">
           <div className="text-center">
-            <p className="text-[9px] text-slate-500 mb-0.5">Total</p>
-            <p className="text-sm font-bold text-white">
-              {upcomingEvents.length}
-            </p>
+            <p className="mb-0.5 text-[9px] text-slate-500">Total</p>
+            <p className="text-sm font-bold text-white">{upcomingEvents.length}</p>
           </div>
           <div className="text-center border-x border-white/10">
-            <p className="text-[9px] text-slate-500 mb-0.5">Hari Ini</p>
+            <p className="mb-0.5 text-[9px] text-slate-500">Hari Ini</p>
             <p className="text-sm font-bold text-emerald-300">{todayCount}</p>
           </div>
           <div className="text-center">
-            <p className="text-[9px] text-slate-500 mb-0.5">Besok</p>
+            <p className="mb-0.5 text-[9px] text-slate-500">Besok</p>
             <p className="text-sm font-bold text-blue-300">{tomorrowCount}</p>
           </div>
         </div>

@@ -11,11 +11,8 @@ interface EventData {
   deskripsi?: string;
   tanggal_mulai: string;
   tanggal_selesai: string;
-  waktu_mulai?: string;
-  waktu_selesai?: string;
   tipe_acara: string;
   lokasi?: string;
-  alamat_lengkap?: string;
   status_acara: string;
   id_property?: string;
   durasi_pilih?: number;
@@ -41,45 +38,48 @@ const tipeAcaraOptions = [
   { value: "LAINNYA", label: "Lainnya", icon: "solar:star-linear", color: "bg-gray-500" },
 ];
 
-// ✅ Helper function untuk format date ke YYYY-MM-DD (timezone-safe)
 const formatDateForInput = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 };
 
-export default function ModalAcara({ 
-  open, 
-  onClose, 
-  selectedDate, 
+const extractTime = (iso: string): string => {
+  const d = new Date(iso);
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+};
+
+export default function ModalAcara({
+  open,
+  onClose,
+  selectedDate,
   selectedEvent,
-  onSuccess 
+  onSuccess,
 }: ModalAcaraProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+  const [dateTimeError, setDateTimeError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     judul_acara: "",
     deskripsi: "",
     tipe_acara: "BUYER_MEETING",
     tanggal_mulai: "",
     tanggal_selesai: "",
-    waktu_mulai: "09:00",
-    waktu_selesai: "10:00",
+    jam_mulai: "09:00",
+    jam_selesai: "10:00",
     lokasi: "",
-    alamat_lengkap: "",
     durasi_pilih: 60,
     id_property: "",
   });
 
-  // ✅ Set default date ketika selectedDate berubah (ADD MODE)
   useEffect(() => {
     if (selectedDate && open && !selectedEvent) {
       const dateStr = formatDateForInput(selectedDate);
-      console.log("Setting default date:", dateStr);
-      
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
         tanggal_mulai: dateStr,
         tanggal_selesai: dateStr,
@@ -87,31 +87,25 @@ export default function ModalAcara({
     }
   }, [selectedDate, open, selectedEvent]);
 
-  // ✅ Set form data ketika edit event (EDIT MODE)
   useEffect(() => {
     if (selectedEvent && open) {
-      console.log("Editing event:", selectedEvent);
-      
       setFormData({
         judul_acara: selectedEvent.judul_acara,
         deskripsi: selectedEvent.deskripsi || "",
         tipe_acara: selectedEvent.tipe_acara,
         tanggal_mulai: selectedEvent.tanggal_mulai.substring(0, 10),
         tanggal_selesai: selectedEvent.tanggal_selesai.substring(0, 10),
-        waktu_mulai: selectedEvent.waktu_mulai || "09:00",
-        waktu_selesai: selectedEvent.waktu_selesai || "10:00",
+        jam_mulai: extractTime(selectedEvent.tanggal_mulai),
+        jam_selesai: extractTime(selectedEvent.tanggal_selesai),
         lokasi: selectedEvent.lokasi || "",
-        alamat_lengkap: selectedEvent.alamat_lengkap || "",
         durasi_pilih: selectedEvent.durasi_pilih || 60,
         id_property: selectedEvent.id_property || "",
       });
     } else if (!selectedEvent && open && !selectedDate) {
-      // ✅ Reset form jika bukan edit dan tidak ada selected date
       resetForm();
     }
   }, [selectedEvent, open, selectedDate]);
 
-  // ✅ Reset form to default
   const resetForm = () => {
     setFormData({
       judul_acara: "",
@@ -119,19 +113,56 @@ export default function ModalAcara({
       tipe_acara: "BUYER_MEETING",
       tanggal_mulai: "",
       tanggal_selesai: "",
-      waktu_mulai: "09:00",
-      waktu_selesai: "10:00",
+      jam_mulai: "09:00",
+      jam_selesai: "10:00",
       lokasi: "",
-      alamat_lengkap: "",
       durasi_pilih: 60,
       id_property: "",
     });
     setError(null);
+    setDateTimeError(null);
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  // Validasi realtime tanggal + jam
+  const validateDateTime = () => {
+    if (!formData.tanggal_mulai || !formData.tanggal_selesai) {
+      setDateTimeError(null);
+      return true;
+    }
+
+    const startDateTime = new Date(`${formData.tanggal_mulai}T${formData.jam_mulai}:00`);
+    const endDateTime = new Date(`${formData.tanggal_selesai}T${formData.jam_selesai}:00`);
+
+    if (endDateTime <= startDateTime) {
+      setDateTimeError("⚠️ Waktu selesai harus lebih besar dari waktu mulai");
+      return false;
+    }
+
+    setDateTimeError(null);
+    return true;
+  };
+
+  useEffect(() => {
+    validateDateTime();
+  }, [
+    formData.tanggal_mulai,
+    formData.tanggal_selesai,
+    formData.jam_mulai,
+    formData.jam_selesai,
+  ]);
+
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({
+      ...prev,
+      [name]: name === "durasi_pilih" ? Number(value) : value,
+    }));
+  };
+
+  const buildDateTime = (date: string, time: string): string => {
+    return `${date}T${time}:00`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -140,26 +171,49 @@ export default function ModalAcara({
     setError(null);
 
     try {
-      // ✅ Validation
       if (!formData.judul_acara.trim()) {
         throw new Error("Judul acara wajib diisi");
       }
-
       if (!formData.tanggal_mulai || !formData.tanggal_selesai) {
         throw new Error("Tanggal mulai dan selesai wajib diisi");
       }
 
-      // ✅ Check if tanggal_selesai >= tanggal_mulai
-      if (formData.tanggal_selesai < formData.tanggal_mulai) {
-        throw new Error("Tanggal selesai tidak boleh lebih awal dari tanggal mulai");
+      // Validasi datetime
+      const startDateTime = new Date(`${formData.tanggal_mulai}T${formData.jam_mulai}:00`);
+      const endDateTime = new Date(`${formData.tanggal_selesai}T${formData.jam_selesai}:00`);
+
+      if (endDateTime <= startDateTime) {
+        throw new Error("Waktu selesai harus lebih besar dari waktu mulai");
       }
 
-      const payload = {
-        ...formData,
-        id_acara: selectedEvent?.id_acara,
-      };
+      if (
+        formData.tipe_acara === "PEMILU" &&
+        (!formData.durasi_pilih || formData.durasi_pilih < 30)
+      ) {
+        throw new Error("Durasi pilih minimal 30 detik untuk event PEMILU");
+      }
 
-      console.log("Submitting payload:", payload);
+      const tanggal_mulai_full = buildDateTime(
+        formData.tanggal_mulai,
+        formData.jam_mulai
+      );
+      const tanggal_selesai_full = buildDateTime(
+        formData.tanggal_selesai,
+        formData.jam_selesai
+      );
+
+      const payload = {
+        id_acara: selectedEvent?.id_acara,
+        judul_acara: formData.judul_acara.trim(),
+        deskripsi: formData.deskripsi.trim() || null,
+        tipe_acara: formData.tipe_acara,
+        tanggal_mulai: tanggal_mulai_full,
+        tanggal_selesai: tanggal_selesai_full,
+        lokasi: formData.lokasi.trim() || null,
+        durasi_pilih:
+          formData.tipe_acara === "PEMILU" ? formData.durasi_pilih || 60 : null,
+        id_property: formData.id_property ? Number(formData.id_property) : null,
+      };
 
       const response = await fetch("/api/dashboard/acara", {
         method: selectedEvent ? "PUT" : "POST",
@@ -172,22 +226,15 @@ export default function ModalAcara({
         throw new Error(errorData.error || "Gagal menyimpan acara");
       }
 
-      const result = await response.json();
-      console.log("Success:", result);
+      await response.json();
 
-      // ✅ Reset form
       resetForm();
-
-      // ✅ Callback success
-      if (onSuccess) onSuccess();
+      onSuccess?.();
       onClose();
-
-      // ✅ Show success message (optional: replace with toast)
       alert(selectedEvent ? "Acara berhasil diperbarui!" : "Acara berhasil ditambahkan!");
-      
-    } catch (error: any) {
-      console.error("Error:", error);
-      setError(error.message || "Gagal menyimpan acara. Silakan coba lagi.");
+    } catch (err: any) {
+      console.error("Error submit acara:", err);
+      setError(err.message || "Gagal menyimpan acara. Silakan coba lagi.");
     } finally {
       setLoading(false);
     }
@@ -198,90 +245,98 @@ export default function ModalAcara({
     onClose();
   };
 
-  // Gunakan portal untuk render modal di luar DOM tree
   if (typeof window === "undefined") return null;
 
   const isEditMode = !!selectedEvent;
+  const hasDateTimeError = !!dateTimeError;
 
   const modalContent = (
     <AnimatePresence>
       {open && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={handleClose}
             className="fixed inset-0 z-[9998] bg-black/60 backdrop-blur-sm"
-            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}
           />
 
-          {/* Modal - Centered */}
-          <div 
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4" 
-            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0 }}
-          >
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="
-                w-full max-w-2xl max-h-[90vh]
-                overflow-hidden
-                rounded-2xl border border-white/10
-                bg-gradient-to-br from-[#0a0e14] to-[#050608]
-                shadow-2xl
-              "
+              className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#05060b] via-[#050712] to-[#020308] shadow-[0_0_60px_rgba(59,130,246,0.35)]"
             >
               {/* Header */}
               <div className="border-b border-white/10 bg-white/5 px-6 py-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
-                      isEditMode 
-                        ? "bg-blue-500/20 border-blue-500/50" 
-                        : "bg-emerald-500/20 border-emerald-500/50"
-                    }`}>
-                      <Icon 
-                        icon={isEditMode ? "solar:pen-linear" : "solar:calendar-add-linear"} 
-                        className={`text-xl ${isEditMode ? "text-blue-300" : "text-emerald-300"}`} 
+                    <div
+                      className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
+                        isEditMode
+                          ? "bg-blue-500/20 border-blue-500/60"
+                          : "bg-emerald-500/20 border-emerald-500/60"
+                      }`}
+                    >
+                      <Icon
+                        icon={
+                          isEditMode
+                            ? "solar:pen-linear"
+                            : "solar:calendar-add-linear"
+                        }
+                        className={`text-xl ${
+                          isEditMode ? "text-blue-300" : "text-emerald-300"
+                        }`}
                       />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-white">
+                      <h3 className="text-xl font-semibold text-white">
                         {isEditMode ? "Edit Acara" : "Tambah Acara Baru"}
                       </h3>
                       <p className="text-xs text-slate-400">
-                        {isEditMode ? "Perbarui detail acara" : "Buat jadwal atau event baru"}
+                        {isEditMode
+                          ? "Perbarui detail acara yang sudah terjadwal"
+                          : "Buat event baru untuk jadwal aktivitas dan pemilu unit"}
                       </p>
                     </div>
                   </div>
                   <button
                     onClick={handleClose}
                     disabled={loading}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-50"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-white disabled:opacity-50"
                   >
                     <Icon icon="solar:close-circle-linear" className="text-2xl" />
                   </button>
                 </div>
               </div>
 
-              {/* Error Message */}
+              {/* Error */}
               {error && (
-                <div className="mx-6 mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mx-6 mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-3"
+                >
                   <div className="flex items-start gap-2">
-                    <Icon icon="solar:danger-circle-bold" className="text-red-400 text-lg flex-shrink-0 mt-0.5" />
-                    <span className="text-sm text-red-300">{error}</span>
+                    <Icon
+                      icon="solar:danger-circle-bold"
+                      className="mt-0.5 text-lg text-red-400"
+                    />
+                    <span className="text-sm text-red-200">{error}</span>
                   </div>
-                </div>
+                </motion.div>
               )}
 
               {/* Form */}
-              <form onSubmit={handleSubmit} className="overflow-y-auto max-h-[calc(90vh-180px)] px-6 py-4 custom-scrollbar">
+              <form
+                onSubmit={handleSubmit}
+                className="custom-scrollbar max-h-[calc(90vh-180px)] overflow-y-auto px-6 py-4"
+              >
                 <div className="space-y-5">
-                  {/* Judul Acara */}
+                  {/* Judul */}
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-slate-300">
                       Judul Acara <span className="text-red-400">*</span>
@@ -292,125 +347,148 @@ export default function ModalAcara({
                       value={formData.judul_acara}
                       onChange={handleChange}
                       required
-                      placeholder="Contoh: Meeting dengan Pak Budi"
-                      className="
-                        w-full rounded-xl border border-white/10 
-                        bg-white/5 px-4 py-3 text-white
-                        placeholder:text-slate-500
-                        focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                        transition-all
-                      "
+                      placeholder="Contoh: Event Pemilu Unit Cluster Sakura"
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-emerald-500/60 focus:bg-white/10 focus:outline-none transition-all"
                     />
                   </div>
 
-                  {/* Tipe Acara */}
+                  {/* Tipe */}
                   <div>
                     <label className="mb-2 block text-sm font-semibold text-slate-300">
                       Tipe Acara <span className="text-red-400">*</span>
                     </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {tipeAcaraOptions.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => setFormData((prev) => ({ ...prev, tipe_acara: option.value }))}
-                          className={`
-                            flex items-center gap-2 rounded-xl border p-3 transition-all
-                            ${
-                              formData.tipe_acara === option.value
-                                ? "border-emerald-500/50 bg-emerald-500/20 shadow-lg shadow-emerald-500/20"
-                                : "border-white/10 bg-white/5 hover:bg-white/10"
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {tipeAcaraOptions.map((opt) => {
+                        const active = formData.tipe_acara === opt.value;
+                        return (
+                          <motion.button
+                            key={opt.value}
+                            type="button"
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                tipe_acara: opt.value,
+                              }))
                             }
-                          `}
+                            className={`
+                              flex items-center gap-2 rounded-xl border p-3 text-left text-xs transition-all
+                              ${
+                                active
+                                  ? "border-emerald-500/60 bg-emerald-500/15 shadow-[0_0_24px_rgba(16,185,129,0.4)]"
+                                  : "border-white/10 bg-white/5 hover:bg-white/10"
+                              }
+                            `}
+                          >
+                            <div
+                              className={`flex h-8 w-8 items-center justify-center rounded-lg ${opt.color}`}
+                            >
+                              <Icon
+                                icon={opt.icon}
+                                className="text-lg text-white"
+                              />
+                            </div>
+                            <span
+                              className={`font-medium ${
+                                active ? "text-emerald-200" : "text-slate-200"
+                              }`}
+                            >
+                              {opt.label}
+                            </span>
+                          </motion.button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Tanggal + Jam */}
+                  <div className="relative">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-300">
+                          Tanggal Mulai <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          name="tanggal_mulai"
+                          value={formData.tanggal_mulai}
+                          onChange={handleChange}
+                          required
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-3 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
+                            hasDateTimeError
+                              ? "border-red-500/60 focus:border-red-500"
+                              : "border-white/10 focus:border-emerald-500/60"
+                          }`}
+                        />
+                        <label className="mt-3 mb-2 block text-xs font-semibold text-slate-400">
+                          Jam Mulai
+                        </label>
+                        <input
+                          type="time"
+                          name="jam_mulai"
+                          value={formData.jam_mulai}
+                          onChange={handleChange}
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-2.5 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
+                            hasDateTimeError
+                              ? "border-red-500/60 focus:border-red-500"
+                              : "border-white/10 focus:border-emerald-500/60"
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-300">
+                          Tanggal Selesai <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          name="tanggal_selesai"
+                          value={formData.tanggal_selesai}
+                          onChange={handleChange}
+                          required
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-3 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
+                            hasDateTimeError
+                              ? "border-red-500/60 focus:border-red-500"
+                              : "border-white/10 focus:border-emerald-500/60"
+                          }`}
+                        />
+                        <label className="mt-3 mb-2 block text-xs font-semibold text-slate-400">
+                          Jam Selesai
+                        </label>
+                        <input
+                          type="time"
+                          name="jam_selesai"
+                          value={formData.jam_selesai}
+                          onChange={handleChange}
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-2.5 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
+                            hasDateTimeError
+                              ? "border-red-500/60 focus:border-red-500"
+                              : "border-white/10 focus:border-emerald-500/60"
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* DateTime error banner */}
+                    <AnimatePresence>
+                      {hasDateTimeError && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-3 overflow-hidden rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2.5"
                         >
-                          <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${option.color}`}>
-                            <Icon icon={option.icon} className="text-lg text-white" />
+                          <div className="flex items-center gap-2">
+                            <Icon
+                              icon="solar:danger-triangle-bold"
+                              className="text-base text-red-400 animate-pulse"
+                            />
+                            <span className="text-xs font-medium text-red-200">
+                              {dateTimeError}
+                            </span>
                           </div>
-                          <span className={`text-sm font-medium ${formData.tipe_acara === option.value ? "text-emerald-300" : "text-slate-300"}`}>
-                            {option.label}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Tanggal */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-300">
-                        Tanggal Mulai <span className="text-red-400">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        name="tanggal_mulai"
-                        value={formData.tanggal_mulai}
-                        onChange={handleChange}
-                        required
-                        className="
-                          w-full rounded-xl border border-white/10 
-                          bg-white/5 px-4 py-3 text-white
-                          focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                          transition-all
-                        "
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-300">
-                        Tanggal Selesai <span className="text-red-400">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        name="tanggal_selesai"
-                        value={formData.tanggal_selesai}
-                        onChange={handleChange}
-                        required
-                        min={formData.tanggal_mulai}
-                        className="
-                          w-full rounded-xl border border-white/10 
-                          bg-white/5 px-4 py-3 text-white
-                          focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                          transition-all
-                        "
-                      />
-                    </div>
-                  </div>
-
-                  {/* Waktu */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-300">
-                        Waktu Mulai
-                      </label>
-                      <input
-                        type="time"
-                        name="waktu_mulai"
-                        value={formData.waktu_mulai}
-                        onChange={handleChange}
-                        className="
-                          w-full rounded-xl border border-white/10 
-                          bg-white/5 px-4 py-3 text-white
-                          focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                          transition-all
-                        "
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-300">
-                        Waktu Selesai
-                      </label>
-                      <input
-                        type="time"
-                        name="waktu_selesai"
-                        value={formData.waktu_selesai}
-                        onChange={handleChange}
-                        className="
-                          w-full rounded-xl border border-white/10 
-                          bg-white/5 px-4 py-3 text-white
-                          focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                          transition-all
-                        "
-                      />
-                    </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
 
                   {/* Lokasi */}
@@ -424,34 +502,7 @@ export default function ModalAcara({
                       value={formData.lokasi}
                       onChange={handleChange}
                       placeholder="Contoh: Kantor Cabang Surabaya"
-                      className="
-                        w-full rounded-xl border border-white/10 
-                        bg-white/5 px-4 py-3 text-white
-                        placeholder:text-slate-500
-                        focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                        transition-all
-                      "
-                    />
-                  </div>
-
-                  {/* Alamat Lengkap */}
-                  <div>
-                    <label className="mb-2 block text-sm font-semibold text-slate-300">
-                      Alamat Lengkap
-                    </label>
-                    <textarea
-                      name="alamat_lengkap"
-                      value={formData.alamat_lengkap}
-                      onChange={handleChange}
-                      rows={3}
-                      placeholder="Masukkan alamat lengkap lokasi acara..."
-                      className="
-                        w-full rounded-xl border border-white/10 
-                        bg-white/5 px-4 py-3 text-white
-                        placeholder:text-slate-500
-                        focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                        transition-all resize-none
-                      "
+                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-emerald-500/60 focus:bg-white/10 focus:outline-none transition-all"
                     />
                   </div>
 
@@ -465,41 +516,64 @@ export default function ModalAcara({
                       value={formData.deskripsi}
                       onChange={handleChange}
                       rows={4}
-                      placeholder="Tulis detail atau catatan tentang acara ini..."
-                      className="
-                        w-full rounded-xl border border-white/10 
-                        bg-white/5 px-4 py-3 text-white
-                        placeholder:text-slate-500
-                        focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                        transition-all resize-none
-                      "
+                      placeholder="Detail atau catatan penting acara..."
+                      className="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-emerald-500/60 focus:bg-white/10 focus:outline-none transition-all"
                     />
                   </div>
 
-                  {/* Durasi Pilih (hanya untuk PEMILU) */}
+                  {/* Durasi pilih (PEMILU) */}
                   {formData.tipe_acara === "PEMILU" && (
-                    <div>
-                      <label className="mb-2 block text-sm font-semibold text-slate-300">
-                        Durasi Pilih Unit (detik)
-                      </label>
-                      <input
-                        type="number"
-                        name="durasi_pilih"
-                        value={formData.durasi_pilih}
-                        onChange={handleChange}
-                        min={30}
-                        max={300}
-                        className="
-                          w-full rounded-xl border border-white/10 
-                          bg-white/5 px-4 py-3 text-white
-                          focus:border-emerald-500/50 focus:bg-white/10 focus:outline-none
-                          transition-all
-                        "
-                      />
-                      <p className="mt-1 text-xs text-slate-500">
-                        Waktu yang diberikan kepada agent untuk memilih unit (default: 60 detik)
-                      </p>
-                    </div>
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="relative overflow-hidden rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/10 via-transparent to-cyan-500/10 p-5"
+                    >
+                      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.25),_transparent_55%)]" />
+                      <div className="relative flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <label className="mb-1 flex items-center gap-2 text-sm font-semibold text-emerald-300">
+                            <Icon icon="solar:timer-linear" className="text-base" />
+                            Durasi Pilih Unit (detik)
+                          </label>
+                          <p className="mb-4 text-xs leading-relaxed text-emerald-200/70">
+                            Waktu yang diberikan ke setiap agent untuk memilih unit property saat giliran PEMILU berlangsung
+                          </p>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <input
+                              type="number"
+                              name="durasi_pilih"
+                              value={formData.durasi_pilih}
+                              onChange={handleChange}
+                              onFocus={(e) => e.target.select()}
+                              min={30}
+                              max={300}
+                              className="w-32 rounded-xl border border-emerald-500/60 bg-black/40 px-4 py-2.5 text-sm font-semibold text-emerald-50 shadow-inner focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all"
+                            />
+                            <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100 shadow-sm">
+                              <div className="flex items-center gap-2">
+                                <Icon
+                                  icon="solar:clock-circle-linear"
+                                  className="text-base text-emerald-300"
+                                />
+                                <span>
+                                  Rekomendasi:{" "}
+                                  <span className="font-semibold">60–120 detik</span>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="hidden h-full items-center sm:flex">
+                          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-emerald-500/50 bg-black/40 shadow-[0_0_40px_rgba(16,185,129,0.4)]">
+                            <Icon
+                              icon="solar:hourglass-bold-duotone"
+                              className="text-3xl text-emerald-300"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
                   )}
                 </div>
               </form>
@@ -511,36 +585,27 @@ export default function ModalAcara({
                     type="button"
                     onClick={handleClose}
                     disabled={loading}
-                    className="
-                      rounded-xl border border-white/10 bg-white/5 
-                      px-5 py-2.5 text-sm font-medium text-slate-300
-                      transition-all hover:bg-white/10
-                      disabled:opacity-50 disabled:cursor-not-allowed
-                    "
+                    className="rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-medium text-slate-300 transition-all hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Batal
                   </button>
-                  <button
+                  <motion.button
                     type="submit"
                     onClick={handleSubmit}
-                    disabled={loading}
-                    className={`
-                      group relative overflow-hidden
-                      rounded-xl bg-gradient-to-r 
-                      ${isEditMode 
-                        ? "from-blue-500 to-blue-600 shadow-blue-500/50 hover:shadow-blue-500/60" 
+                    disabled={loading || hasDateTimeError}
+                    whileTap={{ scale: 0.98 }}
+                    className={`group relative overflow-hidden rounded-xl bg-gradient-to-r px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 ${
+                      isEditMode
+                        ? "from-blue-500 to-blue-600 shadow-blue-500/50 hover:shadow-blue-500/60"
                         : "from-emerald-500 to-emerald-600 shadow-emerald-500/50 hover:shadow-emerald-500/60"
-                      }
-                      px-6 py-2.5 text-sm font-semibold text-white
-                      shadow-lg
-                      transition-all duration-300
-                      hover:shadow-xl
-                      disabled:opacity-50 disabled:cursor-not-allowed
-                    `}
+                    }`}
                   >
                     {loading ? (
                       <span className="flex items-center gap-2">
-                        <Icon icon="solar:settings-linear" className="animate-spin text-lg" />
+                        <Icon
+                          icon="solar:settings-linear"
+                          className="animate-spin text-lg"
+                        />
                         {isEditMode ? "Memperbarui..." : "Menyimpan..."}
                       </span>
                     ) : (
@@ -549,7 +614,7 @@ export default function ModalAcara({
                         {isEditMode ? "Perbarui Acara" : "Simpan Acara"}
                       </span>
                     )}
-                  </button>
+                  </motion.button>
                 </div>
               </div>
             </motion.div>
@@ -559,6 +624,5 @@ export default function ModalAcara({
     </AnimatePresence>
   );
 
-  // Render modal menggunakan Portal ke body
   return createPortal(modalContent, document.body);
 }
