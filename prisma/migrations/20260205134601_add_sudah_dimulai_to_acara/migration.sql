@@ -221,20 +221,6 @@ CREATE TABLE "berita" (
 );
 
 -- CreateTable
-CREATE TABLE "komentar_berita" (
-    "id_komentar" BIGSERIAL NOT NULL,
-    "id_berita" BIGINT NOT NULL,
-    "id_pengguna" VARCHAR(20),
-    "nama_komentar" VARCHAR(100) NOT NULL,
-    "email_komentar" VARCHAR(150),
-    "isi_komentar" TEXT NOT NULL,
-    "status_disetujui" BOOLEAN NOT NULL DEFAULT false,
-    "tanggal_komentar" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "komentar_berita_pkey" PRIMARY KEY ("id_komentar")
-);
-
--- CreateTable
 CREATE TABLE "reward_poin" (
     "id_reward" BIGSERIAL NOT NULL,
     "nama_reward" VARCHAR(200) NOT NULL,
@@ -308,6 +294,7 @@ CREATE TABLE "acara" (
     "reminder_sent" BOOLEAN NOT NULL DEFAULT false,
     "tanggal_dibuat" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "tanggal_diupdate" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "sudah_dimulai" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "acara_pkey" PRIMARY KEY ("id_acara")
 );
@@ -520,9 +507,6 @@ CREATE INDEX "idx_berita_status" ON "berita"("status_publish");
 CREATE INDEX "idx_berita_tanggal" ON "berita"("tanggal_publish");
 
 -- CreateIndex
-CREATE INDEX "idx_komentar_berita" ON "komentar_berita"("id_berita");
-
--- CreateIndex
 CREATE UNIQUE INDEX "reward_poin_slug_key" ON "reward_poin"("slug");
 
 -- CreateIndex
@@ -620,12 +604,6 @@ ALTER TABLE "listing_boost" ADD CONSTRAINT "listing_boost_listing_fk" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "berita" ADD CONSTRAINT "berita_id_agent_fkey" FOREIGN KEY ("id_agent") REFERENCES "agent"("id_agent") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "komentar_berita" ADD CONSTRAINT "komentar_berita_id_berita_fkey" FOREIGN KEY ("id_berita") REFERENCES "berita"("id_berita") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "komentar_berita" ADD CONSTRAINT "komentar_berita_id_pengguna_fkey" FOREIGN KEY ("id_pengguna") REFERENCES "pengguna"("id_pengguna") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "penukaran_poin" ADD CONSTRAINT "penukaran_poin_id_agent_fkey" FOREIGN KEY ("id_agent") REFERENCES "agent"("id_agent") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -20,12 +20,15 @@ interface EventData {
   id_property?: string;
 }
 
+type ModalMode = "create" | "edit" | "view";
+
 export default function JadwalAcaraPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<EventData | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<(EventData & { canEdit?: boolean }) | null>(null);
   const [events, setEvents] = useState<EventData[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState<ModalMode>("create");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,28 +91,34 @@ export default function JadwalAcaraPage() {
     setShowModal(false);
     setSelectedDate(null);
     setSelectedEvent(null);
+    setModalMode("create");
   };
 
-  // Handle klik tanggal di kalendar
+  // Handle klik tanggal di kalendar → selalu create mode
   const handleDateClick = (date: Date) => {
     console.log("Date clicked:", date);
     setSelectedDate(date);
-    setSelectedEvent(null); // Reset selected event
+    setSelectedEvent(null);
+    setModalMode("create");
     setShowModal(true);
   };
 
   // Handle klik event di todo list
-  const handleEventClick = (event: EventData) => {
+  // sekarang menerima event + canEdit dari Todo
+  const handleEventClick = (event: EventData & { canEdit: boolean }) => {
     console.log("Event clicked:", event);
     setSelectedEvent(event);
-    setSelectedDate(null); // Reset selected date
+    setSelectedDate(null);
+    setModalMode(event.canEdit ? "edit" : "view");
     setShowModal(true);
   };
 
-  // Handle tombol tambah acara
+  // Handle tombol tambah acara → create mode
   const handleAddEvent = () => {
-    setSelectedDate(new Date()); // Default hari ini
+    const today = new Date();
+    setSelectedDate(today);
     setSelectedEvent(null);
+    setModalMode("create");
     setShowModal(true);
   };
 
@@ -190,8 +199,9 @@ export default function JadwalAcaraPage() {
         open={showModal}
         onClose={handleCloseModal}
         selectedDate={selectedDate}
-        selectedEvent={selectedEvent}
+        selectedEvent={selectedEvent || undefined}
         onSuccess={handleModalSuccess}
+        mode={modalMode} // ← ini kunci: create/edit/view
       />
     </div>
   );

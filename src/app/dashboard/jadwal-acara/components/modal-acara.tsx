@@ -18,12 +18,16 @@ interface EventData {
   durasi_pilih?: number;
 }
 
+// 🔥 tambah type mode
+type ModalMode = "create" | "edit" | "view";
+
 interface ModalAcaraProps {
   open: boolean;
   onClose: () => void;
   selectedDate?: Date | null;
   selectedEvent?: EventData | null;
   onSuccess?: () => void;
+  mode?: ModalMode; // optional, default auto dari selectedEvent
 }
 
 const tipeAcaraOptions = [
@@ -58,6 +62,7 @@ export default function ModalAcara({
   selectedDate,
   selectedEvent,
   onSuccess,
+  mode, // create | edit | view
 }: ModalAcaraProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +80,11 @@ export default function ModalAcara({
     durasi_pilih: 60,
     id_property: "",
   });
+
+  // mode final (kalau prop mode tidak dikirim, fallback ke create/edit)
+  const isEditMode = !!selectedEvent && (mode ?? "edit") === "edit";
+  const isViewMode =
+    (mode ?? (selectedEvent ? "edit" : "create")) === "view";
 
   useEffect(() => {
     if (selectedDate && open && !selectedEvent) {
@@ -123,7 +133,6 @@ export default function ModalAcara({
     setDateTimeError(null);
   };
 
-  // Validasi realtime tanggal + jam
   const validateDateTime = () => {
     if (!formData.tanggal_mulai || !formData.tanggal_selesai) {
       setDateTimeError(null);
@@ -143,17 +152,21 @@ export default function ModalAcara({
   };
 
   useEffect(() => {
-    validateDateTime();
+    if (!isViewMode) {
+      validateDateTime();
+    }
   }, [
     formData.tanggal_mulai,
     formData.tanggal_selesai,
     formData.jam_mulai,
     formData.jam_selesai,
+    isViewMode,
   ]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
+    if (isViewMode) return; // di view mode tidak boleh mengubah
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
@@ -167,6 +180,8 @@ export default function ModalAcara({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isViewMode) return; // safety guard
+
     setLoading(true);
     setError(null);
 
@@ -178,7 +193,6 @@ export default function ModalAcara({
         throw new Error("Tanggal mulai dan selesai wajib diisi");
       }
 
-      // Validasi datetime
       const startDateTime = new Date(`${formData.tanggal_mulai}T${formData.jam_mulai}:00`);
       const endDateTime = new Date(`${formData.tanggal_selesai}T${formData.jam_selesai}:00`);
 
@@ -247,7 +261,6 @@ export default function ModalAcara({
 
   if (typeof window === "undefined") return null;
 
-  const isEditMode = !!selectedEvent;
   const hasDateTimeError = !!dateTimeError;
 
   const modalContent = (
@@ -276,28 +289,42 @@ export default function ModalAcara({
                   <div className="flex items-center gap-3">
                     <div
                       className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
-                        isEditMode
+                        isViewMode
+                          ? "bg-slate-500/20 border-slate-500/60"
+                          : isEditMode
                           ? "bg-blue-500/20 border-blue-500/60"
                           : "bg-emerald-500/20 border-emerald-500/60"
                       }`}
                     >
                       <Icon
                         icon={
-                          isEditMode
+                          isViewMode
+                            ? "solar:eye-linear"
+                            : isEditMode
                             ? "solar:pen-linear"
                             : "solar:calendar-add-linear"
                         }
                         className={`text-xl ${
-                          isEditMode ? "text-blue-300" : "text-emerald-300"
+                          isViewMode
+                            ? "text-slate-200"
+                            : isEditMode
+                            ? "text-blue-300"
+                            : "text-emerald-300"
                         }`}
                       />
                     </div>
                     <div>
                       <h3 className="text-xl font-semibold text-white">
-                        {isEditMode ? "Edit Acara" : "Tambah Acara Baru"}
+                        {isViewMode
+                          ? "Detail Acara"
+                          : isEditMode
+                          ? "Edit Acara"
+                          : "Tambah Acara Baru"}
                       </h3>
                       <p className="text-xs text-slate-400">
-                        {isEditMode
+                        {isViewMode
+                          ? "Lihat detail acara yang sudah terjadwal"
+                          : isEditMode
                           ? "Perbarui detail acara yang sudah terjadwal"
                           : "Buat event baru untuk jadwal aktivitas dan pemilu unit"}
                       </p>
@@ -313,8 +340,8 @@ export default function ModalAcara({
                 </div>
               </div>
 
-              {/* Error */}
-              {error && (
+              {/* Error (hanya relevan di edit/create) */}
+              {!isViewMode && error && (
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -346,9 +373,17 @@ export default function ModalAcara({
                       name="judul_acara"
                       value={formData.judul_acara}
                       onChange={handleChange}
-                      required
-                      placeholder="Contoh: Event Pemilu Unit Cluster Sakura"
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-emerald-500/60 focus:bg-white/10 focus:outline-none transition-all"
+                      readOnly={isViewMode}
+                      className={`w-full rounded-xl border px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none transition-all ${
+                        isViewMode
+                          ? "border-white/10 bg-white/5 cursor-default"
+                          : "border-white/10 bg-white/5 focus:border-emerald-500/60 focus:bg-white/10"
+                      }`}
+                      placeholder={
+                        isViewMode
+                          ? ""
+                          : "Contoh: Event Pemilu Unit Cluster Sakura"
+                      }
                     />
                   </div>
 
@@ -357,48 +392,73 @@ export default function ModalAcara({
                     <label className="mb-2 block text-sm font-semibold text-slate-300">
                       Tipe Acara <span className="text-red-400">*</span>
                     </label>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {tipeAcaraOptions.map((opt) => {
-                        const active = formData.tipe_acara === opt.value;
-                        return (
-                          <motion.button
-                            key={opt.value}
-                            type="button"
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() =>
-                              setFormData((prev) => ({
-                                ...prev,
-                                tipe_acara: opt.value,
-                              }))
-                            }
-                            className={`
-                              flex items-center gap-2 rounded-xl border p-3 text-left text-xs transition-all
-                              ${
-                                active
-                                  ? "border-emerald-500/60 bg-emerald-500/15 shadow-[0_0_24px_rgba(16,185,129,0.4)]"
-                                  : "border-white/10 bg-white/5 hover:bg-white/10"
+                    {isViewMode ? (
+                      <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                        {(() => {
+                          const opt = tipeAcaraOptions.find(
+                            (o) => o.value === formData.tipe_acara
+                          ) || tipeAcaraOptions[0];
+                          return (
+                            <>
+                              <div
+                                className={`flex h-8 w-8 items-center justify-center rounded-lg ${opt.color}`}
+                              >
+                                <Icon
+                                  icon={opt.icon}
+                                  className="text-lg text-white"
+                                />
+                              </div>
+                              <span className="text-sm font-medium text-slate-200">
+                                {opt.label}
+                              </span>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {tipeAcaraOptions.map((opt) => {
+                          const active = formData.tipe_acara === opt.value;
+                          return (
+                            <motion.button
+                              key={opt.value}
+                              type="button"
+                              whileTap={{ scale: 0.98 }}
+                              onClick={() =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  tipe_acara: opt.value,
+                                }))
                               }
-                            `}
-                          >
-                            <div
-                              className={`flex h-8 w-8 items-center justify-center rounded-lg ${opt.color}`}
+                              className={`
+                                flex items-center gap-2 rounded-xl border p-3 text-left text-xs transition-all
+                                ${
+                                  active
+                                    ? "border-emerald-500/60 bg-emerald-500/15 shadow-[0_0_24px_rgba(16,185,129,0.4)]"
+                                    : "border-white/10 bg-white/5 hover:bg-white/10"
+                                }
+                              `}
                             >
-                              <Icon
-                                icon={opt.icon}
-                                className="text-lg text-white"
-                              />
-                            </div>
-                            <span
-                              className={`font-medium ${
-                                active ? "text-emerald-200" : "text-slate-200"
-                              }`}
-                            >
-                              {opt.label}
-                            </span>
-                          </motion.button>
-                        );
-                      })}
-                    </div>
+                              <div
+                                className={`flex h-8 w-8 items-center justify-center rounded-lg ${opt.color}`}
+                              >
+                                <Icon
+                                  icon={opt.icon}
+                                  className="text-lg text-white"
+                                />
+                              </div>
+                              <span
+                                className={`font-medium ${
+                                  active ? "text-emerald-200" : "text-slate-200"
+                                }`}
+                              >
+                                {opt.label}
+                              </span>
+                            </motion.button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Tanggal + Jam */}
@@ -413,11 +473,14 @@ export default function ModalAcara({
                           name="tanggal_mulai"
                           value={formData.tanggal_mulai}
                           onChange={handleChange}
-                          required
-                          className={`w-full rounded-xl border bg-white/5 px-4 py-3 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
-                            hasDateTimeError
+                          readOnly={isViewMode}
+                          disabled={isViewMode}
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-3 text-sm text-white focus:outline-none transition-all ${
+                            isViewMode
+                              ? "border-white/10 cursor-default"
+                              : hasDateTimeError
                               ? "border-red-500/60 focus:border-red-500"
-                              : "border-white/10 focus:border-emerald-500/60"
+                              : "border-white/10 focus:border-emerald-500/60 focus:bg-white/10"
                           }`}
                         />
                         <label className="mt-3 mb-2 block text-xs font-semibold text-slate-400">
@@ -428,10 +491,14 @@ export default function ModalAcara({
                           name="jam_mulai"
                           value={formData.jam_mulai}
                           onChange={handleChange}
-                          className={`w-full rounded-xl border bg-white/5 px-4 py-2.5 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
-                            hasDateTimeError
+                          readOnly={isViewMode}
+                          disabled={isViewMode}
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-2.5 text-sm text-white focus:outline-none transition-all ${
+                            isViewMode
+                              ? "border-white/10 cursor-default"
+                              : hasDateTimeError
                               ? "border-red-500/60 focus:border-red-500"
-                              : "border-white/10 focus:border-emerald-500/60"
+                              : "border-white/10 focus:border-emerald-500/60 focus:bg-white/10"
                           }`}
                         />
                       </div>
@@ -444,11 +511,14 @@ export default function ModalAcara({
                           name="tanggal_selesai"
                           value={formData.tanggal_selesai}
                           onChange={handleChange}
-                          required
-                          className={`w-full rounded-xl border bg-white/5 px-4 py-3 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
-                            hasDateTimeError
+                          readOnly={isViewMode}
+                          disabled={isViewMode}
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-3 text-sm text-white focus:outline-none transition-all ${
+                            isViewMode
+                              ? "border-white/10 cursor-default"
+                              : hasDateTimeError
                               ? "border-red-500/60 focus:border-red-500"
-                              : "border-white/10 focus:border-emerald-500/60"
+                              : "border-white/10 focus:border-emerald-500/60 focus:bg-white/10"
                           }`}
                         />
                         <label className="mt-3 mb-2 block text-xs font-semibold text-slate-400">
@@ -459,36 +529,41 @@ export default function ModalAcara({
                           name="jam_selesai"
                           value={formData.jam_selesai}
                           onChange={handleChange}
-                          className={`w-full rounded-xl border bg-white/5 px-4 py-2.5 text-sm text-white focus:bg-white/10 focus:outline-none transition-all ${
-                            hasDateTimeError
+                          readOnly={isViewMode}
+                          disabled={isViewMode}
+                          className={`w-full rounded-xl border bg-white/5 px-4 py-2.5 text-sm text-white focus:outline-none transition-all ${
+                            isViewMode
+                              ? "border-white/10 cursor-default"
+                              : hasDateTimeError
                               ? "border-red-500/60 focus:border-red-500"
-                              : "border-white/10 focus:border-emerald-500/60"
+                              : "border-white/10 focus:border-emerald-500/60 focus:bg-white/10"
                           }`}
                         />
                       </div>
                     </div>
 
-                    {/* DateTime error banner */}
-                    <AnimatePresence>
-                      {hasDateTimeError && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mt-3 overflow-hidden rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2.5"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Icon
-                              icon="solar:danger-triangle-bold"
-                              className="text-base text-red-400 animate-pulse"
-                            />
-                            <span className="text-xs font-medium text-red-200">
-                              {dateTimeError}
-                            </span>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    {!isViewMode && (
+                      <AnimatePresence>
+                        {hasDateTimeError && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mt-3 overflow-hidden rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2.5"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Icon
+                                icon="solar:danger-triangle-bold"
+                                className="text-base text-red-400 animate-pulse"
+                              />
+                              <span className="text-xs font-medium text-red-200">
+                                {dateTimeError}
+                              </span>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    )}
                   </div>
 
                   {/* Lokasi */}
@@ -501,8 +576,15 @@ export default function ModalAcara({
                       name="lokasi"
                       value={formData.lokasi}
                       onChange={handleChange}
-                      placeholder="Contoh: Kantor Cabang Surabaya"
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-emerald-500/60 focus:bg-white/10 focus:outline-none transition-all"
+                      readOnly={isViewMode}
+                      className={`w-full rounded-xl border px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none transition-all ${
+                        isViewMode
+                          ? "border-white/10 bg-white/5 cursor-default"
+                          : "border-white/10 bg-white/5 focus:border-emerald-500/60 focus:bg-white/10"
+                      }`}
+                      placeholder={
+                        isViewMode ? "" : "Contoh: Kantor Cabang Surabaya"
+                      }
                     />
                   </div>
 
@@ -516,8 +598,15 @@ export default function ModalAcara({
                       value={formData.deskripsi}
                       onChange={handleChange}
                       rows={4}
-                      placeholder="Detail atau catatan penting acara..."
-                      className="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:border-emerald-500/60 focus:bg-white/10 focus:outline-none transition-all"
+                      readOnly={isViewMode}
+                      className={`w-full resize-none rounded-xl border px-4 py-3 text-sm text-white placeholder:text-slate-500 focus:outline-none transition-all ${
+                        isViewMode
+                          ? "border-white/10 bg-white/5 cursor-default"
+                          : "border-white/10 bg-white/5 focus:border-emerald-500/60 focus:bg-white/10"
+                      }`}
+                      placeholder={
+                        isViewMode ? "" : "Detail atau catatan penting acara..."
+                      }
                     />
                   </div>
 
@@ -545,23 +634,30 @@ export default function ModalAcara({
                               name="durasi_pilih"
                               value={formData.durasi_pilih}
                               onChange={handleChange}
-                              onFocus={(e) => e.target.select()}
+                              onFocus={(e) => !isViewMode && e.target.select()}
                               min={30}
                               max={300}
-                              className="w-32 rounded-xl border border-emerald-500/60 bg-black/40 px-4 py-2.5 text-sm font-semibold text-emerald-50 shadow-inner focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all"
+                              readOnly={isViewMode}
+                              className={`w-32 rounded-xl border px-4 py-2.5 text-sm font-semibold text-emerald-50 shadow-inner focus:outline-none transition-all ${
+                                isViewMode
+                                  ? "border-emerald-500/40 bg-black/40 cursor-default"
+                                  : "border-emerald-500/60 bg-black/40 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/30"
+                              }`}
                             />
-                            <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100 shadow-sm">
-                              <div className="flex items-center gap-2">
-                                <Icon
-                                  icon="solar:clock-circle-linear"
-                                  className="text-base text-emerald-300"
-                                />
-                                <span>
-                                  Rekomendasi:{" "}
-                                  <span className="font-semibold">60–120 detik</span>
-                                </span>
+                            {!isViewMode && (
+                              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100 shadow-sm">
+                                <div className="flex items-center gap-2">
+                                  <Icon
+                                    icon="solar:clock-circle-linear"
+                                    className="text-base text-emerald-300"
+                                  />
+                                  <span>
+                                    Rekomendasi:{" "}
+                                    <span className="font-semibold">60–120 detik</span>
+                                  </span>
+                                </div>
                               </div>
-                            </div>
+                            )}
                           </div>
                         </div>
                         <div className="hidden h-full items-center sm:flex">
@@ -579,44 +675,46 @@ export default function ModalAcara({
               </form>
 
               {/* Footer */}
-              <div className="border-t border-white/10 bg-white/5 px-6 py-4">
-                <div className="flex items-center justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={handleClose}
-                    disabled={loading}
-                    className="rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-medium text-slate-300 transition-all hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Batal
-                  </button>
-                  <motion.button
-                    type="submit"
-                    onClick={handleSubmit}
-                    disabled={loading || hasDateTimeError}
-                    whileTap={{ scale: 0.98 }}
-                    className={`group relative overflow-hidden rounded-xl bg-gradient-to-r px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 ${
-                      isEditMode
-                        ? "from-blue-500 to-blue-600 shadow-blue-500/50 hover:shadow-blue-500/60"
-                        : "from-emerald-500 to-emerald-600 shadow-emerald-500/50 hover:shadow-emerald-500/60"
-                    }`}
-                  >
-                    {loading ? (
-                      <span className="flex items-center gap-2">
-                        <Icon
-                          icon="solar:settings-linear"
-                          className="animate-spin text-lg"
-                        />
-                        {isEditMode ? "Memperbarui..." : "Menyimpan..."}
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <Icon icon="solar:check-circle-bold" className="text-lg" />
-                        {isEditMode ? "Perbarui Acara" : "Simpan Acara"}
-                      </span>
-                    )}
-                  </motion.button>
+              {!isViewMode && (
+                <div className="border-t border-white/10 bg-white/5 px-6 py-4">
+                  <div className="flex items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={handleClose}
+                      disabled={loading}
+                      className="rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm font-medium text-slate-300 transition-all hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Batal
+                    </button>
+                    <motion.button
+                      type="submit"
+                      onClick={handleSubmit}
+                      disabled={loading || hasDateTimeError}
+                      whileTap={{ scale: 0.98 }}
+                      className={`group relative overflow-hidden rounded-xl bg-gradient-to-r px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition-all hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 ${
+                        isEditMode
+                          ? "from-blue-500 to-blue-600 shadow-blue-500/50 hover:shadow-blue-500/60"
+                          : "from-emerald-500 to-emerald-600 shadow-emerald-500/50 hover:shadow-emerald-500/60"
+                      }`}
+                    >
+                      {loading ? (
+                        <span className="flex items-center gap-2">
+                          <Icon
+                            icon="solar:settings-linear"
+                            className="animate-spin text-lg"
+                          />
+                          {isEditMode ? "Memperbarui..." : "Menyimpan..."}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <Icon icon="solar:check-circle-bold" className="text-lg" />
+                          {isEditMode ? "Perbarui Acara" : "Simpan Acara"}
+                        </span>
+                      )}
+                    </motion.button>
+                  </div>
                 </div>
-              </div>
+              )}
             </motion.div>
           </div>
         </>

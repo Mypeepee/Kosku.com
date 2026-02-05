@@ -15,7 +15,7 @@ import NextAuthProvider from "@/providers/NextAuthProvider";
 import { Toaster } from "react-hot-toast";
 import LoadingBar from "@/components/LoadingBar"; // <- tambahkan ini
 
-
+import "@/lib/cron";
 
 const font = DM_Sans({ subsets: ["latin"] });
 

@@ -24,15 +24,25 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     const acara = await prisma.acara.findUnique({
       where: { id_acara },
-      include: { pesertaAcara: true },
+      include: {
+        pesertaAcara: {
+          orderBy: {
+            nomor_urut: "asc",
+          },
+        },
+      },
     });
 
     if (!acara) {
-      return NextResponse.json({ error: "Acara tidak ditemukan" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Acara tidak ditemukan" },
+        { status: 404 }
+      );
     }
 
+    // Sudah ada yang SEDANG_MEMILIH? jangan start lagi
     const sudahAktif = acara.pesertaAcara.find(
-      (p) => p.status_peserta === status_peserta_enum.AKTIF
+      (p) => p.status_peserta === status_peserta_enum.SEDANG_MEMILIH
     );
 
     if (sudahAktif) {
@@ -42,9 +52,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const firstPeserta = [...acara.pesertaAcara]
-      .filter((p) => p.nomor_urut != null)
-      .sort((a, b) => (a.nomor_urut ?? 0) - (b.nomor_urut ?? 0))[0];
+    // Peserta pertama yang TERDAFTAR & punya nomor_urut
+    const firstPeserta = acara.pesertaAcara.find(
+      (p) =>
+        p.nomor_urut != null &&
+        p.status_peserta === status_peserta_enum.TERDAFTAR
+    );
 
     if (!firstPeserta) {
       return NextResponse.json(
@@ -53,6 +66,24 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
+    // Opsional: tandai acara sudah dimulai
+    await prisma.acara.update({
+      where: { id_acara },
+      data: { sudah_dimulai: true },
+    });
+
+    // Semua TERDAFTAR -> MENUNGGU_GILIRAN
+    await prisma.pesertaAcara.updateMany({
+      where: {
+        id_acara,
+        status_peserta: status_peserta_enum.TERDAFTAR,
+      },
+      data: {
+        status_peserta: status_peserta_enum.MENUNGGU_GILIRAN,
+      },
+    });
+
+    // Peserta pertama -> SEDANG_MEMILIH
     const durasi = acara.durasi_pilih ?? 60;
     const start = now;
     const end = new Date(start.getTime() + durasi * 1000);
@@ -60,13 +91,20 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     const activated = await prisma.pesertaAcara.update({
       where: { id_peserta: firstPeserta.id_peserta },
       data: {
-        status_peserta: status_peserta_enum.AKTIF,
+        status_peserta: status_peserta_enum.SEDANG_MEMILIH,
         waktu_mulai_pilih: start,
         waktu_selesai_pilih: end,
       },
     });
 
-    const remainingSeconds = Math.floor((end.getTime() - Date.now()) / 1000);
+    const remainingSeconds = Math.max(
+      0,
+      Math.floor((end.getTime() - Date.now()) / 1000)
+    );
+
+    console.log(
+      `🚀 Manual start pemilu ${id_acara}: ${activated.id_agent}, remaining=${remainingSeconds}s`
+    );
 
     await pusher.trigger(`pemilu-${id_acara}`, "giliran-update", {
       id_agent: activated.id_agent,
@@ -82,10 +120,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("Error start pemilu:", error);
+    console.error("❌ Error start pemilu:", error);
     return NextResponse.json(
       { error: "Gagal memulai pemilu" },
       { status: 500 }
     );
+  } finally {
+    await prisma.$disconnect();
   }
 }

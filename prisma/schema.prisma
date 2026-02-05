@@ -24,7 +24,6 @@ model Pengguna {
   dibuat_pada      DateTime?        @default(now()) @db.Timestamptz(6)
   diperbarui_pada  DateTime?        @default(now()) @db.Timestamptz(6)
   agent            Agent?
-  komentarBerita   KomentarBerita[]
   transaksiKlien   Transaksi[]      @relation("TransaksiKlien")
 
   @@index([kode_referral], map: "idx_kode_referral")
@@ -221,29 +220,12 @@ model Berita {
   tanggal_dibuat   DateTime           @default(now()) @db.Timestamptz(6)
   tanggal_diupdate DateTime           @default(now()) @db.Timestamptz(6)
   agent            Agent?             @relation(fields: [id_agent], references: [id_agent])
-  komentar         KomentarBerita[]
 
   @@index([slug], map: "idx_berita_slug")
   @@index([kategori], map: "idx_berita_kategori")
   @@index([status_publish], map: "idx_berita_status")
   @@index([tanggal_publish], map: "idx_berita_tanggal")
   @@map("berita")
-}
-
-model KomentarBerita {
-  id_komentar      BigInt    @id @default(autoincrement())
-  id_berita        BigInt
-  id_pengguna      String?   @db.VarChar(20)
-  nama_komentar    String    @db.VarChar(100)
-  email_komentar   String?   @db.VarChar(150)
-  isi_komentar     String
-  status_disetujui Boolean   @default(false)
-  tanggal_komentar DateTime  @default(now()) @db.Timestamptz(6)
-  berita           Berita    @relation(fields: [id_berita], references: [id_berita], onDelete: Cascade)
-  pengguna         Pengguna? @relation(fields: [id_pengguna], references: [id_pengguna])
-
-  @@index([id_berita], map: "idx_komentar_berita")
-  @@map("komentar_berita")
 }
 
 model RewardPoin {
@@ -329,6 +311,7 @@ model Acara {
   reminder_sent    Boolean           @default(false)
   tanggal_dibuat   DateTime          @default(now()) @db.Timestamptz(6)
   tanggal_diupdate DateTime          @default(now()) @db.Timestamptz(6)
+  sudah_dimulai    Boolean             @default(false)
   agent            Agent?            @relation(fields: [id_agent], references: [id_agent])
   listing          Listing?          @relation(fields: [id_property], references: [id_property])
   pesertaAcara     PesertaAcara[]    // ← jadi array

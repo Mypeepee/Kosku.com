@@ -24,7 +24,7 @@ interface EventData {
 
 interface TodoProps {
   events: EventData[];
-  onEventClick?: (event: EventData) => void;
+  onEventClick?: (event: EventData & { canEdit: boolean }) => void;
 }
 
 const eventConfig: Record<
@@ -117,7 +117,6 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch apakah user sudah terdaftar di PEMILU-PEMILU yang ada
   useEffect(() => {
     const fetchRegistrations = async () => {
       if (!session?.user) {
@@ -132,7 +131,6 @@ export default function Todo({ events, onEventClick }: TodoProps) {
       }
 
       try {
-        // Hit API untuk cek status registrasi semua pemilu
         const checks = await Promise.all(
           pemiluEvents.map(async (event) => {
             try {
@@ -204,8 +202,27 @@ export default function Todo({ events, onEventClick }: TodoProps) {
       return isRegistered ? "Masuk PEMILU" : "Join PEMILU";
     }
 
-    // Setelah mulai, hanya yang registered bisa masuk
     return "Masuk PEMILU";
+  };
+
+  const getRelativeTime = (startStr: string, endStr: string) => {
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "";
+
+    const now = currentTime;
+
+    if (now > end) return "Selesai";
+    if (now >= start && now <= end) return "Berlangsung";
+
+    const diffMs = start.getTime() - now.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffHours < 1) return "Segera";
+    if (diffHours < 24) return `${diffHours}j lagi`;
+    if (diffDays === 1) return "Besok";
+    return `${diffDays}h lagi`;
   };
 
   const upcomingEvents = useMemo(() => {
@@ -265,22 +282,6 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]}`;
   };
 
-  const getRelativeTime = (dateTimeStr: string) => {
-    const eventDate = new Date(dateTimeStr);
-    if (Number.isNaN(eventDate.getTime())) return "";
-    const now = currentTime;
-    const diffMs = eventDate.getTime() - now.getTime();
-    if (diffMs < 0) return "Berlangsung";
-
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffHours < 1) return "Segera";
-    if (diffHours < 24) return `${diffHours}j lagi`;
-    if (diffDays === 1) return "Besok";
-    return `${diffDays}h lagi`;
-  };
-
   const handleJoinPemilu = async (event: EventData, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -300,13 +301,12 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     const eventStart = new Date(event.tanggal_mulai);
     const now = currentTime;
 
-    // Kalau sudah registered, langsung redirect (tidak perlu hit API join lagi)
+    // Kalau sudah registered atau sudah mulai, langsung masuk
     if (isRegistered || now >= eventStart) {
       window.location.href = `/dashboard/pemilu/${event.id_acara}`;
       return;
     }
 
-    // Kalau belum registered dan masih sebelum event mulai, hit API join
     try {
       setJoiningId(event.id_acara);
 
@@ -322,10 +322,8 @@ export default function Todo({ events, onEventClick }: TodoProps) {
         throw new Error(result.error || "Gagal join PEMILU");
       }
 
-      // Update state registered
       setRegisteredEvents((prev) => new Set(prev).add(event.id_acara));
 
-      // Redirect
       window.location.href = `/dashboard/pemilu/${event.id_acara}`;
     } catch (err: any) {
       console.error("Error join PEMILU:", err);
@@ -359,7 +357,7 @@ export default function Todo({ events, onEventClick }: TodoProps) {
             </div>
             <div>
               <h3 className="text-sm font-bold text-white">Agenda</h3>
-              <p className="text-[10px] text-slate-400">7 hari</p>
+              <p className="text-[10px] text-slate-400">7 hari ke depan</p>
             </div>
           </div>
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/30">
@@ -400,6 +398,11 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                       const isJoining = joiningId === event.id_acara;
                       const pemiluLabel = getPemiluButtonLabel(event);
 
+                      const relativeTime = getRelativeTime(
+                        event.tanggal_mulai,
+                        event.tanggal_selesai || event.tanggal_mulai
+                      );
+
                       return (
                         <motion.div
                           key={event.id_acara}
@@ -407,7 +410,7 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, x: -50 }}
                           transition={{ delay: idx * 0.03 }}
-                          className="group relative overflow-hidden rounded-xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 transition-all duration-200 hover:from-white/15 hover:to-white/10 hover:border-white/20 hover:shadow-lg hover:shadow-black/10"
+                          className="group relative overflow-hidden rounded-xl bg-gradient-to-br from-white/10 to-white/5 border border-white/10 transition-all duration-200 hover:from-white/15 hover:to-white/10 hover:border-white/20 hover:shadow-lg hover:shadow-black/10 cursor-pointer"
                         >
                           <div className="absolute inset-0 bg-gradient-to-b from-white/0 to-black/5 opacity-50" />
 
@@ -433,7 +436,8 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                                     <Icon icon="solar:clock-circle-bold" className="text-xs" />
                                     <span>
                                       {formatTimeFromDateTime(event.tanggal_mulai)}
-                                      {event.tanggal_selesai && ` - ${formatTimeFromDateTime(event.tanggal_selesai)}`}
+                                      {event.tanggal_selesai &&
+                                        ` - ${formatTimeFromDateTime(event.tanggal_selesai)}`}
                                     </span>
                                   </div>
 
@@ -447,8 +451,16 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                               </div>
 
                               <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                                <span className="text-[9px] font-bold text-emerald-400">
-                                  {getRelativeTime(event.tanggal_mulai)}
+                                <span
+                                  className={`text-[9px] font-bold ${
+                                    relativeTime === "Selesai"
+                                      ? "text-slate-500"
+                                      : relativeTime === "Berlangsung"
+                                      ? "text-yellow-400"
+                                      : "text-emerald-400"
+                                  }`}
+                                >
+                                  {relativeTime}
                                 </span>
                               </div>
                             </div>
@@ -470,21 +482,37 @@ export default function Todo({ events, onEventClick }: TodoProps) {
                                 </motion.button>
                               )}
 
-                              {canEdit && (
+                              {canEdit && !showPemiluButton && (
                                 <button
-                                  onClick={() => onEventClick?.(event)}
-                                  className={`flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-blue-600/10 border border-blue-500/30 text-xs font-semibold text-blue-300 transition-all duration-200 hover:from-blue-500/30 hover:to-blue-600/20 hover:border-blue-500/50 hover:scale-105 active:scale-95 ${
-                                    showPemiluButton ? "flex-shrink-0 w-10 h-10 px-0" : "flex-1 px-3 py-2"
-                                  }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEventClick?.({ ...event, canEdit: true });
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-blue-500/20 to-blue-600/10 border border-blue-500/30 px-3 py-2 text-xs font-semibold text-blue-300 transition-all duration-200 hover:from-blue-500/30 hover:to-blue-600/20 hover:border-blue-500/50 hover:scale-105 active:scale-95"
+                                >
+                                  <Icon icon="solar:pen-bold" className="text-sm" />
+                                  Edit
+                                </button>
+                              )}
+
+                              {canEdit && showPemiluButton && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEventClick?.({ ...event, canEdit: true });
+                                  }}
+                                  className="flex items-center justify-center rounded-lg bg-gradient-to-r from-blue-500/20 to-blue-600/10 border border-blue-500/30 w-10 h-10 text-xs font-semibold text-blue-300 transition-all duration-200 hover:from-blue-500/30 hover:to-blue-600/20 hover:border-blue-500/50 hover:scale-105 active:scale-95"
                                 >
                                   <Icon icon="solar:pen-bold" className="text-base" />
-                                  {!showPemiluButton && <span>Edit</span>}
                                 </button>
                               )}
 
                               {!canEdit && !showPemiluButton && (
                                 <button
-                                  onClick={() => onEventClick?.(event)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEventClick?.({ ...event, canEdit: false });
+                                  }}
                                   className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-slate-500/20 to-slate-600/10 border border-slate-500/30 px-3 py-2 text-xs font-semibold text-slate-300 transition-all duration-200 hover:from-slate-500/30 hover:to-slate-600/20 hover:border-slate-500/50 hover:scale-105 active:scale-95"
                                 >
                                   <Icon icon="solar:eye-bold" className="text-sm" />

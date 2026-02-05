@@ -16,7 +16,29 @@ export function usePemiluGiliran(
 
   const isTransitioning = useRef(false);
 
-  // countdown lokal buat UX
+  // 🔥 TAMBAHAN: polling status kalau activeAgentId null
+  useEffect(() => {
+    if (activeAgentId !== null) return;
+
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/pemilu/${id_acara}/status`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        if (data.activeAgentId) {
+          setActiveAgentId(data.activeAgentId);
+          setCountdown(data.remainingSeconds ?? 0);
+        }
+      } catch (err) {
+        console.error("Error polling status:", err);
+      }
+    }, 5000); // poll setiap 5 detik
+
+    return () => clearInterval(poll);
+  }, [activeAgentId, id_acara]);
+
+  // countdown lokal
   useEffect(() => {
     if (!activeAgentId || countdown <= 0) return;
 
@@ -34,7 +56,15 @@ export function usePemiluGiliran(
 
       fetch(`/api/pemilu/${id_acara}/giliran/next`, {
         method: "POST",
-      }).catch((err) => console.error("Error next giliran:", err));
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          console.log("✅ Next giliran response:", data);
+        })
+        .catch((err) => {
+          console.error("❌ Error next giliran:", err);
+          isTransitioning.current = false;
+        });
     }
   }, [countdown, activeAgentId, id_acara]);
 
@@ -49,6 +79,7 @@ export function usePemiluGiliran(
     channel.bind(
       "giliran-update",
       (data: { id_agent: string | null; remainingSeconds: number | null }) => {
+        console.log("📡 Pusher event received:", data);
         setActiveAgentId(data.id_agent);
         setCountdown(data.remainingSeconds ?? 0);
         isTransitioning.current = false;
