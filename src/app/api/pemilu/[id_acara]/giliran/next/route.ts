@@ -42,6 +42,25 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
+    // ✅ CEK BATAS WAKTU ACARA
+    if (acara.tanggal_selesai && now >= acara.tanggal_selesai) {
+      console.log(
+        `🏁 Acara ${id_acara} sudah lewat tanggal_selesai (${acara.tanggal_selesai.toISOString()})`
+      );
+      await pusher.trigger(`pemilu-${id_acara}`, "giliran-update", {
+        id_agent: null,
+        remainingSeconds: null,
+      });
+      return NextResponse.json(
+        {
+          message: "Acara sudah selesai (lewat tanggal_selesai)",
+          activeAgentId: null,
+          remainingSeconds: null,
+        },
+        { status: 200 }
+      );
+    }
+
     const durasi = acara.durasi_pilih ?? 60;
 
     const pesertaAktif = acara.pesertaAcara.find(
@@ -174,7 +193,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           in: [
             status_peserta_enum.MENUNGGU_GILIRAN,
             status_peserta_enum.TERDAFTAR,
-            // boleh juga SUDAH_MEMILIH kalau kamu mau izinkan dia ikut lagi
             status_peserta_enum.SUDAH_MEMILIH,
           ],
         },
