@@ -44,7 +44,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     const durasi = acara.durasi_pilih ?? 60;
 
-    // Peserta yang sedang memilih
     const pesertaAktif = acara.pesertaAcara.find(
       (p) => p.status_peserta === status_peserta_enum.SEDANG_MEMILIH
     );
@@ -70,7 +69,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       `✅ Peserta aktif: ${pesertaAktif.id_agent} (nomor ${pesertaAktif.nomor_urut})`
     );
 
-    // 1) Tandai peserta aktif sebagai SUDAH_MEMILIH
+    // 1) tandai aktif → SUDAH_MEMILIH
     const selesai = await prisma.pesertaAcara.updateMany({
       where: {
         id_peserta: pesertaAktif.id_peserta,
@@ -83,94 +82,48 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     });
 
     if (selesai.count === 0) {
-      console.warn(
-        `⚠️ Peserta ${pesertaAktif.id_agent} sudah diubah oleh proses lain`
-      );
       return NextResponse.json(
         { error: "Giliran sudah diproses" },
         { status: 409 }
       );
     }
 
-    console.log(`✅ Peserta ${pesertaAktif.id_agent} → SUDAH_MEMILIH`);
-
-    // 2) Cari peserta berikutnya yang BELUM SUDAH_MEMILIH (nomor_urut > aktif)
-    const kandidatBerikut = acara.pesertaAcara.find(
+    // 2) peserta valid = punya nomor_urut, tidak DQ, tidak SKIP
+    const pesertaValid = acara.pesertaAcara.filter(
       (p) =>
         p.nomor_urut != null &&
-        p.nomor_urut > (pesertaAktif.nomor_urut ?? 0) &&
-        p.status_peserta !== status_peserta_enum.SUDAH_MEMILIH &&
         p.status_peserta !== status_peserta_enum.DISKUALIFIKASI &&
         p.status_peserta !== status_peserta_enum.SKIP
     );
 
-    let nextPeserta = kandidatBerikut;
-
-    // 3) Kalau tidak ada yang tersisa di belakangnya → cek apakah semua SUDAH_MEMILIH
-    if (!nextPeserta) {
-      const semuaSudah = acara.pesertaAcara.every(
-        (p) =>
-          p.status_peserta === status_peserta_enum.SUDAH_MEMILIH ||
-          p.status_peserta === status_peserta_enum.DISKUALIFIKASI ||
-          p.status_peserta === status_peserta_enum.SKIP
+    if (pesertaValid.length === 0) {
+      console.log(`🏁 Tidak ada peserta valid di acara ${id_acara}`);
+      await pusher.trigger(`pemilu-${id_acara}`, "giliran-update", {
+        id_agent: null,
+        remainingSeconds: null,
+      });
+      return NextResponse.json(
+        {
+          message: "Tidak ada peserta valid",
+          activeAgentId: null,
+          remainingSeconds: null,
+        },
+        { status: 200 }
       );
+    }
 
-      if (semuaSudah) {
-        // RESET LOOP:
-        // semua yg SUDAH_MEMILIH → MENUNGGU_GILIRAN
-        await prisma.pesertaAcara.updateMany({
-          where: {
-            id_acara,
-            status_peserta: status_peserta_enum.SUDAH_MEMILIH,
-          },
-          data: {
-            status_peserta: status_peserta_enum.MENUNGGU_GILIRAN,
-          },
-        });
+    // 3) cari yang nomor_urut > aktif (TANPA cek SUDAH_MEMILIH)
+    let nextPeserta =
+      pesertaValid.find(
+        (p) => p.nomor_urut! > (pesertaAktif.nomor_urut ?? 0)
+      ) ?? null;
 
-        // Ambil lagi peserta dengan nomor_urut paling kecil
-        const firstAgain = [...acara.pesertaAcara]
-          .filter(
-            (p) =>
-              p.status_peserta !== status_peserta_enum.DISKUALIFIKASI &&
-              p.status_peserta !== status_peserta_enum.SKIP &&
-              p.nomor_urut != null
-          )
-          .sort((a, b) => (a.nomor_urut ?? 0) - (b.nomor_urut ?? 0))[0];
-
-        if (!firstAgain) {
-          console.log(
-            `🏁 Pemilu ${id_acara} selesai total, tidak ada peserta valid`
-          );
-          await pusher.trigger(`pemilu-${id_acara}`, "giliran-update", {
-            id_agent: null,
-            remainingSeconds: null,
-          });
-          return NextResponse.json(
-            {
-              message: "Pemilu selesai total",
-              activeAgentId: null,
-              remainingSeconds: null,
-            },
-            { status: 200 }
-          );
-        }
-
-        nextPeserta = firstAgain;
-        console.log(
-          `🔁 Semua sudah memilih, loop kembali ke ${nextPeserta.id_agent} (nomor ${nextPeserta.nomor_urut})`
-        );
-      } else {
-        // Ada yang belum SUDAH_MEMILIH tapi nomor_urut lebih kecil (wrap-around)
-        const wrap = acara.pesertaAcara.find(
-          (p) =>
-            p.nomor_urut != null &&
-            p.status_peserta !== status_peserta_enum.SUDAH_MEMILIH &&
-            p.status_peserta !== status_peserta_enum.DISKUALIFIKASI &&
-            p.status_peserta !== status_peserta_enum.SKIP
-        );
-        nextPeserta = wrap ?? null;
-      }
+    if (!nextPeserta) {
+      // aktif tadi adalah urutan terakhir valid → wrap ke nomor paling kecil
+      nextPeserta =
+        pesertaValid.sort(
+          (a, b) => (a.nomor_urut ?? 0) - (b.nomor_urut ?? 0)
+        )[0] ?? null;
     }
 
     if (!nextPeserta) {
@@ -191,7 +144,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // 4) Set semua peserta lain yang belum SUDAH_MEMILIH → MENUNGGU_GILIRAN
+    // 4) set semua peserta lain → MENUNGGU_GILIRAN
     await prisma.pesertaAcara.updateMany({
       where: {
         id_acara,
@@ -210,7 +163,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       },
     });
 
-    // 5) Aktifkan nextPeserta sebagai SEDANG_MEMILIH
+    // 5) aktifkan nextPeserta → SEDANG_MEMILIH
     const start = now;
     const end = new Date(start.getTime() + durasi * 1000);
 
@@ -221,6 +174,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           in: [
             status_peserta_enum.MENUNGGU_GILIRAN,
             status_peserta_enum.TERDAFTAR,
+            // boleh juga SUDAH_MEMILIH kalau kamu mau izinkan dia ikut lagi
+            status_peserta_enum.SUDAH_MEMILIH,
           ],
         },
       },
@@ -232,9 +187,6 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     });
 
     if (newAktif.count === 0) {
-      console.warn(
-        `⚠️ Peserta berikutnya ${nextPeserta.id_agent} sudah diubah oleh proses lain`
-      );
       return NextResponse.json(
         { error: "Peserta berikutnya sudah diproses" },
         { status: 409 }
