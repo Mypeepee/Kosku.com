@@ -478,3 +478,21 @@ section {
   animation: slideInFromTop 0.4s ease-out forwards;
 }
 
+/* Tambahkan ke global CSS */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 3s infinite;
+}
+
+/* Safe area untuk iPhone dengan notch */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}

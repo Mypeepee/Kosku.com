@@ -7,13 +7,13 @@ import { useEffect, useState } from "react";
 
 interface Props {
   peserta: (Peserta & { online: boolean; isActive: boolean })[];
-  countdown?: number; // countdown dalam detik untuk giliran aktif
+  countdown?: number;
 }
 
 export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
   const [progress, setProgress] = useState(100);
   const activePeserta = peserta.find((p) => p.isActive);
-  const durasiPilih = 60; // default, bisa ambil dari props kalau perlu
+  const durasiPilih = 60;
 
   useEffect(() => {
     if (countdown > 0 && durasiPilih > 0) {
@@ -24,29 +24,28 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
     }
   }, [countdown, durasiPilih]);
 
-  // Hitung berapa orang yang sudah selesai (sudah punya pilihan)
   const selesaiCount = peserta.filter((p) => p.status_peserta === "SELESAI").length;
   const menungguCount = peserta.filter((p) => !p.isActive && p.status_peserta !== "SELESAI").length;
 
   return (
-    <div className="flex h-1/2 min-h-[220px] flex-col rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-3 md:p-4 shadow-[0_0_40px_rgba(15,23,42,0.9)]">
+    <div className="flex h-full flex-col rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-3 md:p-4 shadow-[0_0_40px_rgba(15,23,42,0.9)]">
       {/* Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/40">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 border border-emerald-500/40">
             <Icon
               icon="solar:users-group-rounded-bold"
               className="text-sm text-emerald-300"
             />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold text-white">Peserta</p>
-            <p className="text-[10px] text-slate-400">
+            <p className="truncate text-[10px] text-slate-400">
               {peserta.length} agent · {selesaiCount} selesai · {menungguCount} menunggu
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 border border-emerald-500/30">
+        <div className="flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 border border-emerald-500/30">
           <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-[10px] font-medium text-emerald-200">
             Realtime
@@ -68,10 +67,10 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
             />
           </div>
 
-          <div className="relative flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="relative flex items-center gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               {/* Avatar dengan pulse animation */}
-              <div className="relative">
+              <div className="relative flex-shrink-0">
                 <span className="absolute inset-0 h-10 w-10 rounded-full bg-sky-400 opacity-75 animate-ping" />
                 <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-blue-500 border-2 border-white/20 text-xs font-bold text-white shadow-lg">
                   {activePeserta.nama_agent
@@ -93,7 +92,7 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
                 <div className="flex items-center gap-1.5">
                   <Icon
                     icon="solar:play-circle-bold"
-                    className="text-sm text-sky-300"
+                    className="text-sm text-sky-300 flex-shrink-0"
                   />
                   <p className="text-[9px] font-semibold uppercase tracking-wider text-sky-200">
                     Giliran Sekarang
@@ -107,7 +106,7 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
 
             {/* Countdown timer */}
             {countdown > 0 && (
-              <div className="flex flex-col items-center">
+              <div className="flex flex-shrink-0 flex-col items-center">
                 <div className="relative flex h-12 w-12 items-center justify-center">
                   {/* Circular progress */}
                   <svg className="absolute inset-0 -rotate-90 transform" viewBox="0 0 48 48">
@@ -145,7 +144,7 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
       )}
 
       {/* List Peserta */}
-      <div className="flex-1 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+      <div className="flex-1 min-h-0 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
         {peserta.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center py-4 text-center">
             <Icon
@@ -165,7 +164,7 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
               <div
                 key={p.id_agent}
                 className={`
-                  group relative flex items-center justify-between gap-2 rounded-2xl border px-2.5 py-2
+                  group relative flex items-center gap-2 rounded-2xl border px-2.5 py-2
                   transition-all duration-300
                   ${
                     p.isActive
@@ -181,7 +180,7 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
                   <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-sky-500/20 via-blue-500/20 to-purple-500/20 blur-xl" />
                 )}
 
-                <div className="relative flex items-center gap-2 min-w-0 flex-1">
+                <div className="relative flex min-w-0 flex-1 items-center gap-2">
                   <div className="relative flex-shrink-0">
                     <div
                       className={`
@@ -224,7 +223,7 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
                       {p.nomor_urut != null && (
                         <span
                           className={`
-                            flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold
+                            flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold
                             ${
                               p.isActive
                                 ? "bg-sky-400 text-white"
@@ -254,7 +253,7 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <p
-                        className={`text-[9px] ${
+                        className={`truncate text-[9px] ${
                           p.isActive
                             ? "text-sky-200"
                             : isSelesai
@@ -274,32 +273,34 @@ export default function PesertaPanel({ peserta, countdown = 0 }: Props) {
                   </div>
                 </div>
 
-                {/* Status badge */}
-                {p.isActive && (
-                  <div className="relative flex items-center gap-1 rounded-full bg-sky-500/20 px-2 py-0.5 border border-sky-400/40">
-                    <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
-                    <span className="text-[9px] font-semibold uppercase tracking-wide text-sky-200">
-                      Aktif
-                    </span>
-                  </div>
-                )}
+                {/* Status badge - wrapped untuk mobile */}
+                <div className="flex flex-shrink-0 items-center">
+                  {p.isActive && (
+                    <div className="relative flex items-center gap-1 rounded-full bg-sky-500/20 px-2 py-0.5 border border-sky-400/40">
+                      <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
+                      <span className="text-[9px] font-semibold uppercase tracking-wide text-sky-200 whitespace-nowrap">
+                        Aktif
+                      </span>
+                    </div>
+                  )}
 
-                {isSelesai && (
-                  <Icon
-                    icon="solar:check-circle-bold"
-                    className="text-base text-emerald-400"
-                  />
-                )}
-
-                {isMenunggu && p.nomor_urut && (
-                  <div className="flex items-center gap-1 rounded-full bg-slate-800/60 px-2 py-0.5 border border-white/10">
+                  {isSelesai && (
                     <Icon
-                      icon="solar:clock-circle-linear"
-                      className="text-[10px] text-slate-400"
+                      icon="solar:check-circle-bold"
+                      className="text-base text-emerald-400"
                     />
-                    <span className="text-[9px] text-slate-400">Menunggu</span>
-                  </div>
-                )}
+                  )}
+
+                  {isMenunggu && p.nomor_urut && (
+                    <div className="flex items-center gap-1 rounded-full bg-slate-800/60 px-2 py-0.5 border border-white/10">
+                      <Icon
+                        icon="solar:clock-circle-linear"
+                        className="text-[10px] text-slate-400"
+                      />
+                      <span className="text-[9px] text-slate-400 whitespace-nowrap">Menunggu</span>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })

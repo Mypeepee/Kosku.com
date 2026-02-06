@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // ✅ 1. CEK: Acara belum mulai
+    // 1. Acara belum mulai
     if (acara.tanggal_mulai && now < acara.tanggal_mulai) {
       console.log(
         `⏸ Acara ${id_acara} belum mulai (tanggal_mulai: ${acara.tanggal_mulai.toISOString()})`
@@ -57,13 +57,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    // ✅ 2. CEK: Acara sudah selesai
+    // 2. Acara sudah selesai
     if (acara.tanggal_selesai && now >= acara.tanggal_selesai) {
       console.log(
         `🏁 Acara ${id_acara} sudah selesai (${acara.tanggal_selesai.toISOString()})`
       );
 
-      // Reset semua peserta ke TERDAFTAR
       await prisma.pesertaAcara.updateMany({
         where: { id_acara },
         data: {
@@ -237,9 +236,10 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       );
     }
 
+    // Pakai 'now' yang sama untuk hitung remainingSeconds
     const remainingSeconds = Math.max(
       0,
-      Math.floor((end.getTime() - Date.now()) / 1000)
+      Math.floor((end.getTime() - now.getTime()) / 1000)
     );
 
     console.log(

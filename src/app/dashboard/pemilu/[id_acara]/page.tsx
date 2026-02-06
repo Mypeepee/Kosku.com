@@ -3,7 +3,7 @@ import { PrismaClient, status_peserta_enum } from "@prisma/client";
 import PemiluClient from "./PemiluClient";
 
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route"; // path ini sesuai file yang kamu kirim
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 const prisma = new PrismaClient();
 
@@ -89,12 +89,11 @@ export default async function PemiluPage({ params }: PageProps) {
 
     const now = new Date();
 
-    // NOTE: ini masih pakai status AKTIF, kalau di DB sekarang pakai SEDANG_MEMILIH,
-    // ganti: status_peserta_enum.SEDANG_MEMILIH
+    // ✅ FIXED: Pakai SEDANG_MEMILIH sesuai flow yang benar
     const pesertaAktif =
       acara.pesertaAcara.find(
         (p) =>
-          p.status_peserta === status_peserta_enum.AKTIF &&
+          p.status_peserta === status_peserta_enum.SEDANG_MEMILIH &&
           p.waktu_selesai_pilih
       ) ?? null;
 
@@ -137,6 +136,7 @@ export default async function PemiluPage({ params }: PageProps) {
       orderBy: { tanggal_dibuat: "desc" },
     });
 
+    // ✅ Sort peserta by nomor_urut
     const sortedPeserta = [...acara.pesertaAcara].sort(
       (a, b) => (a.nomor_urut ?? 0) - (b.nomor_urut ?? 0)
     );
@@ -152,7 +152,7 @@ export default async function PemiluPage({ params }: PageProps) {
         id_acara: p.id_acara.toString(),
         id_agent: p.id_agent,
         nomor_urut: p.nomor_urut,
-        status_peserta: p.status_peserta,
+        status_peserta: p.status_peserta, // ✅ Ini akan pass SEDANG_MEMILIH, MENUNGGU_GILIRAN, SUDAH_MEMILIH, dll
         nama_agent: p.agent?.pengguna?.nama_lengkap ?? p.id_agent,
         avatar_url: p.agent?.foto_profil_url ?? null,
       })),

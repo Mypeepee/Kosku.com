@@ -14,9 +14,28 @@ export function usePemiluGiliran(
     initialRemainingSeconds ?? 0
   );
 
+  // ⏱ deadline absolut (timestamp ms) kapan giliran ini berakhir
+  const deadlineRef = useRef<number | null>(
+    initialRemainingSeconds != null
+      ? Date.now() + initialRemainingSeconds * 1000
+      : null
+  );
+
   const isTransitioning = useRef(false);
 
-  // Polling status kalau activeAgentId null (event belum mulai / sudah selesai)
+  // Helper untuk update countdown dari deadline (supaya bisa dipakai di beberapa tempat)
+  const recomputeCountdownFromDeadline = () => {
+    if (!deadlineRef.current || !activeAgentId) {
+      setCountdown(0);
+      return;
+    }
+    const now = Date.now();
+    const diffMs = deadlineRef.current - now;
+    const sec = Math.max(0, Math.floor(diffMs / 1000));
+    setCountdown(sec);
+  };
+
+  // Polling status kalau activeAgentId null
   useEffect(() => {
     if (activeAgentId !== null) return;
 
@@ -26,10 +45,11 @@ export function usePemiluGiliran(
         if (!res.ok) return;
         const data = await res.json();
 
-        // Hanya set kalau ada activeAgentId yang valid dari server
         if (data.activeAgentId) {
           setActiveAgentId(data.activeAgentId);
-          setCountdown(data.remainingSeconds ?? 0);
+          const remaining = data.remainingSeconds ?? 0;
+          deadlineRef.current = Date.now() + remaining * 1000;
+          setCountdown(remaining);
         }
       } catch (err) {
         console.error("Error polling status:", err);
@@ -39,21 +59,23 @@ export function usePemiluGiliran(
     return () => clearInterval(poll);
   }, [activeAgentId, id_acara]);
 
-  // Countdown lokal
+  // Countdown lokal, tapi hitung ulang dari deadline, bukan prev - 1
   useEffect(() => {
-    if (!activeAgentId || countdown <= 0) return;
+    if (!activeAgentId || !deadlineRef.current) return;
+
+    recomputeCountdownFromDeadline(); // sync sekali saat effect jalan
 
     const timer = setInterval(() => {
-      setCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+      recomputeCountdownFromDeadline();
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [activeAgentId, countdown]);
+    // pakai activeAgentId & deadlineRef sebagai dependensi “logis”; ref tidak memicu rerun
+  }, [activeAgentId]);
 
-  // Kalau countdown habis DAN ada activeAgentId, minta server pindah giliran
+  // Kalau countdown hampir habis (<=1 detik) DAN ada activeAgentId, minta server pindah giliran
   useEffect(() => {
-    // ✅ Guard: jangan panggil /next kalau countdown masih jalan atau sudah transisi
-    if (countdown !== 0 || !activeAgentId || isTransitioning.current) return;
+    if (countdown > 1 || !activeAgentId || isTransitioning.current) return;
 
     isTransitioning.current = true;
 
@@ -64,14 +86,14 @@ export function usePemiluGiliran(
         const data = await res.json();
         console.log("✅ Next giliran response:", data);
 
-        // Kalau server balikin error (acara belum mulai / sudah selesai), reset state
         if (!res.ok) {
           console.warn("⚠️ Server tolak /next:", data);
           setActiveAgentId(null);
           setCountdown(0);
+          deadlineRef.current = null;
           isTransitioning.current = false;
         }
-        // Kalau sukses, tunggu event Pusher untuk update state
+        // Kalau sukses, kita tunggu update dari Pusher
       })
       .catch((err) => {
         console.error("❌ Error next giliran:", err);
@@ -79,7 +101,7 @@ export function usePemiluGiliran(
       });
   }, [countdown, activeAgentId, id_acara]);
 
-  // Subscribe Pusher
+  // Subscribe Pusher: setiap giliran berubah, server kirim remainingSeconds baru
   useEffect(() => {
     const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
       cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
@@ -91,8 +113,18 @@ export function usePemiluGiliran(
       "giliran-update",
       (data: { id_agent: string | null; remainingSeconds: number | null }) => {
         console.log("📡 Pusher event received:", data);
+
         setActiveAgentId(data.id_agent);
-        setCountdown(data.remainingSeconds ?? 0);
+
+        if (data.id_agent && data.remainingSeconds != null) {
+          const remaining = data.remainingSeconds;
+          deadlineRef.current = Date.now() + remaining * 1000;
+          setCountdown(remaining);
+        } else {
+          deadlineRef.current = null;
+          setCountdown(0);
+        }
+
         isTransitioning.current = false;
       }
     );
