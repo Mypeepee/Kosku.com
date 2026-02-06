@@ -59,26 +59,27 @@ export interface PemiluInitialData {
   pilihan: Pilihan[];
   availableListings: Listing[];
 
-  // ↓↓↓ Tambahan ini yang penting untuk realtime countdown
   activeAgentId: string | null;
   activeRemainingSeconds: number | null;
 }
 
 interface PemiluClientProps {
   initialData: PemiluInitialData;
+
+  // ID agent user yang sedang login (harus sama dengan kolom id_agent di DB pesertaAcara)
+  currentAgentId: string;
 }
 
-export default function PemiluClient({ initialData }: PemiluClientProps) {
+export default function PemiluClient({
+  initialData,
+  currentAgentId,
+}: PemiluClientProps) {
   const [peserta, setPeserta] = useState<Peserta[]>(initialData.peserta);
   const [pilihan, setPilihan] = useState<Pilihan[]>(initialData.pilihan);
-  const [availableListings] = useState<Listing[]>(
-    initialData.availableListings
-  );
+  const [availableListings] = useState<Listing[]>(initialData.availableListings);
 
   const { onlineMap } = usePemiluPresence(initialData.id_acara);
 
-  // 👉 Hook giliran sekarang TIDAK lagi hitung dari tanggal_mulai,
-  //    tapi pakai activeAgentId + remainingSeconds dari server.
   const { activeAgentId, countdown } = usePemiluGiliran(
     initialData.id_acara,
     initialData.activeAgentId,
@@ -96,6 +97,10 @@ export default function PemiluClient({ initialData }: PemiluClientProps) {
       })),
     [peserta, onlineMap, activeAgentId]
   );
+
+  // LOG: cek apakah id agent login sama dengan id agent aktif dari server
+  console.log("👤 currentAgentId (login):", currentAgentId);
+  console.log("🔥 activeAgentId (giliran):", activeAgentId);
 
   const handlePilih = async (id_listing: string) => {
     try {
@@ -137,6 +142,8 @@ export default function PemiluClient({ initialData }: PemiluClientProps) {
         countdown={countdown}
         availableListings={availableListings}
         onPilih={handlePilih}
+        currentAgentId={currentAgentId}
+        activeAgentId={activeAgentId}
       />
     </div>
   );

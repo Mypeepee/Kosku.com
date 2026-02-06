@@ -12,6 +12,9 @@ interface Props {
   countdown: number;
   availableListings: Listing[];
   onPilih: (id_listing: string) => void;
+
+  currentAgentId: string;
+  activeAgentId: string | null;
 }
 
 export default function PemiluLayout({
@@ -20,6 +23,8 @@ export default function PemiluLayout({
   countdown,
   availableListings,
   onPilih,
+  currentAgentId,
+  activeAgentId,
 }: Props) {
   return (
     <div className="grid h-full gap-4 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)]">
@@ -32,6 +37,8 @@ export default function PemiluLayout({
           pilihan={pilihan}
           availableListings={availableListings}
           onPilih={onPilih}
+          currentAgentId={currentAgentId}
+          activeAgentId={activeAgentId}
         />
       </div>
     </div>

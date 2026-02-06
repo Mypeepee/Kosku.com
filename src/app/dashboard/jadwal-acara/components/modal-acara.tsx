@@ -143,7 +143,7 @@ export default function ModalAcara({
     const endDateTime = new Date(`${formData.tanggal_selesai}T${formData.jam_selesai}:00`);
 
     if (endDateTime <= startDateTime) {
-      setDateTimeError("⚠️ Waktu selesai harus lebih besar dari waktu mulai");
+      setDateTimeError("Waktu selesai harus lebih besar dari waktu mulai");
       return false;
     }
 

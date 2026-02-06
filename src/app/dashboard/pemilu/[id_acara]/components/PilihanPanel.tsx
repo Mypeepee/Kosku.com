@@ -9,6 +9,11 @@ interface Props {
   pilihan: Pilihan[];
   availableListings: Listing[];
   onPilih?: (id_listing: string) => void;
+
+  // Agent yang sedang login di panel ini
+  currentAgentId: string;
+  // Agent yang sedang giliran dari server
+  activeAgentId: string | null;
 }
 
 const ITEMS_PER_PAGE = 15;
@@ -41,6 +46,8 @@ export default function PilihanPanel({
   pilihan,
   availableListings,
   onPilih,
+  currentAgentId,
+  activeAgentId,
 }: Props) {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState("");
@@ -51,17 +58,21 @@ export default function PilihanPanel({
     [pilihan]
   );
 
-  // Unique kategori
   const uniqueKategori = useMemo(
     () => Array.from(new Set(availableListings.map((l) => l.kategori))),
     [availableListings]
   );
 
-  // Filter & search logic
+  // LOG untuk debug giliran
+  console.log("🎯 currentAgentId:", currentAgentId);
+  console.log("🎯 activeAgentId:", activeAgentId);
+  const isCurrentAgentTurn =
+    activeAgentId != null && activeAgentId === currentAgentId;
+  console.log("➡️ isCurrentAgentTurn:", isCurrentAgentTurn);
+
   const filteredListings = useMemo(() => {
     let result = [...availableListings];
 
-    // Search by alamat / kota / provinsi / kecamatan / kelurahan / id_listing
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(
@@ -76,7 +87,6 @@ export default function PilihanPanel({
       );
     }
 
-    // Filter kategori
     if (filterKategori !== "all") {
       result = result.filter((l) => l.kategori === filterKategori);
     }
@@ -84,13 +94,11 @@ export default function PilihanPanel({
     return result;
   }, [availableListings, searchQuery, filterKategori]);
 
-  // Pagination
   const totalPages = Math.ceil(filteredListings.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentListings = filteredListings.slice(startIndex, endIndex);
 
-  // Reset page ketika filter berubah
   useMemo(() => {
     setCurrentPage(1);
   }, [searchQuery, filterKategori]);
@@ -136,9 +144,8 @@ export default function PilihanPanel({
         </div>
       </div>
 
-      {/* Search & Filter - 1 Baris */}
+      {/* Search & Filter */}
       <div className="mb-3 flex items-center gap-2">
-        {/* Search Bar */}
         <div className="relative flex-1">
           <Icon
             icon="solar:magnifer-linear"
@@ -153,7 +160,6 @@ export default function PilihanPanel({
           />
         </div>
 
-        {/* Filter Kategori */}
         <select
           value={filterKategori}
           onChange={(e) => setFilterKategori(e.target.value)}
@@ -167,7 +173,6 @@ export default function PilihanPanel({
           ))}
         </select>
 
-        {/* Reset Button */}
         {(searchQuery || filterKategori !== "all") && (
           <button
             onClick={handleResetFilters}
@@ -221,20 +226,16 @@ export default function PilihanPanel({
                 const pilihanData = pilihan.find(
                   (p) => p.id_listing === listing.id_property
                 );
-
                 const imageUrl = getFirstImageUrl(listing.gambar);
 
                 return (
                   <tr
                     key={listing.id_property}
-                    className={`
-                      group transition-all duration-150
-                      ${
-                        isSelected
-                          ? "bg-emerald-500/10"
-                          : "hover:bg-slate-900/60"
-                      }
-                    `}
+                    className={`group transition-all duration-150 ${
+                      isSelected
+                        ? "bg-emerald-500/10"
+                        : "hover:bg-slate-900/60"
+                    }`}
                   >
                     {/* Gambar */}
                     <td className="border-b border-white/5 px-3 py-2">
@@ -331,7 +332,7 @@ export default function PilihanPanel({
                           <Icon icon="solar:check-circle-bold" />
                           Terpilih
                         </div>
-                      ) : (
+                      ) : isCurrentAgentTurn ? (
                         <button
                           onClick={() => onPilih?.(listing.id_property)}
                           className="inline-flex items-center gap-1 rounded-lg bg-sky-500/20 px-3 py-1.5 text-[10px] font-semibold text-sky-200 border border-sky-500/40 transition-all hover:bg-sky-500/30 hover:border-sky-500/60 hover:shadow-[0_0_12px_rgba(56,189,248,0.4)]"
@@ -339,6 +340,11 @@ export default function PilihanPanel({
                           <Icon icon="solar:add-circle-bold" />
                           Pilih
                         </button>
+                      ) : (
+                        <div className="inline-flex items-center gap-1 rounded-lg bg-slate-800/60 px-3 py-1.5 text-[10px] font-semibold text-slate-500 border border-slate-700/60">
+                          <Icon icon="solar:lock-bold" />
+                          Bukan giliran Anda
+                        </div>
                       )}
                     </td>
                   </tr>

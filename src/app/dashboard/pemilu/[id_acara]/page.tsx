@@ -2,6 +2,9 @@
 import { PrismaClient, status_peserta_enum } from "@prisma/client";
 import PemiluClient from "./PemiluClient";
 
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route"; // path ini sesuai file yang kamu kirim
+
 const prisma = new PrismaClient();
 
 interface PageProps {
@@ -10,6 +13,27 @@ interface PageProps {
 
 export default async function PemiluPage({ params }: PageProps) {
   try {
+    // 🔐 Ambil session dari NextAuth
+    const session = await getServerSession(authOptions);
+    const currentAgentId = session?.user?.agentId as string | undefined;
+
+    // Kalau user belum punya agent, block dulu
+    if (!currentAgentId) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+          <div className="text-center">
+            <div className="mb-4 text-6xl">🔐</div>
+            <h2 className="mb-2 text-2xl font-bold text-white">
+              Agent belum terautentikasi
+            </h2>
+            <p className="text-slate-400">
+              Silakan login sebagai agent terlebih dahulu.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     const id_acara = BigInt(params.id_acara);
 
     const acara = await prisma.acara.findUnique({
@@ -65,7 +89,8 @@ export default async function PemiluPage({ params }: PageProps) {
 
     const now = new Date();
 
-    // Cari peserta aktif
+    // NOTE: ini masih pakai status AKTIF, kalau di DB sekarang pakai SEDANG_MEMILIH,
+    // ganti: status_peserta_enum.SEDANG_MEMILIH
     const pesertaAktif =
       acara.pesertaAcara.find(
         (p) =>
@@ -160,12 +185,16 @@ export default async function PemiluPage({ params }: PageProps) {
         kamar_mandi: l.kamar_mandi,
         gambar: l.gambar,
       })),
-
       activeAgentId,
       activeRemainingSeconds,
     };
 
-    return <PemiluClient initialData={initialData} />;
+    return (
+      <PemiluClient
+        initialData={initialData}
+        currentAgentId={currentAgentId}
+      />
+    );
   } catch (error) {
     console.error("Error loading pemilu page:", error);
     return (
