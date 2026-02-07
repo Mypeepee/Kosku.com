@@ -65,8 +65,6 @@ export interface PemiluInitialData {
 
 interface PemiluClientProps {
   initialData: PemiluInitialData;
-
-  // ID agent user yang sedang login (harus sama dengan kolom id_agent di DB pesertaAcara)
   currentAgentId: string;
 }
 
@@ -98,29 +96,57 @@ export default function PemiluClient({
     [peserta, onlineMap, activeAgentId]
   );
 
-  // LOG: cek apakah id agent login sama dengan id agent aktif dari server
   console.log("👤 currentAgentId (login):", currentAgentId);
   console.log("🔥 activeAgentId (giliran):", activeAgentId);
 
   const handlePilih = async (id_listing: string) => {
+    // Cek apakah giliran user
+    if (activeAgentId !== currentAgentId) {
+      alert("Bukan giliran Anda untuk memilih!");
+      return;
+    }
+
+    // ❌ HAPUS validasi "user sudah pilih sebelumnya"
+    // Agent boleh pilih berkali-kali dalam 1 giliran!
+
+    // Cek apakah listing sudah dipilih (oleh siapa pun)
+    const listingSudahDipilih = pilihan.some((p) => p.id_listing === id_listing);
+    if (listingSudahDipilih) {
+      alert("Unit ini sudah dipilih!");
+      return;
+    }
+
+    const confirmed = confirm(
+      "Pilih unit ini? Anda masih bisa memilih unit lain selama giliran Anda berlangsung."
+    );
+
+    if (!confirmed) return;
+
     try {
       const res = await fetch(`/api/pemilu/${initialData.id_acara}/pilih`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id_listing }),
+        body: JSON.stringify({
+          id_agent: currentAgentId,
+          id_listing,
+        }),
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        const err = await res.json();
-        alert(err.error || "Gagal memilih unit");
+        alert(data.error || "Gagal memilih unit");
         return;
       }
 
-      const data = await res.json();
-      console.log("Pilihan berhasil:", data);
+      console.log("✅ Pilihan berhasil:", data);
+      // Pusher akan handle update UI secara realtime via usePemiluPilihan hook
+      
+      // ✅ Ganti alert dengan console.log supaya tidak blocking user
+      console.log(`✅ Berhasil memilih: ${data.data.judul_listing}`);
     } catch (error) {
-      console.error("Error pilih unit:", error);
-      alert("Terjadi kesalahan, coba lagi.");
+      console.error("❌ Error memilih unit:", error);
+      alert("Terjadi kesalahan saat memilih unit. Silakan coba lagi.");
     }
   };
 

@@ -28,13 +28,21 @@ export default function PemiluLayout({
 }: Props) {
   return (
     <>
-      {/* Desktop/Tablet Layout */}
+      {/* Desktop/Tablet Layout - ✅ LOCK HEIGHT */}
       <div className="grid h-full gap-4 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)]">
-        <div className="flex flex-col gap-4">
+        {/* Left Column - ✅ LOCK HEIGHT */}
+        <div className="flex flex-col gap-4 min-h-0">
           {/* Hidden pada mobile, tampil di tablet+ */}
-          <div className="hidden md:flex md:flex-col md:gap-4">
-            <PesertaPanel peserta={peserta} countdown={countdown} />
-            <GiliranPanel pilihan={pilihan} />
+          <div className="hidden md:flex md:flex-col md:gap-4 md:h-full md:min-h-0">
+            {/* ✅ PesertaPanel: 60% height */}
+            <div className="flex-[3] min-h-0">
+              <PesertaPanel peserta={peserta} countdown={countdown} />
+            </div>
+            
+            {/* ✅ GiliranPanel: 40% height */}
+            <div className="flex-[2] min-h-0">
+              <GiliranPanel pilihan={pilihan} />
+            </div>
           </div>
 
           {/* Tampil di mobile, hidden di tablet+ */}
@@ -43,7 +51,8 @@ export default function PemiluLayout({
           </div>
         </div>
         
-        <div className="pb-20 md:pb-0">
+        {/* Right Column - ✅ LOCK HEIGHT */}
+        <div className="pb-20 md:pb-0 min-h-0">
           <PilihanPanel
             pilihan={pilihan}
             availableListings={availableListings}

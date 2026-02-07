@@ -9,10 +9,7 @@ interface Props {
   pilihan: Pilihan[];
   availableListings: Listing[];
   onPilih?: (id_listing: string) => void;
-
-  // Agent yang sedang login di panel ini
   currentAgentId: string;
-  // Agent yang sedang giliran dari server
   activeAgentId: string | null;
 }
 
@@ -63,12 +60,7 @@ export default function PilihanPanel({
     [availableListings]
   );
 
-  // LOG untuk debug giliran
-  console.log("🎯 currentAgentId:", currentAgentId);
-  console.log("🎯 activeAgentId:", activeAgentId);
-  const isCurrentAgentTurn =
-    activeAgentId != null && activeAgentId === currentAgentId;
-  console.log("➡️ isCurrentAgentTurn:", isCurrentAgentTurn);
+  const isCurrentAgentTurn = activeAgentId != null && activeAgentId === currentAgentId;
 
   const filteredListings = useMemo(() => {
     let result = [...availableListings];
@@ -99,6 +91,7 @@ export default function PilihanPanel({
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentListings = filteredListings.slice(startIndex, endIndex);
 
+  // Reset page ketika filter berubah
   useMemo(() => {
     setCurrentPage(1);
   }, [searchQuery, filterKategori]);
@@ -131,8 +124,7 @@ export default function PilihanPanel({
           <div>
             <p className="text-xs font-semibold text-white">Pilihan Unit</p>
             <p className="text-[10px] text-slate-400">
-              {filteredListings.length} unit tersedia · {pilihan.length} sudah
-              dipilih
+              {filteredListings.length} unit tersedia · {pilihan.length} sudah dipilih
             </p>
           </div>
         </div>

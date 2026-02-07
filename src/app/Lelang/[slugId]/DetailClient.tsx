@@ -27,6 +27,7 @@ interface ProductData {
   kecamatan?: string | null;
   provinsi?: string | null;
   gambar: string | null;
+  foto_list?: string[];
   kamar_tidur: number | null;
   kamar_mandi: number | null;
   luas_tanah: number | null;
@@ -47,6 +48,7 @@ interface ProductData {
   tanggal_lelang?: string | null;
   uang_jaminan?: number | string | null;
   nilai_limit_lelang?: number | string | null;
+  agent_photo?: string;
 
   agent?: {
     id_agent?: string | null;
@@ -56,7 +58,7 @@ interface ProductData {
     nomor_whatsapp?: string | null;
     kota_area?: string | null;
     jabatan?: string | null;
-    foto_profil_url?: string | null; // <- SUDAH DINORMALISASI DI page.tsx
+    foto_profil_url?: string | null;
     pengguna?: {
       nama_lengkap?: string | null;
       foto_profil_url?: string | null;
@@ -70,8 +72,8 @@ interface DetailClientProps {
   product: ProductData;
   fotoArray: string[];
   similarProperties?: ProductData[];
-  currentAgentId?: string | null;   // id agent yang login (jika ada)
-  currentRole?: "AGENT" | "OWNER" | "USER" | string | null; // role user
+  currentAgentId?: string | null;
+  currentRole?: "AGENT" | "OWNER" | "USER" | string | null;
 }
 
 export default function DetailClient({
@@ -81,14 +83,12 @@ export default function DetailClient({
   currentAgentId,
   currentRole,
 }: DetailClientProps) {
-  // ========= INCREMENT VIEW SETIAP HALAMAN DETAIL DIBUKA =========
   useEffect(() => {
     if (!product?.id_property) return;
 
     const id = product.id_property;
     fetch(`/api/listing/${id}/dilihat`, { method: "POST" }).catch(() => {});
   }, [product?.id_property]);
-  // ===============================================================
 
   const convertToNumber = (value: any): number => {
     if (typeof value === "number") return value;
@@ -162,7 +162,6 @@ export default function DetailClient({
     gambar: fotoArray[0] || "/images/hero/banner.jpg",
     foto_list: fotoArray,
 
-    // ✅ GUNAKAN foto_profil_url DARI agent (SUDAH JADI URL THUMB)
     agent: product.agent
       ? {
           nama: product.agent.pengguna?.nama_lengkap || "Agent Premier",
@@ -174,9 +173,9 @@ export default function DetailClient({
           email: product.agent.pengguna?.email || "",
           kantor: product.agent.nama_kantor || "Premier Asset",
           foto_url:
-            product.agent.foto_profil_url ||        // utama: dari kolom agent (sudah normalize)
-            product.agent.pengguna?.foto_profil_url || // fallback jika ada di pengguna
-            "",
+            product.agent.foto_profil_url ||
+            product.agent.pengguna?.foto_profil_url ||
+            "/images/user/user-01.png",
           rating: product.agent.rating ?? 5,
           jumlah_closing: product.agent.jumlah_closing ?? 0,
           kota_area: product.agent.kota_area || "",
@@ -187,19 +186,18 @@ export default function DetailClient({
     agent_name:
       product.agent?.pengguna?.nama_lengkap || "Agent Premier",
     agent_photo:
-      product.agent?.foto_profil_url ||            // pakai yang sudah normalize
+      product.agent?.foto_profil_url ||
       product.agent?.pengguna?.foto_profil_url ||
       "/images/user/user-01.png",
 
-    // owner dengan id_agent + avatar yang benar
     owner: product.agent
       ? {
-          id: product.agent.id_agent || "", // penting untuk cek kepemilikan
+          id: product.agent.id_agent || "",
           name: product.agent.pengguna?.nama_lengkap || "Agent Premier",
           avatar:
-            product.agent.foto_profil_url ||        // <== INI YANG DIBACA AgentSidebar
+            product.agent.foto_profil_url ||
             product.agent.pengguna?.foto_profil_url ||
-            "",
+            "/images/user/user-01.png",
           phone: product.agent.nomor_whatsapp || "",
           office: product.agent.nama_kantor || "Premier Asset",
           rating: product.agent.rating ?? 5.0,
@@ -210,7 +208,7 @@ export default function DetailClient({
       : {
           id: "",
           name: "Agent Premier",
-          avatar: "",
+          avatar: "/images/user/user-01.png",
           phone: "",
           office: "Premier Asset",
           rating: 5.0,
@@ -234,29 +232,27 @@ export default function DetailClient({
 
   const [selectedRoom, setSelectedRoom] = useState(minimalRoom);
 
-  const formattedSimilarProperties = similarProperties.map((p) => ({
-    ...p,
-    slug: p.slug || "",
-    gambar: p.gambar || "/images/hero/banner.jpg",
-    foto_list: p.gambar
-      ? p.gambar.split(",").map((g) => g.trim())
-      : [],
-    agent_name:
-      p.agent?.pengguna?.nama_lengkap || "Agent Premier",
-    agent_photo:
-      p.agent?.foto_profil_url ||                  // gunakan thumbnail agent juga di similar
-      p.agent?.pengguna?.foto_profil_url ||
-      "/images/user/user-01.png",
-    harga: convertToNumber(p.harga),
-    dilihat: p.dilihat ?? 0,
-    is_hot_deal: p.is_hot_deal ?? false,
-  }));
+  // ✅ FORMAT SIMILAR PROPERTIES DENGAN GAMBAR YANG SUDAH DINORMALISASI
+  const formattedSimilarProperties = similarProperties.map((p) => {
+    const photoList = Array.isArray(p.foto_list) && p.foto_list.length > 0
+      ? p.foto_list
+      : [p.gambar || "/images/hero/banner.jpg"];
+
+    return {
+      ...p,
+      slug: p.slug || "",
+      gambar: photoList[0],
+      foto_list: photoList,
+      agent_name: p.agent?.pengguna?.nama_lengkap || "Agent Premier",
+      agent_photo: p.agent_photo || "/images/user/user-01.png",
+      harga: convertToNumber(p.harga),
+      dilihat: p.dilihat ?? 0,
+      is_hot_deal: p.is_hot_deal ?? false,
+    };
+  });
 
   const ownerId: string = (propertyData as any).owner?.id || "";
 
-  // boleh edit jika:
-  // - currentRole OWNER (admin/owner sistem), ATAU
-  // - currentRole AGENT dan currentAgentId === ownerId
   const canEdit =
     currentRole === "OWNER" ||
     (currentRole === "AGENT" && !!currentAgentId && currentAgentId === ownerId);
@@ -303,14 +299,12 @@ export default function DetailClient({
           />
 
           {isAgent ? (
-            // Semua agent selalu lihat KeperluanAgent
             <KeperluanAgent
               data={propertyData as any}
               currentAgentId={currentAgentId}
-              canEdit={canEdit} // di dalamnya tombol Edit hanya muncul jika canEdit true
+              canEdit={canEdit}
             />
           ) : (
-            // Non-agent (buyer biasa) lihat BookingSidebar
             <BookingSidebar
               data={propertyData as any}
               currentAgentId={currentAgentId}

@@ -1,4 +1,3 @@
-// app/dashboard/listings/components/listings-table.tsx
 "use client";
 
 import { useMemo, useState } from "react";
@@ -117,6 +116,32 @@ export default function ListingsTable({
   const goPrev = () => goToPage(currentPage - 1);
   const goNext = () => goToPage(currentPage + 1);
 
+  // ✅ Handler untuk bulk delete (optional, bisa diimplementasikan nanti)
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    
+    const confirmed = window.confirm(
+      `Apakah Anda yakin ingin menghapus ${selectedIds.length} listing?`
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      // TODO: Implement bulk delete API
+      // await fetch('/api/listings/bulk-delete', {
+      //   method: 'POST',
+      //   body: JSON.stringify({ ids: selectedIds })
+      // });
+      
+      alert(`Berhasil menghapus ${selectedIds.length} listing`);
+      setSelectedIds([]);
+      window.location.reload();
+    } catch (error) {
+      console.error('Bulk delete error:', error);
+      alert('Gagal menghapus listing. Silakan coba lagi.');
+    }
+  };
+
   return (
     <div className="overflow-hidden rounded-2xl border border-white/5 bg-[#050608]">
       {/* HEADER ATAS */}
@@ -159,9 +184,10 @@ export default function ListingsTable({
           <div className="flex items-center justify-end gap-2">
             {/* Bulk delete */}
             <button
-              className="inline-flex items-center justify-center gap-1 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-40"
+              className="inline-flex items-center justify-center gap-1 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-300 hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               disabled={selectedIds.length === 0}
               type="button"
+              onClick={handleBulkDelete}
             >
               <Icon
                 icon="solar:trash-bin-minimalistic-linear"
@@ -170,10 +196,10 @@ export default function ListingsTable({
               Hapus terpilih ({selectedIds.length})
             </button>
 
-            {/* Add Property */}
+            {/* ✅ Add Property - Update Link ke /tambah-property */}
             <Link
-              href="/dashboard/listings/new"
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/25 hover:border-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.35)]"
+              href="/tambah-property"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/25 hover:border-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.35)] transition-all"
             >
               <Icon
                 icon="solar:add-circle-linear"
@@ -298,11 +324,11 @@ export default function ListingsTable({
                     {formatViews(item.views)}
                   </td>
 
-                  {/* tombol edit */}
+                  {/* tombol edit - ✅ Update link ke /tambah-property/[id] untuk edit mode */}
                   <td className="px-4 py-3 align-top text-right">
                     <Link
-                      href={`/dashboard/listings/${item.id}`}
-                      className="inline-flex h-8 items-center justify-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 text-[11px] text-slate-100 hover:bg-white/10"
+                      href={`/tambah-property?id=${item.id}&mode=edit`}
+                      className="inline-flex h-8 items-center justify-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 text-[11px] text-slate-100 hover:bg-white/10 transition-colors"
                     >
                       <Icon
                         icon="solar:pen-new-square-linear"
@@ -323,8 +349,8 @@ export default function ListingsTable({
                 >
                   Tidak ada property yang cocok dengan pencarian.{" "}
                   <Link
-                    href="/dashboard/listings/new"
-                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/60 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20"
+                    href="/tambah-property"
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/60 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
                   >
                     <Icon
                       icon="solar:add-circle-linear"
@@ -364,7 +390,7 @@ export default function ListingsTable({
               type="button"
               onClick={goPrev}
               disabled={currentPage === 1}
-              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
             >
               <Icon icon="solar:alt-arrow-left-linear" className="text-xs" />
               <span className="hidden sm:inline">Sebelumnya</span>
@@ -379,7 +405,7 @@ export default function ListingsTable({
                     <button
                       type="button"
                       onClick={() => goToPage(pageNumber)}
-                      className={`h-7 min-w-[1.75rem] rounded-full px-2 text-[11px] ${
+                      className={`h-7 min-w-[1.75rem] rounded-full px-2 text-[11px] transition-colors ${
                         isActive
                           ? "bg-emerald-500 text-black"
                           : "bg-white/5 text-slate-300 hover:bg-white/10"
@@ -397,7 +423,7 @@ export default function ListingsTable({
               type="button"
               onClick={goNext}
               disabled={currentPage === totalPages}
-              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
             >
               <span className="hidden sm:inline">Berikutnya</span>
               <Icon icon="solar:alt-arrow-right-linear" className="text-xs" />

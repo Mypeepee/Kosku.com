@@ -1,4 +1,3 @@
-// app/Jual/[slug]/[agentId]/components/KeperluanAgent.tsx
 "use client";
 
 import React from "react";
@@ -64,8 +63,11 @@ export default function KeperluanAgent({ data, currentAgentId }: KeperluanAgentP
   const biayaPengosongan = calcPengosongan(limit);
 
   // ✅ Check Ownership
-  const ownerId: string = data?.owner?.id || "";
+  const ownerId: string = data?.owner?.id || data?.id_agent || "";
   const isOwner = !!currentAgentId && !!ownerId && currentAgentId === ownerId;
+
+  // ✅ Get property ID for edit
+  const propertyId = data?.id_property || data?.id || "";
 
   const handleDownloadImages = () => {
     const urls: string[] = data?.foto_list || [];
@@ -185,10 +187,10 @@ export default function KeperluanAgent({ data, currentAgentId }: KeperluanAgentP
         {/* TOMBOL AKSI */}
         <div className="px-5 pb-4 pt-2 bg-slate-950/95 border-t border-white/5">
           <div className="flex flex-col gap-2">
-            {/* ✅ TOMBOL EDIT - HANYA UNTUK OWNER */}
-            {isOwner && (
+            {/* ✅ TOMBOL EDIT - HANYA UNTUK OWNER - UPDATED LINK */}
+            {isOwner && propertyId && (
               <Link
-                href={`/dashboard/properties/edit/${data.slug}`}
+                href={`/tambah-property?id=${propertyId}&mode=edit`}
                 className="group relative w-full overflow-hidden rounded-2xl
                   bg-gradient-to-r from-violet-600 via-fuchsia-600 to-pink-600
                   p-[1px] shadow-[0_0_30px_rgba(168,85,247,0.5)]
@@ -366,10 +368,10 @@ export default function KeperluanAgent({ data, currentAgentId }: KeperluanAgentP
         </div>
 
         <div className="px-4 py-2.5 flex gap-2">
-          {/* ✅ TOMBOL EDIT DI MOBILE */}
-          {isOwner && (
+          {/* ✅ TOMBOL EDIT DI MOBILE - UPDATED LINK */}
+          {isOwner && propertyId && (
             <Link
-              href={`/dashboard/properties/edit/${data.slug}`}
+              href={`/tambah-property?id=${propertyId}&mode=edit`}
               className="flex-1 relative overflow-hidden rounded-xl
                 bg-gradient-to-r from-violet-600 to-pink-600
                 shadow-[0_0_20px_rgba(168,85,247,0.4)]

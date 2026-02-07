@@ -1,0 +1,23 @@
+/* Hide Header & Footer untuk halaman tambah-property */
+
+/* Target semua header di atas */
+body:has(.hide-header-footer) header {
+    display: none !important;
+  }
+  
+  /* Target semua footer di atas */
+  body:has(.hide-header-footer) footer {
+    display: none !important;
+  }
+  
+  /* Remove padding dari main */
+  body:has(.hide-header-footer) main {
+    padding-top: 0 !important;
+  }
+  
+  /* Specific target jika perlu */
+  body:has(.hide-header-footer) > div > div > header,
+  body:has(.hide-header-footer) > div > div > footer {
+    display: none !important;
+  }
+  

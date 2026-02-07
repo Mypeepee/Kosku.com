@@ -9,7 +9,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
 // --- TYPES ---
 type ParamsShape = {
-  slugId: string; // contoh: "rumahdigambut-32"
+  slugId: string;
 };
 
 type Props = {
@@ -35,7 +35,7 @@ function serializePrisma<T>(data: T): any {
   return JSON.parse(
     JSON.stringify(
       data,
-      (_key, value) => (typeof value === "bigint" ? value.toString() : value) // BigInt → string
+      (_key, value) => (typeof value === "bigint" ? value.toString() : value)
     )
   );
 }
@@ -43,12 +43,11 @@ function serializePrisma<T>(data: T): any {
 // --- HELPER: normalisasi foto agent dari Google Drive ID ---
 function normalizeAgentPhoto(fileId: string | null | undefined): string {
   if (!fileId || fileId.trim() === "") {
-    return "/images/default-profile.png"; // pastikan file ini ada di /public/images
+    return "/images/default-profile.png";
   }
 
   const trimmed = fileId.trim();
 
-  // Jika sudah URL penuh, pakai langsung
   if (
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
@@ -57,8 +56,35 @@ function normalizeAgentPhoto(fileId: string | null | undefined): string {
     return trimmed;
   }
 
-  // Asumsi: ini Google Drive file ID
   return `https://drive.google.com/thumbnail?id=${trimmed}&sz=w64`;
+}
+
+// ✅ HELPER BARU: normalisasi gambar listing dari Google Drive ID
+function normalizeListingImages(gambar: string | null | undefined): string[] {
+  if (!gambar || gambar.trim() === "") {
+    return ["/images/hero/banner.jpg"];
+  }
+
+  const rawImages = gambar
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  if (rawImages.length === 0) {
+    return ["/images/hero/banner.jpg"];
+  }
+
+  return rawImages.map((img) => {
+    if (
+      img.startsWith("http://") ||
+      img.startsWith("https://") ||
+      img.startsWith("/")
+    ) {
+      return img;
+    }
+
+    return `https://drive.google.com/thumbnail?id=${img}&sz=w800`;
+  });
 }
 
 // --- QUERY DETAIL ---
@@ -75,7 +101,7 @@ async function getProperty(id: bigint) {
           nomor_whatsapp: true,
           kota_area: true,
           jabatan: true,
-          foto_profil_url: true, // <-- di Agent
+          foto_profil_url: true,
           pengguna: {
             select: {
               nama_lengkap: true,
@@ -186,15 +212,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     ? product.deskripsi.substring(0, 155) + "..."
     : `${product.jenis_transaksi} ${product.kategori} di ${product.kota}, ${product.provinsi}. ${specs}. Hubungi ${namaAgent} untuk info lebih lanjut.`;
 
-  const rawGambar = product.gambar || "";
-  const fotoArray =
-    rawGambar.trim().length > 0
-      ? rawGambar
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0)
-      : [];
-  const firstImage = fotoArray[0] || "/images/hero/banner.jpg";
+  const fotoArray = normalizeListingImages(product.gambar);
+  const firstImage = fotoArray[0];
 
   const safeSlugId =
     slugId || `${product.slug}-${product.id_property.toString()}`;
@@ -266,11 +285,9 @@ export default async function DetailPage({ params }: Props) {
     notFound();
   }
 
-  // Ambil session: kalau agent login, punya agentId
   const session = await getServerSession(authOptions);
   const currentAgentId = (session?.user as any)?.agentId || null;
 
-  // Self-healing slug: pastikan slug-id di URL sesuai data
   if (product.slug && product.id_property) {
     const expectedSlugId = `${product.slug}-${product.id_property.toString()}`;
 
@@ -282,7 +299,6 @@ export default async function DetailPage({ params }: Props) {
     }
   }
 
-  // Kalau slug-id sudah benar dan agent sedang login → pakai segmen agentId
   if (currentAgentId) {
     const safeSlugId =
       slugId || `${product.slug}-${product.id_property.toString()}`;
@@ -293,46 +309,28 @@ export default async function DetailPage({ params }: Props) {
     slugId || `${product.slug}-${product.id_property.toString()}`;
   const canonicalUrl = `https://premierasset.com/Lelang/${safeSlugId}`;
 
-  const rawGambar = product.gambar || "";
-  const fotoArray =
-    rawGambar.trim().length > 0
-      ? rawGambar
-          .split(",")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0)
-      : [];
-
-  const finalFotoArray =
-    fotoArray.length > 0 ? fotoArray : ["/images/hero/banner.jpg"];
+  // ✅ NORMALISASI GAMBAR LISTING UTAMA
+  const fotoArray = normalizeListingImages(product.gambar);
 
   const similarPropertiesRaw = await getSimilarProperties(product);
 
+  // ✅ NORMALISASI GAMBAR DI SIMILAR PROPERTIES
   const similarProperties = similarPropertiesRaw.map((prop) => {
-    const propGambar = prop.gambar || "";
-    const propFotoArray =
-      propGambar.trim().length > 0
-        ? propGambar
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0)
-        : ["/images/hero/banner.jpg"];
-
-    // normalisasi foto agent di similar
+    const propFotoArray = normalizeListingImages(prop.gambar);
     const agentPhotoUrl = normalizeAgentPhoto(prop.agent?.foto_profil_url);
 
     return {
       ...prop,
       foto_list: propFotoArray,
+      gambar: propFotoArray[0],
       agent_photo: agentPhotoUrl,
     };
   });
 
-  // Normalisasi foto agent di product utama
   const productAgentPhoto = normalizeAgentPhoto(
     product.agent?.foto_profil_url
   );
 
-  // --- SERIALIZE UNTUK CLIENT COMPONENT (hapus BigInt) ---
   const productForClient = serializePrisma({
     ...product,
     agent: {
@@ -351,7 +349,7 @@ export default async function DetailPage({ params }: Props) {
     description:
       product.deskripsi ||
       `${product.kategori} ${product.jenis_transaksi} di ${product.kota}`,
-    image: finalFotoArray,
+    image: fotoArray,
   };
 
   const breadcrumbJsonLd = {
@@ -402,7 +400,7 @@ export default async function DetailPage({ params }: Props) {
 
       <DetailClient
         product={productForClient}
-        fotoArray={finalFotoArray}
+        fotoArray={fotoArray}
         similarProperties={similarForClient}
         currentAgentId={null}
       />
