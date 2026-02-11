@@ -13,7 +13,7 @@ import { Step3Pricing } from './components/listing/steps/Step3Pricing';
 import { Step4Specifications } from './components/listing/steps/Step4Specifications';
 import { Step5Media } from './components/listing/steps/Step5Media';
 import { useFormPersist } from './hooks/useFormPersist';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Save, Send, ArrowLeft } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -45,7 +45,7 @@ function TambahPropertyContent() {
   const [currentStep, setCurrentStep] = useState(1);
   const [justEnteredStep5, setJustEnteredStep5] = useState(false);
   const [images, setImages] = useState<ImageFile[]>([]);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [saveStatus] = useState<SaveStatus>('idle');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -59,7 +59,13 @@ function TambahPropertyContent() {
     },
   });
 
-  const { watch, handleSubmit, formState: { errors }, trigger, reset } = form;
+  const {
+    watch,
+    handleSubmit,
+    formState: { errors },
+    trigger,
+    reset,
+  } = form;
 
   useEffect(() => {
     if (isEditMode && listingId) {
@@ -85,7 +91,9 @@ function TambahPropertyContent() {
         status_tayang: listing.status_tayang || 'TERSEDIA',
         harga: listing.harga,
         harga_promo: listing.harga_promo || undefined,
-        tanggal_lelang: listing.tanggal_lelang ? new Date(listing.tanggal_lelang) : undefined,
+        tanggal_lelang: listing.tanggal_lelang
+          ? new Date(listing.tanggal_lelang)
+          : undefined,
         uang_jaminan: listing.uang_jaminan || undefined,
         nilai_limit_lelang: listing.nilai_limit_lelang || undefined,
         link: listing.link || '',
@@ -112,12 +120,16 @@ function TambahPropertyContent() {
       });
 
       if (listing.gambar) {
-        const imageUrls = listing.gambar.split(',').filter((url: string) => url.trim());
-        const existingImages: ImageFile[] = imageUrls.map((url: string, index: number) => ({
-          id: `existing-${index}`,
-          file: null,
-          preview: url,
-        }));
+        const imageUrls = listing.gambar
+          .split(',')
+          .filter((url: string) => url.trim());
+        const existingImages: ImageFile[] = imageUrls.map(
+          (url: string, index: number) => ({
+            id: `existing-${index}`,
+            file: null,
+            preview: url,
+          })
+        );
         setImages(existingImages);
       }
     } catch (error) {
@@ -155,10 +167,19 @@ function TambahPropertyContent() {
       return;
     }
 
+    const values = watch();
+    console.log('[DEBUG NEXT] currentStep =', currentStep, {
+      jenis_transaksi: values.jenis_transaksi,
+      alamat_lengkap: values.alamat_lengkap,
+      kota: values.kota,
+      provinsi: values.provinsi,
+      latitude: values.latitude,
+      longitude: values.longitude,
+    });
+
     if (currentStep < 5) {
       setCurrentStep((prev) => {
         const next = prev + 1;
-        // kalau baru naik ke step 5, set flag
         if (next === 5) {
           setJustEnteredStep5(true);
         }
@@ -176,7 +197,9 @@ function TambahPropertyContent() {
   };
 
   const handleSaveDraft = async () => {
-    toast.info('Fitur simpan draft otomatis dimatikan. Data hanya disimpan saat Publish / Update di Step 5.');
+    toast.info(
+      'Fitur simpan draft otomatis dimatikan. Data hanya disimpan saat Publish / Update di Step 5.'
+    );
   };
 
   const uploadImagesToGoogleDrive = async (
@@ -217,7 +240,6 @@ function TambahPropertyContent() {
   const onSubmit = async (data: ListingFormData) => {
     console.log('[ON SUBMIT] DIPANGGIL, currentStep =', currentStep);
 
-    // Guard: jangan submit kalau belum step 5
     if (currentStep < 5) {
       console.warn('[ON SUBMIT] DIBLOKIR karena currentStep < 5');
       return;
@@ -232,7 +254,7 @@ function TambahPropertyContent() {
     setIsSubmitting(true);
 
     try {
-      const newImages = images.filter(img => img.file);
+      const newImages = images.filter((img) => img.file);
       let newImageUrls: string[] = [];
 
       if (newImages.length > 0) {
@@ -244,7 +266,9 @@ function TambahPropertyContent() {
         );
       }
 
-      const existingImageUrls = images.filter(img => !img.file).map(img => img.preview);
+      const existingImageUrls = images
+        .filter((img) => !img.file)
+        .map((img) => img.preview);
       const allImageUrls = [...existingImageUrls, ...newImageUrls];
 
       const submitData = {
@@ -259,8 +283,12 @@ function TambahPropertyContent() {
         harga: Number(data.harga),
         harga_promo: data.harga_promo ? Number(data.harga_promo) : null,
         uang_jaminan: data.uang_jaminan ? Number(data.uang_jaminan) : null,
-        nilai_limit_lelang: data.nilai_limit_lelang ? Number(data.nilai_limit_lelang) : null,
-        tanggal_lelang: data.tanggal_lelang ? new Date(data.tanggal_lelang).toISOString() : null,
+        nilai_limit_lelang: data.nilai_limit_lelang
+          ? Number(data.nilai_limit_lelang)
+          : null,
+        tanggal_lelang: data.tanggal_lelang
+          ? new Date(data.tanggal_lelang).toISOString()
+          : null,
         link: data.link || null,
         alamat_lengkap: data.alamat_lengkap || null,
         provinsi: data.provinsi || null,
@@ -296,14 +324,19 @@ function TambahPropertyContent() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `Failed to ${isEditMode ? 'update' : 'create'} listing`);
+        throw new Error(
+          errorData.error ||
+            `Failed to ${isEditMode ? 'update' : 'create'} listing`
+        );
       }
 
       const result = await response.json();
 
       clearDraft();
       if (!isEditMode) {
-        await fetch('/api/listings/draft', { method: 'DELETE' }).catch(() => {});
+        await fetch('/api/listings/draft', { method: 'DELETE' }).catch(
+          () => {}
+        );
       }
 
       if (isEditMode) {
@@ -326,9 +359,7 @@ function TambahPropertyContent() {
         }
 
         const base =
-          updated.jenis_transaksi === 'LELANG'
-            ? 'Lelang'
-            : 'Jual';
+          updated.jenis_transaksi === 'LELANG' ? 'Lelang' : 'Jual';
 
         const detailUrl = `/${base}/${slug}-${idProp}/${agentId}`;
         router.push(detailUrl);
@@ -350,17 +381,22 @@ function TambahPropertyContent() {
 
   const handleFormSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
     e.preventDefault();
-    console.log('[FORM onSubmit] currentStep =', currentStep, 'justEnteredStep5 =', justEnteredStep5);
+    console.log(
+      '[FORM onSubmit] currentStep =',
+      currentStep,
+      'justEnteredStep5 =',
+      justEnteredStep5
+    );
 
     if (currentStep < 5) {
       void handleNext();
       return;
     }
 
-    // Di sini currentStep === 5:
-    // kalau barusan masuk step 5 (dari klik Lanjut step 4), abaikan submit pertama
     if (justEnteredStep5) {
-      console.warn('[FORM onSubmit] submit pertama setelah masuk step 5 → diabaikan');
+      console.warn(
+        '[FORM onSubmit] submit pertama setelah masuk step 5 → diabaikan'
+      );
       setJustEnteredStep5(false);
       return;
     }
@@ -368,26 +404,10 @@ function TambahPropertyContent() {
     void handleSubmit(onSubmit)();
   };
 
-  const renderStep = () => {
-    switch (currentStep) {
-      case 1:
-        return <Step1BasicInfo form={form} />;
-      case 2:
-        return <Step2Location form={form} />;
-      case 3:
-        return <Step3Pricing form={form} />;
-      case 4:
-        return <Step4Specifications form={form} />;
-      case 5:
-        return <Step5Media form={form} images={images} onImagesChange={setImages} />;
-      default:
-        return null;
-    }
-  };
-
   const handleGoBack = () => {
-    const hasUnsavedChanges = Object.keys(watch()).some(key => {
-      const value = watch(key as keyof ListingFormData);
+    const all = watch();
+    const hasUnsavedChanges = Object.keys(all).some((key) => {
+      const value = all[key as keyof ListingFormData];
       return value !== undefined && value !== '' && value !== null;
     });
 
@@ -407,31 +427,16 @@ function TambahPropertyContent() {
         <div className="text-center">
           <div className="relative w-20 h-20 mx-auto mb-6">
             <div className="absolute inset-0 rounded-full border-2 border-emerald-500/20"></div>
-            <div className="absolute inset-0 rounded-full border-2 border-t-emerald-500 border-r-transparent border-b-transparent border-l-transparent animate-spin"></div>
-            <div className="absolute inset-2 rounded-full border-2 border-emerald-400/20"></div>
-            <div
-              className="absolute inset-2 rounded-full border-2 border-b-emerald-400 border-t-transparent border-r-transparent border-l-transparent animate-spin"
-              style={{ animationDuration: '1.5s' }}
-            ></div>
+            <div className="absolute inset-0 rounded-full border-2 border-t-emerald-500 animate-spin"></div>
           </div>
-          <div className="space-y-2">
-            <p className="text-slate-100 text-lg font-semibold">Memuat data listing</p>
-            <div className="flex items-center justify-center gap-1">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"></span>
-              <span
-                className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"
-                style={{ animationDelay: '150ms' }}
-              ></span>
-              <span
-                className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"
-                style={{ animationDelay: '300ms' }}
-              ></span>
-            </div>
-          </div>
+          <p className="text-slate-300 font-medium">Memuat data listing...</p>
         </div>
       </div>
     );
   }
+
+  const allValues = watch();
+  console.log('[RENDER PAGE] values:', allValues);
 
   return (
     <div className="min-h-screen bg-black">
@@ -479,7 +484,9 @@ function TambahPropertyContent() {
                 <h1 className="text-sm sm:text-base font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
                   {isEditMode ? 'Edit Property' : 'Tambah Property Baru'}
                 </h1>
-                <p className="text-xs text-slate-500 hidden sm:block">Lengkapi dengan detail</p>
+                <p className="text-xs text-slate-500 hidden sm:block">
+                  Lengkapi dengan detail
+                </p>
               </div>
               <AutoSaveIndicator status={saveStatus} />
             </div>
@@ -532,20 +539,29 @@ function TambahPropertyContent() {
                 <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 pointer-events-none"></div>
                 <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-                <div className="relative z-10">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={currentStep}
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.3 }}
-                    >
-                      {renderStep()}
-                    </motion.div>
-                  </AnimatePresence>
+                <div className="relative z-10 space-y-6">
+                  {/* Semua step dirender, hanya di-hide/show */}
+                  <div className={currentStep === 1 ? 'block' : 'hidden'}>
+                    <Step1BasicInfo form={form} />
+                  </div>
+                  <div className={currentStep === 2 ? 'block' : 'hidden'}>
+                    <Step2Location form={form} />
+                  </div>
+                  <div className={currentStep === 3 ? 'block' : 'hidden'}>
+                    <Step3Pricing form={form} />
+                  </div>
+                  <div className={currentStep === 4 ? 'block' : 'hidden'}>
+                    <Step4Specifications form={form} />
+                  </div>
+                  <div className={currentStep === 5 ? 'block' : 'hidden'}>
+                    <Step5Media
+                      form={form}
+                      images={images}
+                      onImagesChange={setImages}
+                    />
+                  </div>
 
-                  <div className="flex items-center justify-between mt-8 pt-6 border-t border-emerald-500/20">
+                  <div className="flex items-center justify-between mt-4 pt-6 border-t border-emerald-500/20">
                     <motion.button
                       whileHover={{ scale: 1.05, x: -2 }}
                       whileTap={{ scale: 0.95 }}
@@ -555,7 +571,9 @@ function TambahPropertyContent() {
                       className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-slate-800 to-slate-700 hover:from-slate-700 hover:to-slate-600 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-50 border border-slate-700 hover:border-emerald-500/50 transition-all duration-300"
                     >
                       <ChevronLeft className="h-4 w-4 text-slate-300" />
-                      <span className="text-sm font-medium text-slate-300">Kembali</span>
+                      <span className="text-sm font-medium text-slate-300">
+                        Kembali
+                      </span>
                     </motion.button>
 
                     {currentStep < 5 ? (
@@ -585,7 +603,11 @@ function TambahPropertyContent() {
                           <>
                             <motion.div
                               animate={{ rotate: 360 }}
-                              transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                              transition={{
+                                duration: 1,
+                                repeat: Infinity,
+                                ease: 'linear',
+                              }}
                               className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full relative z-10"
                             />
                             <span className="text-sm font-bold text-white relative z-10">
@@ -638,7 +660,7 @@ function TambahPropertyContent() {
             className="lg:col-span-1"
           >
             <div className="sticky top-24">
-              <LivePreview data={watch()} images={images} />
+              <LivePreview data={allValues} images={images} />
             </div>
           </motion.div>
         </div>

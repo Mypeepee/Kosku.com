@@ -1,6 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { ListingFormData } from '@/lib/validations/listing';
 import { FormField } from '../FormField';
@@ -15,34 +20,50 @@ import {
   EyeOff,
   ShieldCheck,
   Search,
-  Info
+  Info,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 
+// ====== CONFIG ======
 interface Step2Props {
   form: UseFormReturn<ListingFormData>;
 }
 
-interface Region {
-  id: string;
-  nama: string;
-}
-
-const BASE_API = 'https://ibnux.github.io/data-indonesia';
 const libraries: ('places')[] = ['places'];
+
+// Batas geografis Indonesia untuk restriction map
+const INDONESIA_BOUNDS = {
+  north: 6.2,     // kira-kira Sabang
+  south: -11.0,   // kira-kira Rote
+  west: 95.0,     // Aceh
+  east: 141.0,    // Papua
+};
 
 const mapContainerStyle = {
   width: '100%',
   height: '100%',
 };
 
+// Center kira-kira tengah Indonesia
 const defaultCenter = {
-  lat: -7.2575,
-  lng: 112.7521,
+  lat: -2.5,
+  lng: 118.0,
 };
 
+const defaultZoom = 5;
+
+// ====== HELPER ======
+function debounce<F extends (...args: any[]) => void>(fn: F, delay: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<F>) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+// ====== COMPONENT ======
 export function Step2Location({ form }: Step2Props) {
   const {
     watch,
@@ -52,145 +73,64 @@ export function Step2Location({ form }: Step2Props) {
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_GEOCODING_API_KEY || '',
-    libraries: libraries,
+    libraries,
   });
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [markerPosition, setMarkerPosition] =
     useState<google.maps.LatLngLiteral | null>(null);
-  const [autocomplete, setAutocomplete] =
-    useState<google.maps.places.Autocomplete | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  // State for location hierarchy
-  const [provinsiList, setProvinsiList] = useState<Region[]>([]);
-
-  // Loading states
-  const [loadingProvinsi, setLoadingProvinsi] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-
-  // Location completeness score
   const [locationScore, setLocationScore] = useState(0);
 
-  // Privacy check
+  const [alamatInput, setAlamatInput] = useState('');
+
+  const autocompleteServiceRef =
+    useRef<google.maps.places.AutocompleteService | null>(null);
+  const placesServiceRef = useRef<google.maps.places.PlacesService | null>(
+    null
+  );
+
   const jenisTransaksi = watch('jenis_transaksi');
   const isPrivacyMode =
     jenisTransaksi === 'SECONDARY' || jenisTransaksi === 'SEWA';
 
-  // Fetch Provinsi on mount
+  // Sinkron awal dari form -> state input
   useEffect(() => {
-    fetchProvinsi();
-  }, []);
-
-  const fetchProvinsi = async () => {
-    setLoadingProvinsi(true);
-    try {
-      const res = await fetch(`${BASE_API}/propinsi.json`);
-      const data: Region[] = await res.json();
-      setProvinsiList(data.sort((a, b) => a.nama.localeCompare(b.nama)));
-      console.log('✅ Provinsi loaded:', data.length);
-    } catch (error) {
-      console.error('Error loading provinsi:', error);
-    } finally {
-      setLoadingProvinsi(false);
-    }
-  };
-
-  // RESTORE INPUT VALUE when returning to this step
-  useEffect(() => {
-    if (inputRef.current && watch('alamat_lengkap')) {
-      inputRef.current.value = watch('alamat_lengkap');
-      console.log('✅ Restored input value:', watch('alamat_lengkap'));
-    }
+    const alamat = watch('alamat_lengkap') || '';
+    setAlamatInput(alamat);
   }, [watch('alamat_lengkap')]);
 
-  // RESTORE MAP POSITION when coordinates exist
+  // Init services (hanya Indonesia)
+  useEffect(() => {
+    if (!isLoaded || !window.google) return;
+
+    if (!autocompleteServiceRef.current) {
+      autocompleteServiceRef.current =
+        new google.maps.places.AutocompleteService();
+    }
+    if (!placesServiceRef.current && map) {
+      placesServiceRef.current = new google.maps.places.PlacesService(map);
+    }
+  }, [isLoaded, map]);
+
+  // Restore map position dari lat/lng
   useEffect(() => {
     const lat = watch('latitude');
     const lng = watch('longitude');
 
     if (lat && lng && map) {
-      const position = { lat: Number(lat), lng: Number(lng) }; // ⬅️ pastikan number
+      const position = { lat: Number(lat), lng: Number(lng) };
       setMarkerPosition(position);
       map.panTo(position);
       map.setZoom(17);
-      console.log('✅ Restored map position:', position);
     }
   }, [watch('latitude'), watch('longitude'), map]);
 
-  // Initialize Autocomplete
-  useEffect(() => {
-    if (isLoaded && inputRef.current && !autocomplete) {
-      console.log('🔧 Initializing autocomplete...');
-
-      const autocompleteInstance = new google.maps.places.Autocomplete(
-        inputRef.current,
-        {
-          componentRestrictions: { country: 'id' },
-          fields: ['address_components', 'geometry', 'formatted_address', 'name'],
-          types: ['geocode', 'establishment'],
-        }
-      );
-
-      autocompleteInstance.addListener('place_changed', async () => {
-        console.log('🎯 Place changed event fired!');
-
-        const place = autocompleteInstance.getPlace();
-        console.log('📍 Selected place:', place);
-
-        if (!place.geometry || !place.geometry.location) {
-          toast.error('❌ Pilih lokasi dari dropdown yang muncul');
-          return;
-        }
-
-        setIsProcessing(true);
-
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        const address = place.formatted_address || place.name || '';
-
-        console.log('📌 Coordinates:', { lat, lng, address });
-
-        // Update form
-        setValue('alamat_lengkap', address);
-        setValue('latitude', lat);
-        setValue('longitude', lng);
-
-        // Update marker
-        const newPos = { lat, lng };
-        setMarkerPosition(newPos);
-
-        // ZOOM MAP
-        if (map) {
-          console.log('🗺️ Zooming map to location...');
-          map.panTo(newPos);
-          map.setZoom(17);
-          console.log('✅ Map zoomed!');
-        } else {
-          console.warn('⚠️ Map not ready yet');
-        }
-
-        // Extract address components
-        if (place.address_components) {
-          await handleAddressComponents(place.address_components);
-        }
-
-        setIsProcessing(false);
-        toast.success('✅ Lokasi berhasil dipilih!');
-      });
-
-      setAutocomplete(autocompleteInstance);
-      console.log('✅ Autocomplete initialized');
-    }
-  }, [isLoaded, inputRef.current, map]);
-
-  // Handle address components extraction
-  const handleAddressComponents = async (
+  const handleAddressComponents = (
     components: google.maps.GeocoderAddressComponent[]
   ) => {
-    console.log('🔍 Processing address components:', components);
-
     let provinsi = '';
     let kota = '';
     let kecamatan = '';
@@ -198,7 +138,6 @@ export function Step2Location({ form }: Step2Props) {
 
     components.forEach((component) => {
       const types = component.types;
-
       if (types.includes('administrative_area_level_1')) {
         provinsi = component.long_name;
       }
@@ -217,45 +156,108 @@ export function Step2Location({ form }: Step2Props) {
       }
     });
 
-    console.log('📦 Extracted:', { provinsi, kota, kecamatan, kelurahan });
-
-    // Clean and set values directly
     if (provinsi) {
       const cleanProv = provinsi
         .replace(/^(Provinsi|Province|Prov\.?)\s*/i, '')
         .trim();
       setValue('provinsi', cleanProv);
-      console.log('✅ Provinsi set:', cleanProv);
     }
-
     if (kota) {
       const cleanKota = kota
         .replace(/^(Kabupaten|Kota|Kab\.?)\s*/i, '')
         .trim();
       setValue('kota', cleanKota);
-      console.log('✅ Kota set:', cleanKota);
     }
-
     if (kecamatan) {
       const cleanKecamatan = kecamatan
         .replace(/^(Kecamatan|Kec\.?)\s*/i, '')
         .trim();
       setValue('kecamatan', cleanKecamatan);
-      console.log('✅ Kecamatan set:', cleanKecamatan);
     }
-
     if (kelurahan) {
       const cleanKelurahan = kelurahan
         .replace(/^(Kelurahan|Desa|Kel\.?)\s*/i, '')
         .trim();
       setValue('kelurahan', cleanKelurahan);
-      console.log('✅ Kelurahan set:', cleanKelurahan);
     }
-
-    console.log('✅ Address extraction completed');
   };
 
-  // Calculate location completeness
+  // Auto cari tempat terdekat di Indonesia tiap user berhenti mengetik
+  const fetchNearestPlace = useCallback(
+    debounce((input: string) => {
+      if (
+        !input ||
+        !autocompleteServiceRef.current ||
+        !placesServiceRef.current
+      ) {
+        return;
+      }
+
+      setIsProcessing(true);
+
+      autocompleteServiceRef.current
+        .getPlacePredictions({
+          input,
+          // batasi ke Indonesia
+          componentRestrictions: { country: 'id' },
+        })
+        .then((response) => {
+          const predictions = response.predictions;
+          if (!predictions || predictions.length === 0) {
+            setIsProcessing(false);
+            return;
+          }
+
+          const best = predictions[0];
+          const request: google.maps.places.PlaceDetailsRequest = {
+            placeId: best.place_id,
+            fields: ['geometry', 'address_components'],
+          };
+
+          placesServiceRef.current!.getDetails(
+            request,
+            (place, status) => {
+              if (
+                status === google.maps.places.PlacesServiceStatus.OK &&
+                place &&
+                place.geometry &&
+                place.geometry.location
+              ) {
+                const lat = place.geometry.location.lat();
+                const lng = place.geometry.location.lng();
+                const coords = { lat, lng };
+
+                setValue('latitude', lat);
+                setValue('longitude', lng);
+                setMarkerPosition(coords);
+                if (map) {
+                  map.panTo(coords);
+                  map.setZoom(17);
+                }
+
+                if (place.address_components) {
+                  handleAddressComponents(place.address_components);
+                }
+              }
+              setIsProcessing(false);
+            }
+          );
+        })
+        .catch(() => {
+          setIsProcessing(false);
+        });
+    }, 500),
+    [map, setValue]
+  );
+
+  // Trigger auto-locate ketika alamatInput berubah
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!alamatInput || alamatInput.trim().length < 5) return;
+    fetchNearestPlace(alamatInput);
+  }, [alamatInput, isLoaded, fetchNearestPlace]);
+
+  // Hitung skor kelengkapan
   useEffect(() => {
     let score = 0;
     if (watch('provinsi')) score += 20;
@@ -273,60 +275,57 @@ export function Step2Location({ form }: Step2Props) {
     watch('longitude'),
   ]);
 
-  // Get GPS location
+  // GPS: tetap dalam Indonesia, area dari geocoder
   const handleGetCurrentLocation = () => {
     setIsLoadingLocation(true);
     const loadingToast = toast.loading('📡 Mendapatkan lokasi GPS...');
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
+    if (!navigator.geolocation) return;
 
-          setValue('latitude', lat);
-          setValue('longitude', lng);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const coords = { lat, lng };
 
-          const newPos = { lat, lng };
-          setMarkerPosition(newPos);
-
-          if (map) {
-            map.panTo(newPos);
-            map.setZoom(17);
-          }
-
-          // Reverse geocode
-          const geocoder = new google.maps.Geocoder();
-          geocoder.geocode({ location: newPos }, async (results, status) => {
-            if (status === 'OK' && results && results[0]) {
-              const address = results[0].formatted_address;
-              setValue('alamat_lengkap', address);
-              if (inputRef.current) {
-                inputRef.current.value = address;
-              }
-
-              if (results[0].address_components) {
-                await handleAddressComponents(results[0].address_components);
-              }
-            }
-          });
-
-          setIsLoadingLocation(false);
-          toast.dismiss(loadingToast);
-          toast.success('✅ Lokasi GPS didapatkan!');
-        },
-        (error) => {
-          setIsLoadingLocation(false);
-          toast.dismiss(loadingToast);
-          toast.error('❌ Aktifkan izin lokasi di browser');
+        setValue('latitude', lat);
+        setValue('longitude', lng);
+        setMarkerPosition(coords);
+        if (map) {
+          map.panTo(coords);
+          map.setZoom(17);
         }
-      );
-    }
+
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ location: coords }, (results, status) => {
+          if (status === 'OK' && results && results[0]) {
+            if (results[0].address_components) {
+              handleAddressComponents(results[0].address_components);
+            }
+          }
+        });
+
+        setIsLoadingLocation(false);
+        toast.dismiss(loadingToast);
+        toast.success('✅ Lokasi GPS didapatkan!');
+      },
+      () => {
+        setIsLoadingLocation(false);
+        toast.dismiss(loadingToast);
+        toast.error('❌ Aktifkan izin lokasi di browser');
+      }
+    );
   };
 
-  const onMapLoad = useCallback((map: google.maps.Map) => {
-    console.log('🗺️ Map loaded!');
-    setMap(map);
+  const onMapLoad = useCallback((m: google.maps.Map) => {
+    setMap(m);
+
+    // Set initial bounds & restriction Indonesia
+    const bounds = new google.maps.LatLngBounds(
+      { lat: INDONESIA_BOUNDS.south, lng: INDONESIA_BOUNDS.west },
+      { lat: INDONESIA_BOUNDS.north, lng: INDONESIA_BOUNDS.east }
+    );
+    m.fitBounds(bounds);
   }, []);
 
   const getScoreColor = (score: number) => {
@@ -336,8 +335,6 @@ export function Step2Location({ form }: Step2Props) {
   };
 
   const hasCoordinates = watch('latitude') && watch('longitude');
-
-  // ambil value sekali biar nggak panggil watch berkali-kali di JSX
   const latValue = watch('latitude');
   const lngValue = watch('longitude');
 
@@ -387,10 +384,7 @@ export function Step2Location({ form }: Step2Props) {
                     Privacy Protection Mode
                   </h4>
                   <p className="text-xs text-slate-300 leading-relaxed mb-2">
-                    Alamat lengkap{' '}
-                    <span className="font-semibold">disimpan</span> tapi{' '}
-                    <span className="font-semibold">tidak ditampilkan</span> ke
-                    publik.
+                    Alamat lengkap disimpan, tapi tidak ditampilkan ke publik.
                   </p>
                   <div className="flex items-start gap-2 text-xs bg-amber-500/10 rounded-lg p-2 border border-amber-500/20">
                     <Info className="h-3 w-3 text-amber-400 flex-shrink-0 mt-0.5" />
@@ -401,9 +395,6 @@ export function Step2Location({ form }: Step2Props) {
                       <p className="text-amber-200/80">
                         Kelurahan, Kecamatan, Kota, Provinsi
                       </p>
-                      <p className="text-amber-200/60 mt-1 italic">
-                        Alamat lengkap hanya terlihat setelah deal
-                      </p>
                     </div>
                   </div>
                 </div>
@@ -413,22 +404,25 @@ export function Step2Location({ form }: Step2Props) {
         )}
       </AnimatePresence>
 
-      {/* Autocomplete Input */}
+      {/* Input alamat */}
       <FormField
-        label="Cari Alamat Property"
+        label="Alamat Lengkap Property"
         required
         error={errors.alamat_lengkap?.message}
-        description="Ketik alamat dan WAJIB pilih dari dropdown Google Maps"
-        hint="Contoh: Jl. Raya Kalirungkut No. 45, Surabaya"
+        description="Tulis alamat selengkap mungkin. Sistem akan otomatis mencari titik terdekat di Indonesia, dan mengisi peta + area."
+        hint="Contoh: Grand Pakuwon Cluster Adelaide JF10-32, Surabaya"
         icon={<Search className="h-3 w-3 text-emerald-400" />}
         loading={isProcessing}
       >
         <div className="relative">
           <input
-            ref={inputRef}
             type="text"
-            placeholder="Mulai ketik alamat..."
-            defaultValue={watch('alamat_lengkap') || ''}
+            placeholder="Ketik alamat lengkap (Indonesia saja)..."
+            value={alamatInput}
+            onChange={(e) => {
+              setAlamatInput(e.target.value);
+              setValue('alamat_lengkap', e.target.value);
+            }}
             className={cn(
               'flex h-12 w-full rounded-xl px-4 py-2 text-sm text-slate-100 pr-10',
               'bg-slate-900/50 backdrop-blur-sm',
@@ -446,13 +440,13 @@ export function Step2Location({ form }: Step2Props) {
         </div>
       </FormField>
 
-      {/* Google Map */}
+      {/* Map hanya Indonesia */}
       <div className="relative">
         <div className="aspect-[16/10] w-full rounded-2xl border-2 border-slate-700 overflow-hidden shadow-2xl">
           <GoogleMap
             mapContainerStyle={mapContainerStyle}
             center={markerPosition || defaultCenter}
-            zoom={markerPosition ? 17 : 12}
+            zoom={markerPosition ? 17 : defaultZoom}
             onLoad={onMapLoad}
             options={{
               zoomControl: true,
@@ -460,6 +454,10 @@ export function Step2Location({ form }: Step2Props) {
               mapTypeControl: true,
               fullscreenControl: true,
               styles: [],
+              restriction: {
+                latLngBounds: INDONESIA_BOUNDS,
+                strictBounds: true,
+              },
             }}
           >
             {markerPosition && (
@@ -509,7 +507,7 @@ export function Step2Location({ form }: Step2Props) {
                       </p>
                       <p className="text-xs text-slate-700 font-mono">
                         {latValue != null && latValue !== ''
-                          ? Number(latValue).toFixed(6) // ⬅️ aman untuk string/number
+                          ? Number(latValue).toFixed(6)
                           : '-'}
                         ,{' '}
                         {lngValue != null && lngValue !== ''
@@ -592,14 +590,14 @@ export function Step2Location({ form }: Step2Props) {
         </div>
       </motion.div>
 
-      {/* Data Lokasi - READONLY INPUTS WITH CHECKMARKS */}
+      {/* Data lokasi auto */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
-          <div className="h-px bg-slate-700 flex-1"></div>
+          <div className="h-px bg-slate-700 flex-1" />
           <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
             Data Lokasi (Terisi Otomatis)
           </span>
-          <div className="h-px bg-slate-700 flex-1"></div>
+          <div className="h-px bg-slate-700 flex-1" />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -620,17 +618,7 @@ export function Step2Location({ form }: Step2Props) {
                 placeholder="Belum terisi"
               />
               {watch('provinsi') && (
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 500,
-                    damping: 30,
-                  }}
-                >
-                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
-                </motion.div>
+                <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
               )}
             </div>
           </FormField>
@@ -657,17 +645,7 @@ export function Step2Location({ form }: Step2Props) {
                 placeholder="Belum terisi"
               />
               {watch('kota') && (
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 500,
-                    damping: 30,
-                  }}
-                >
-                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
-                </motion.div>
+                <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
               )}
             </div>
           </FormField>
@@ -689,17 +667,7 @@ export function Step2Location({ form }: Step2Props) {
                 placeholder="Belum terisi"
               />
               {watch('kecamatan') && (
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 500,
-                    damping: 30,
-                  }}
-                >
-                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
-                </motion.div>
+                <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
               )}
             </div>
           </FormField>
@@ -721,64 +689,12 @@ export function Step2Location({ form }: Step2Props) {
                 placeholder="Belum terisi"
               />
               {watch('kelurahan') && (
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{
-                    type: 'spring',
-                    stiffness: 500,
-                    damping: 30,
-                  }}
-                >
-                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
-                </motion.div>
+                <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
               )}
             </div>
           </FormField>
         </div>
       </div>
-
-      {/* Tips */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="p-4 rounded-xl bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20"
-      >
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
-            <span>💡</span>
-          </div>
-          <div className="flex-1">
-            <h4 className="text-sm font-semibold text-emerald-400 mb-2">
-              Cara Pakai
-            </h4>
-            <ul className="text-xs text-slate-300 space-y-1.5">
-              <li className="flex gap-2">
-                <span className="text-emerald-400">1.</span>
-                <span>Ketik alamat di kotak pencarian</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-emerald-400">2.</span>
-                <span>
-                  <strong>WAJIB pilih</strong> dari dropdown yang muncul
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-emerald-400">3.</span>
-                <span>
-                  Map akan zoom & data lokasi terisi otomatis
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-emerald-400">4.</span>
-                <span>
-                  Data akan tersimpan saat navigasi antar step
-                </span>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </motion.div>
     </motion.div>
   );
 }
