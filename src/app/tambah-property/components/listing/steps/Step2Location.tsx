@@ -1,15 +1,25 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { UseFormReturn } from 'react-hook-form';
 import { ListingFormData } from '@/lib/validations/listing';
 import { FormField } from '../FormField';
-import { Select } from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Loader2, Crosshair, CheckCircle2, AlertCircle, EyeOff, ShieldCheck, Search } from 'lucide-react';
+import {
+  MapPin,
+  Navigation,
+  Loader2,
+  Crosshair,
+  CheckCircle2,
+  AlertCircle,
+  EyeOff,
+  ShieldCheck,
+  Search,
+  Info
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
-import { useJsApiLoader, GoogleMap, Marker } from '@react-google-maps/api';
+import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 
 interface Step2Props {
   form: UseFormReturn<ListingFormData>;
@@ -20,81 +30,117 @@ interface Region {
   nama: string;
 }
 
-const BASE_API = "https://ibnux.github.io/data-indonesia";
-const libraries: ("places")[] = ["places"];
+const BASE_API = 'https://ibnux.github.io/data-indonesia';
+const libraries: ('places')[] = ['places'];
 
 const mapContainerStyle = {
   width: '100%',
-  height: '100%'
+  height: '100%',
 };
 
 const defaultCenter = {
   lat: -7.2575,
-  lng: 112.7521
+  lng: 112.7521,
 };
 
 export function Step2Location({ form }: Step2Props) {
-  const { watch, setValue, formState: { errors } } = form;
-  
+  const {
+    watch,
+    setValue,
+    formState: { errors },
+  } = form;
+
   const { isLoaded, loadError } = useJsApiLoader({
-    id: 'google-map-script',
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_GEOCODING_API_KEY || '',
     libraries: libraries,
   });
 
-  const autocompleteInputRef = useRef<HTMLInputElement>(null);
-  const [autocomplete, setAutocomplete] = useState<google.maps.places.Autocomplete | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
-  const [markerPosition, setMarkerPosition] = useState<google.maps.LatLngLiteral | null>(null);
-  
+  const [markerPosition, setMarkerPosition] =
+    useState<google.maps.LatLngLiteral | null>(null);
+  const [autocomplete, setAutocomplete] =
+    useState<google.maps.places.Autocomplete | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
   // State for location hierarchy
   const [provinsiList, setProvinsiList] = useState<Region[]>([]);
-  const [kotaList, setKotaList] = useState<Region[]>([]);
-  const [kecamatanList, setKecamatanList] = useState<Region[]>([]);
-  const [kelurahanList, setKelurahanList] = useState<Region[]>([]);
-  
+
   // Loading states
   const [loadingProvinsi, setLoadingProvinsi] = useState(false);
-  const [loadingKota, setLoadingKota] = useState(false);
-  const [loadingKecamatan, setLoadingKecamatan] = useState(false);
-  const [loadingKelurahan, setLoadingKelurahan] = useState(false);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  // Selected IDs for cascading
-  const [selectedProvinsiId, setSelectedProvinsiId] = useState<string>('');
-  const [selectedKotaId, setSelectedKotaId] = useState<string>('');
-  const [selectedKecamatanId, setSelectedKecamatanId] = useState<string>('');
 
   // Location completeness score
   const [locationScore, setLocationScore] = useState(0);
 
   // Privacy check
   const jenisTransaksi = watch('jenis_transaksi');
-  const isPrivacyMode = jenisTransaksi === 'SECONDARY' || jenisTransaksi === 'SEWA';
+  const isPrivacyMode =
+    jenisTransaksi === 'SECONDARY' || jenisTransaksi === 'SEWA';
 
   // Fetch Provinsi on mount
   useEffect(() => {
     fetchProvinsi();
   }, []);
 
-  // Initialize Google Places Autocomplete
+  const fetchProvinsi = async () => {
+    setLoadingProvinsi(true);
+    try {
+      const res = await fetch(`${BASE_API}/propinsi.json`);
+      const data: Region[] = await res.json();
+      setProvinsiList(data.sort((a, b) => a.nama.localeCompare(b.nama)));
+      console.log('✅ Provinsi loaded:', data.length);
+    } catch (error) {
+      console.error('Error loading provinsi:', error);
+    } finally {
+      setLoadingProvinsi(false);
+    }
+  };
+
+  // RESTORE INPUT VALUE when returning to this step
   useEffect(() => {
-    if (isLoaded && autocompleteInputRef.current && !autocomplete) {
+    if (inputRef.current && watch('alamat_lengkap')) {
+      inputRef.current.value = watch('alamat_lengkap');
+      console.log('✅ Restored input value:', watch('alamat_lengkap'));
+    }
+  }, [watch('alamat_lengkap')]);
+
+  // RESTORE MAP POSITION when coordinates exist
+  useEffect(() => {
+    const lat = watch('latitude');
+    const lng = watch('longitude');
+
+    if (lat && lng && map) {
+      const position = { lat: Number(lat), lng: Number(lng) }; // ⬅️ pastikan number
+      setMarkerPosition(position);
+      map.panTo(position);
+      map.setZoom(17);
+      console.log('✅ Restored map position:', position);
+    }
+  }, [watch('latitude'), watch('longitude'), map]);
+
+  // Initialize Autocomplete
+  useEffect(() => {
+    if (isLoaded && inputRef.current && !autocomplete) {
+      console.log('🔧 Initializing autocomplete...');
+
       const autocompleteInstance = new google.maps.places.Autocomplete(
-        autocompleteInputRef.current,
+        inputRef.current,
         {
           componentRestrictions: { country: 'id' },
-          fields: ['formatted_address', 'address_components', 'geometry', 'name', 'place_id'],
+          fields: ['address_components', 'geometry', 'formatted_address', 'name'],
           types: ['geocode', 'establishment'],
         }
       );
 
       autocompleteInstance.addListener('place_changed', async () => {
+        console.log('🎯 Place changed event fired!');
+
         const place = autocompleteInstance.getPlace();
-        
+        console.log('📍 Selected place:', place);
+
         if (!place.geometry || !place.geometry.location) {
-          toast.error('❌ Lokasi tidak ditemukan. Pilih dari dropdown yang muncul.');
+          toast.error('❌ Pilih lokasi dari dropdown yang muncul');
           return;
         }
 
@@ -102,151 +148,111 @@ export function Step2Location({ form }: Step2Props) {
 
         const lat = place.geometry.location.lat();
         const lng = place.geometry.location.lng();
-        const fullAddress = place.formatted_address || place.name || '';
+        const address = place.formatted_address || place.name || '';
 
-        // Save to form
-        setValue('alamat_lengkap', fullAddress);
+        console.log('📌 Coordinates:', { lat, lng, address });
+
+        // Update form
+        setValue('alamat_lengkap', address);
         setValue('latitude', lat);
         setValue('longitude', lng);
 
-        // Update map
-        setMarkerPosition({ lat, lng });
+        // Update marker
+        const newPos = { lat, lng };
+        setMarkerPosition(newPos);
+
+        // ZOOM MAP
         if (map) {
-          map.panTo({ lat, lng });
+          console.log('🗺️ Zooming map to location...');
+          map.panTo(newPos);
           map.setZoom(17);
+          console.log('✅ Map zoomed!');
+        } else {
+          console.warn('⚠️ Map not ready yet');
         }
 
-        // Extract address components and auto-fill
+        // Extract address components
         if (place.address_components) {
-          await extractAndFillAddressComponents(place.address_components);
+          await handleAddressComponents(place.address_components);
         }
 
         setIsProcessing(false);
-        toast.success('✅ Lokasi berhasil dipilih!', {
-          duration: 3000,
-          icon: '📍',
-        });
+        toast.success('✅ Lokasi berhasil dipilih!');
       });
 
       setAutocomplete(autocompleteInstance);
+      console.log('✅ Autocomplete initialized');
     }
-  }, [isLoaded, map, autocomplete]);
+  }, [isLoaded, inputRef.current, map]);
 
-  // Extract and auto-fill address components
-  const extractAndFillAddressComponents = async (components: google.maps.GeocoderAddressComponent[]) => {
-    let extractedProvinsi = '';
-    let extractedKota = '';
-    let extractedKecamatan = '';
-    let extractedKelurahan = '';
+  // Handle address components extraction
+  const handleAddressComponents = async (
+    components: google.maps.GeocoderAddressComponent[]
+  ) => {
+    console.log('🔍 Processing address components:', components);
 
-    // Extract from Google
+    let provinsi = '';
+    let kota = '';
+    let kecamatan = '';
+    let kelurahan = '';
+
     components.forEach((component) => {
       const types = component.types;
-      
+
       if (types.includes('administrative_area_level_1')) {
-        extractedProvinsi = component.long_name;
+        provinsi = component.long_name;
       }
       if (types.includes('administrative_area_level_2')) {
-        extractedKota = component.long_name;
+        kota = component.long_name;
       }
       if (types.includes('administrative_area_level_3')) {
-        extractedKecamatan = component.long_name;
+        kecamatan = component.long_name;
       }
-      if (types.includes('administrative_area_level_4') || types.includes('sublocality_level_1') || types.includes('sublocality')) {
-        extractedKelurahan = component.long_name;
+      if (
+        types.includes('administrative_area_level_4') ||
+        types.includes('sublocality_level_1') ||
+        types.includes('sublocality')
+      ) {
+        kelurahan = component.long_name;
       }
     });
 
-    console.log('Extracted:', { extractedProvinsi, extractedKota, extractedKecamatan, extractedKelurahan });
+    console.log('📦 Extracted:', { provinsi, kota, kecamatan, kelurahan });
 
-    // Clean province name
-    if (extractedProvinsi) {
-      const cleanProvinsi = extractedProvinsi
-        .replace(/^(Provinsi|Province|Prov\.?|Propinsi)\s*/i, '')
-        .replace(/\s+(Provinsi|Province)$/i, '')
+    // Clean and set values directly
+    if (provinsi) {
+      const cleanProv = provinsi
+        .replace(/^(Provinsi|Province|Prov\.?)\s*/i, '')
         .trim();
-      
-      setValue('provinsi', cleanProvinsi);
-      
-      // Match with Indonesian data
-      const matchedProv = provinsiList.find(p => {
-        const pNorm = p.nama.toLowerCase().replace(/\s+/g, '');
-        const cNorm = cleanProvinsi.toLowerCase().replace(/\s+/g, '');
-        return pNorm.includes(cNorm) || cNorm.includes(pNorm);
-      });
-      
-      if (matchedProv) {
-        setSelectedProvinsiId(matchedProv.id);
-        await fetchKota(matchedProv.id);
-        
-        // Wait and match Kota
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        if (extractedKota) {
-          const cleanKota = extractedKota
-            .replace(/^(Kabupaten|Kota|Kab\.?)\s*/i, '')
-            .replace(/\s+(Regency|City)$/i, '')
-            .trim();
-          
-          setValue('kota', cleanKota);
-          
-          // Force re-fetch to ensure kotaList is populated
-          const res = await fetch(`${BASE_API}/kabupaten/${matchedProv.id}.json`);
-          const kotaData: Region[] = await res.json();
-          setKotaList(kotaData.sort((a, b) => a.nama.localeCompare(b.nama)));
-          
-          const matchedKota = kotaData.find(k => {
-            const kNorm = k.nama.toLowerCase().replace(/\s+/g, '');
-            const cNorm = cleanKota.toLowerCase().replace(/\s+/g, '');
-            return kNorm.includes(cNorm) || cNorm.includes(kNorm);
-          });
-          
-          if (matchedKota) {
-            setSelectedKotaId(matchedKota.id);
-            await fetchKecamatan(matchedKota.id);
-            
-            // Wait and match Kecamatan
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            if (extractedKecamatan) {
-              const cleanKecamatan = extractedKecamatan
-                .replace(/^(Kecamatan|Kec\.?)\s*/i, '')
-                .replace(/\s+(District)$/i, '')
-                .trim();
-              
-              setValue('kecamatan', cleanKecamatan);
-              
-              const resKec = await fetch(`${BASE_API}/kecamatan/${matchedKota.id}.json`);
-              const kecData: Region[] = await resKec.json();
-              setKecamatanList(kecData.sort((a, b) => a.nama.localeCompare(b.nama)));
-              
-              const matchedKec = kecData.find(k => {
-                const kNorm = k.nama.toLowerCase().replace(/\s+/g, '');
-                const cNorm = cleanKecamatan.toLowerCase().replace(/\s+/g, '');
-                return kNorm.includes(cNorm) || cNorm.includes(kNorm);
-              });
-              
-              if (matchedKec) {
-                setSelectedKecamatanId(matchedKec.id);
-                await fetchKelurahan(matchedKec.id);
-                
-                // Wait and match Kelurahan
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                if (extractedKelurahan) {
-                  const cleanKelurahan = extractedKelurahan
-                    .replace(/^(Kelurahan|Desa|Kel\.?)\s*/i, '')
-                    .replace(/\s+(Village|Subdistrict)$/i, '')
-                    .trim();
-                  
-                  setValue('kelurahan', cleanKelurahan);
-                }
-              }
-            }
-          }
-        }
-      }
+      setValue('provinsi', cleanProv);
+      console.log('✅ Provinsi set:', cleanProv);
     }
+
+    if (kota) {
+      const cleanKota = kota
+        .replace(/^(Kabupaten|Kota|Kab\.?)\s*/i, '')
+        .trim();
+      setValue('kota', cleanKota);
+      console.log('✅ Kota set:', cleanKota);
+    }
+
+    if (kecamatan) {
+      const cleanKecamatan = kecamatan
+        .replace(/^(Kecamatan|Kec\.?)\s*/i, '')
+        .trim();
+      setValue('kecamatan', cleanKecamatan);
+      console.log('✅ Kecamatan set:', cleanKecamatan);
+    }
+
+    if (kelurahan) {
+      const cleanKelurahan = kelurahan
+        .replace(/^(Kelurahan|Desa|Kel\.?)\s*/i, '')
+        .trim();
+      setValue('kelurahan', cleanKelurahan);
+      console.log('✅ Kelurahan set:', cleanKelurahan);
+    }
+
+    console.log('✅ Address extraction completed');
   };
 
   // Calculate location completeness
@@ -258,136 +264,53 @@ export function Step2Location({ form }: Step2Props) {
     if (watch('kelurahan')) score += 15;
     if (watch('latitude') && watch('longitude')) score += 15;
     setLocationScore(score);
-  }, [watch('provinsi'), watch('kota'), watch('kecamatan'), watch('kelurahan'), watch('latitude'), watch('longitude')]);
-
-  const fetchProvinsi = async () => {
-    setLoadingProvinsi(true);
-    try {
-      const res = await fetch(`${BASE_API}/propinsi.json`);
-      const data: Region[] = await res.json();
-      setProvinsiList(data.sort((a, b) => a.nama.localeCompare(b.nama)));
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoadingProvinsi(false);
-    }
-  };
-
-  const fetchKota = async (provinsiId: string) => {
-    setLoadingKota(true);
-    try {
-      const res = await fetch(`${BASE_API}/kabupaten/${provinsiId}.json`);
-      const data: Region[] = await res.json();
-      setKotaList(data.sort((a, b) => a.nama.localeCompare(b.nama)));
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoadingKota(false);
-    }
-  };
-
-  const fetchKecamatan = async (kotaId: string) => {
-    setLoadingKecamatan(true);
-    try {
-      const res = await fetch(`${BASE_API}/kecamatan/${kotaId}.json`);
-      const data: Region[] = await res.json();
-      setKecamatanList(data.sort((a, b) => a.nama.localeCompare(b.nama)));
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoadingKecamatan(false);
-    }
-  };
-
-  const fetchKelurahan = async (kecamatanId: string) => {
-    setLoadingKelurahan(true);
-    try {
-      const res = await fetch(`${BASE_API}/kelurahan/${kecamatanId}.json`);
-      const data: Region[] = await res.json();
-      setKelurahanList(data.sort((a, b) => a.nama.localeCompare(b.nama)));
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoadingKelurahan(false);
-    }
-  };
-
-  // Manual selection handlers
-  const handleProvinsiChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedId = e.target.value;
-    const selectedName = provinsiList.find(p => p.id === selectedId)?.nama || '';
-    
-    setSelectedProvinsiId(selectedId);
-    setValue('provinsi', selectedName);
-    setValue('kota', '');
-    setValue('kecamatan', '');
-    setValue('kelurahan', '');
-    
-    setSelectedKotaId('');
-    setSelectedKecamatanId('');
-    setKotaList([]);
-    setKecamatanList([]);
-    setKelurahanList([]);
-    
-    if (selectedId) fetchKota(selectedId);
-  };
-
-  const handleKotaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedId = e.target.value;
-    const selectedName = kotaList.find(k => k.id === selectedId)?.nama || '';
-    
-    setSelectedKotaId(selectedId);
-    setValue('kota', selectedName);
-    setValue('kecamatan', '');
-    setValue('kelurahan', '');
-    
-    setSelectedKecamatanId('');
-    setKecamatanList([]);
-    setKelurahanList([]);
-    
-    if (selectedId) fetchKecamatan(selectedId);
-  };
-
-  const handleKecamatanChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedId = e.target.value;
-    const selectedName = kecamatanList.find(k => k.id === selectedId)?.nama || '';
-    
-    setSelectedKecamatanId(selectedId);
-    setValue('kecamatan', selectedName);
-    setValue('kelurahan', '');
-    
-    setKelurahanList([]);
-    
-    if (selectedId) fetchKelurahan(selectedId);
-  };
-
-  const handleKelurahanChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedName = kelurahanList.find(k => k.id === e.target.value)?.nama || '';
-    setValue('kelurahan', selectedName);
-  };
+  }, [
+    watch('provinsi'),
+    watch('kota'),
+    watch('kecamatan'),
+    watch('kelurahan'),
+    watch('latitude'),
+    watch('longitude'),
+  ]);
 
   // Get GPS location
   const handleGetCurrentLocation = () => {
     setIsLoadingLocation(true);
     const loadingToast = toast.loading('📡 Mendapatkan lokasi GPS...');
-    
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
-          
+
           setValue('latitude', lat);
           setValue('longitude', lng);
-          setMarkerPosition({ lat, lng });
-          
+
+          const newPos = { lat, lng };
+          setMarkerPosition(newPos);
+
           if (map) {
-            map.panTo({ lat, lng });
+            map.panTo(newPos);
             map.setZoom(17);
           }
 
-          await reverseGeocode(lat, lng);
-          
+          // Reverse geocode
+          const geocoder = new google.maps.Geocoder();
+          geocoder.geocode({ location: newPos }, async (results, status) => {
+            if (status === 'OK' && results && results[0]) {
+              const address = results[0].formatted_address;
+              setValue('alamat_lengkap', address);
+              if (inputRef.current) {
+                inputRef.current.value = address;
+              }
+
+              if (results[0].address_components) {
+                await handleAddressComponents(results[0].address_components);
+              }
+            }
+          });
+
           setIsLoadingLocation(false);
           toast.dismiss(loadingToast);
           toast.success('✅ Lokasi GPS didapatkan!');
@@ -401,31 +324,10 @@ export function Step2Location({ form }: Step2Props) {
     }
   };
 
-  // Reverse Geocode
-  const reverseGeocode = async (lat: number, lng: number) => {
-    if (!isLoaded) return;
-
-    setIsProcessing(true);
-
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ location: { lat, lng } }, async (results, status) => {
-      if (status === 'OK' && results && results[0]) {
-        const address = results[0].formatted_address;
-        setValue('alamat_lengkap', address);
-        
-        // Update autocomplete input display
-        if (autocompleteInputRef.current) {
-          autocompleteInputRef.current.value = address;
-        }
-        
-        if (results[0].address_components) {
-          await extractAndFillAddressComponents(results[0].address_components);
-        }
-      }
-      
-      setIsProcessing(false);
-    });
-  };
+  const onMapLoad = useCallback((map: google.maps.Map) => {
+    console.log('🗺️ Map loaded!');
+    setMap(map);
+  }, []);
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'from-green-500 to-emerald-500';
@@ -435,12 +337,26 @@ export function Step2Location({ form }: Step2Props) {
 
   const hasCoordinates = watch('latitude') && watch('longitude');
 
+  // ambil value sekali biar nggak panggil watch berkali-kali di JSX
+  const latValue = watch('latitude');
+  const lngValue = watch('longitude');
+
   if (loadError) {
     return (
       <div className="p-6 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400">
         <p className="font-semibold mb-2">❌ Error loading Google Maps</p>
-        <p className="text-sm">Check: NEXT_PUBLIC_GOOGLE_GEOCODING_API_KEY in .env.local</p>
-        <p className="text-xs mt-2 text-slate-500">Make sure Maps JavaScript API & Places API are enabled</p>
+        <p className="text-sm">Check: NEXT_PUBLIC_GOOGLE_GEOCODING_API_KEY</p>
+      </div>
+    );
+  }
+
+  if (!isLoaded) {
+    return (
+      <div className="p-6 rounded-xl bg-slate-800 border border-slate-700">
+        <div className="flex items-center gap-3">
+          <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
+          <p className="text-slate-300">Loading Google Maps...</p>
+        </div>
       </div>
     );
   }
@@ -470,9 +386,26 @@ export function Step2Location({ form }: Step2Props) {
                     <EyeOff className="h-4 w-4" />
                     Privacy Protection Mode
                   </h4>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Alamat lengkap <span className="font-semibold">disimpan</span> tapi <span className="font-semibold">tidak ditampilkan</span> ke publik. Hanya <span className="text-amber-200">Kelurahan, Kecamatan, Kota</span> yang terlihat.
+                  <p className="text-xs text-slate-300 leading-relaxed mb-2">
+                    Alamat lengkap{' '}
+                    <span className="font-semibold">disimpan</span> tapi{' '}
+                    <span className="font-semibold">tidak ditampilkan</span> ke
+                    publik.
                   </p>
+                  <div className="flex items-start gap-2 text-xs bg-amber-500/10 rounded-lg p-2 border border-amber-500/20">
+                    <Info className="h-3 w-3 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-amber-300 mb-1">
+                        Yang tampil di listing:
+                      </p>
+                      <p className="text-amber-200/80">
+                        Kelurahan, Kecamatan, Kota, Provinsi
+                      </p>
+                      <p className="text-amber-200/60 mt-1 italic">
+                        Alamat lengkap hanya terlihat setelah deal
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -480,91 +413,84 @@ export function Step2Location({ form }: Step2Props) {
         )}
       </AnimatePresence>
 
-      {/* Google Maps Search Input */}
+      {/* Autocomplete Input */}
       <FormField
         label="Cari Alamat Property"
         required
         error={errors.alamat_lengkap?.message}
-        description="Ketik alamat dan pilih dari dropdown. Provinsi-Kelurahan akan terisi otomatis."
+        description="Ketik alamat dan WAJIB pilih dari dropdown Google Maps"
         hint="Contoh: Jl. Raya Kalirungkut No. 45, Surabaya"
         icon={<Search className="h-3 w-3 text-emerald-400" />}
         loading={isProcessing}
       >
-        <div className="relative group">
-          {/* Glow effect */}
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-xl opacity-0 group-focus-within:opacity-20 blur transition-opacity duration-300"></div>
-          
+        <div className="relative">
           <input
-            ref={autocompleteInputRef}
+            ref={inputRef}
             type="text"
-            placeholder="Ketik alamat property di sini..."
-            disabled={!isLoaded}
+            placeholder="Mulai ketik alamat..."
+            defaultValue={watch('alamat_lengkap') || ''}
             className={cn(
-              "relative flex h-12 w-full rounded-xl px-4 py-2 text-sm text-slate-100 pr-10",
-              "bg-slate-900/50 backdrop-blur-sm",
-              "border-2 border-slate-800 focus:border-emerald-500/50",
-              "focus:outline-none focus:ring-2 focus:ring-emerald-500/20",
-              "placeholder:text-slate-500",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-              "transition-all duration-300"
+              'flex h-12 w-full rounded-xl px-4 py-2 text-sm text-slate-100 pr-10',
+              'bg-slate-900/50 backdrop-blur-sm',
+              'border-2 border-slate-800 focus:border-emerald-500/50',
+              'focus:outline-none focus:ring-2 focus:ring-emerald-500/20',
+              'placeholder:text-slate-500',
+              'transition-all duration-300'
             )}
           />
-          
           {isProcessing ? (
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-emerald-400 animate-spin" />
           ) : (
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-emerald-400 pointer-events-none" />
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-emerald-400" />
           )}
         </div>
       </FormField>
 
       {/* Google Map */}
       <div className="relative">
-        <div className="aspect-[16/10] w-full rounded-2xl border-2 border-slate-700 overflow-hidden relative">
-          {isLoaded ? (
-            <GoogleMap
-              mapContainerStyle={mapContainerStyle}
-              center={markerPosition || defaultCenter}
-              zoom={markerPosition ? 17 : 12}
-              onLoad={setMap}
-              options={{
-                zoomControl: true,
-                streetViewControl: false,
-                mapTypeControl: false,
-                fullscreenControl: true,
-                styles: [
-                  { featureType: 'all', elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
-                  { featureType: 'all', elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
-                  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#17263c' }] },
-                ]
-              }}
-            >
-              {markerPosition && <Marker position={markerPosition} animation={google.maps.Animation.DROP} />}
-            </GoogleMap>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
-              <div className="text-center">
-                <Loader2 className="h-8 w-8 text-emerald-400 animate-spin mx-auto mb-3" />
-                <p className="text-sm text-slate-400">Loading Google Maps...</p>
-              </div>
-            </div>
-          )}
+        <div className="aspect-[16/10] w-full rounded-2xl border-2 border-slate-700 overflow-hidden shadow-2xl">
+          <GoogleMap
+            mapContainerStyle={mapContainerStyle}
+            center={markerPosition || defaultCenter}
+            zoom={markerPosition ? 17 : 12}
+            onLoad={onMapLoad}
+            options={{
+              zoomControl: true,
+              streetViewControl: true,
+              mapTypeControl: true,
+              fullscreenControl: true,
+              styles: [],
+            }}
+          >
+            {markerPosition && (
+              <Marker
+                position={markerPosition}
+                animation={google.maps.Animation.DROP}
+              />
+            )}
+          </GoogleMap>
 
           <motion.button
             type="button"
             onClick={handleGetCurrentLocation}
-            disabled={isLoadingLocation || !isLoaded}
+            disabled={isLoadingLocation}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             className={cn(
-              "absolute top-4 right-4 px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg backdrop-blur-xl border-2 z-10",
-              isLoadingLocation || !isLoaded
-                ? "bg-slate-800/80 border-slate-700 text-slate-400"
-                : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border-emerald-500/50 text-white"
+              'absolute top-4 right-4 px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-lg backdrop-blur-xl border-2 z-10',
+              isLoadingLocation
+                ? 'bg-slate-200 border-slate-300 text-slate-500'
+                : 'bg-white hover:bg-emerald-50 border-emerald-500/50 text-emerald-700'
             )}
           >
-            {isLoadingLocation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Navigation className="h-4 w-4" />}
-            <span className="hidden sm:inline">{isLoadingLocation ? 'Mencari...' : 'GPS Saya'}</span>
+            {isLoadingLocation ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Navigation className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {isLoadingLocation ? 'Mencari...' : 'GPS Saya'}
+            </span>
           </motion.button>
 
           <AnimatePresence>
@@ -574,27 +500,30 @@ export function Step2Location({ form }: Step2Props) {
                 animate={{ opacity: 1, y: 0 }}
                 className="absolute bottom-4 left-4 z-10"
               >
-                <div className="bg-slate-900/95 backdrop-blur-xl px-4 py-3 rounded-xl border border-emerald-500/30 shadow-lg">
+                <div className="bg-white/95 backdrop-blur-xl px-4 py-3 rounded-xl border border-emerald-500/30 shadow-lg">
                   <div className="flex items-center gap-3">
-                    <Crosshair className="h-4 w-4 text-emerald-400" />
+                    <Crosshair className="h-4 w-4 text-emerald-600" />
                     <div>
-                      <p className="text-xs text-emerald-400 font-semibold">GPS Coordinates</p>
-                      <p className="text-xs text-slate-200 font-mono">
-                        {watch('latitude')?.toFixed(6)}, {watch('longitude')?.toFixed(6)}
+                      <p className="text-xs text-emerald-600 font-semibold">
+                        Koordinat
+                      </p>
+                      <p className="text-xs text-slate-700 font-mono">
+                        {latValue != null && latValue !== ''
+                          ? Number(latValue).toFixed(6) // ⬅️ aman untuk string/number
+                          : '-'}
+                        ,{' '}
+                        {lngValue != null && lngValue !== ''
+                          ? Number(lngValue).toFixed(6)
+                          : '-'}
                       </p>
                     </div>
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    <CheckCircle2 className="h-4 w-4 text-green-600" />
                   </div>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
-        
-        <p className="text-xs text-slate-500 mt-3 flex items-center gap-2">
-          <span>💡</span>
-          <span>Pilih alamat dari dropdown untuk hasil terbaik. Provinsi-Kelurahan akan terisi otomatis.</span>
-        </p>
       </div>
 
       {/* Location Score */}
@@ -609,16 +538,24 @@ export function Step2Location({ form }: Step2Props) {
               <MapPin className="h-4 w-4 text-emerald-400" />
             </div>
             <div>
-              <h4 className="text-sm font-semibold text-slate-200">Location Completeness</h4>
-              <p className="text-xs text-slate-500">Kelengkapan data lokasi</p>
+              <h4 className="text-sm font-semibold text-slate-200">
+                Location Completeness
+              </h4>
+              <p className="text-xs text-slate-500">
+                Kelengkapan data lokasi
+              </p>
             </div>
           </div>
-          <span className="text-2xl font-bold text-slate-200">{locationScore}%</span>
+          <span className="text-2xl font-bold text-slate-200">
+            {locationScore}%
+          </span>
         </div>
 
         <div className="relative h-2 bg-slate-800 rounded-full overflow-hidden">
           <motion.div
-            className={`h-full bg-gradient-to-r ${getScoreColor(locationScore)}`}
+            className={`h-full bg-gradient-to-r ${getScoreColor(
+              locationScore
+            )}`}
             animate={{ width: `${locationScore}%` }}
             transition={{ duration: 0.5 }}
           />
@@ -638,58 +575,165 @@ export function Step2Location({ form }: Step2Props) {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.1 }}
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium",
-                item.checked 
-                  ? "bg-green-500/10 text-green-400 border border-green-500/30" 
-                  : "bg-slate-800/50 text-slate-500 border border-slate-700/50"
+                'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium',
+                item.checked
+                  ? 'bg-green-500/10 text-green-400 border border-green-500/30'
+                  : 'bg-slate-800/50 text-slate-500 border border-slate-700/50'
               )}
             >
-              {item.checked ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+              {item.checked ? (
+                <CheckCircle2 className="h-3 w-3" />
+              ) : (
+                <AlertCircle className="h-3 w-3" />
+              )}
               <span>{item.label}</span>
             </motion.div>
           ))}
         </div>
       </motion.div>
 
-      {/* Manual Override */}
+      {/* Data Lokasi - READONLY INPUTS WITH CHECKMARKS */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <div className="h-px bg-slate-700 flex-1"></div>
-          <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Koreksi Manual (Jika Perlu)</span>
+          <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
+            Data Lokasi (Terisi Otomatis)
+          </span>
           <div className="h-px bg-slate-700 flex-1"></div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <FormField label="Provinsi" badge="Auto">
-            <Select value={selectedProvinsiId} onChange={handleProvinsiChange} disabled={loadingProvinsi}>
-              <option value="">{watch('provinsi') || 'Pilih Provinsi'}</option>
-              {provinsiList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
-            </Select>
+            <div className="relative">
+              <input
+                type="text"
+                value={watch('provinsi') || ''}
+                readOnly
+                className={cn(
+                  'flex h-11 w-full rounded-xl px-4 py-2 text-sm pr-10',
+                  'bg-slate-900/70 backdrop-blur-sm border-2',
+                  watch('provinsi')
+                    ? 'text-slate-100 border-emerald-500/30 bg-emerald-500/5'
+                    : 'text-slate-500 border-slate-800',
+                  'cursor-not-allowed transition-all duration-300'
+                )}
+                placeholder="Belum terisi"
+              />
+              {watch('provinsi') && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 500,
+                    damping: 30,
+                  }}
+                >
+                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
+                </motion.div>
+              )}
+            </div>
           </FormField>
 
-          <FormField label="Kota" required error={errors.kota?.message} badge="Auto" loading={loadingKota}>
-            <Select value={selectedKotaId} onChange={handleKotaChange} disabled={!selectedProvinsiId || loadingKota}>
-              <option value="">{watch('kota') || 'Pilih Kota'}</option>
-              {kotaList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-            </Select>
+          <FormField
+            label="Kota"
+            required
+            error={errors.kota?.message}
+            badge="Auto"
+          >
+            <div className="relative">
+              <input
+                type="text"
+                value={watch('kota') || ''}
+                readOnly
+                className={cn(
+                  'flex h-11 w-full rounded-xl px-4 py-2 text-sm pr-10',
+                  'bg-slate-900/70 backdrop-blur-sm border-2',
+                  watch('kota')
+                    ? 'text-slate-100 border-emerald-500/30 bg-emerald-500/5'
+                    : 'text-slate-500 border-slate-800',
+                  'cursor-not-allowed transition-all duration-300'
+                )}
+                placeholder="Belum terisi"
+              />
+              {watch('kota') && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 500,
+                    damping: 30,
+                  }}
+                >
+                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
+                </motion.div>
+              )}
+            </div>
           </FormField>
 
-          <FormField label="Kecamatan" badge="Auto" loading={loadingKecamatan}>
-            <Select value={selectedKecamatanId} onChange={handleKecamatanChange} disabled={!selectedKotaId || loadingKecamatan}>
-              <option value="">{watch('kecamatan') || 'Pilih Kecamatan'}</option>
-              {kecamatanList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-            </Select>
+          <FormField label="Kecamatan" badge="Auto">
+            <div className="relative">
+              <input
+                type="text"
+                value={watch('kecamatan') || ''}
+                readOnly
+                className={cn(
+                  'flex h-11 w-full rounded-xl px-4 py-2 text-sm pr-10',
+                  'bg-slate-900/70 backdrop-blur-sm border-2',
+                  watch('kecamatan')
+                    ? 'text-slate-100 border-emerald-500/30 bg-emerald-500/5'
+                    : 'text-slate-500 border-slate-800',
+                  'cursor-not-allowed transition-all duration-300'
+                )}
+                placeholder="Belum terisi"
+              />
+              {watch('kecamatan') && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 500,
+                    damping: 30,
+                  }}
+                >
+                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
+                </motion.div>
+              )}
+            </div>
           </FormField>
 
-          <FormField label="Kelurahan" badge="Auto" loading={loadingKelurahan}>
-            <Select 
-              value={kelurahanList.find(k => k.nama === watch('kelurahan'))?.id || ''}
-              onChange={handleKelurahanChange} 
-              disabled={!selectedKecamatanId || loadingKelurahan}
-            >
-              <option value="">{watch('kelurahan') || 'Pilih Kelurahan'}</option>
-              {kelurahanList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-            </Select>
+          <FormField label="Kelurahan" badge="Auto">
+            <div className="relative">
+              <input
+                type="text"
+                value={watch('kelurahan') || ''}
+                readOnly
+                className={cn(
+                  'flex h-11 w-full rounded-xl px-4 py-2 text-sm pr-10',
+                  'bg-slate-900/70 backdrop-blur-sm border-2',
+                  watch('kelurahan')
+                    ? 'text-slate-100 border-emerald-500/30 bg-emerald-500/5'
+                    : 'text-slate-500 border-slate-800',
+                  'cursor-not-allowed transition-all duration-300'
+                )}
+                placeholder="Belum terisi"
+              />
+              {watch('kelurahan') && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 500,
+                    damping: 30,
+                  }}
+                >
+                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-green-500" />
+                </motion.div>
+              )}
+            </div>
           </FormField>
         </div>
       </div>
@@ -705,11 +749,32 @@ export function Step2Location({ form }: Step2Props) {
             <span>💡</span>
           </div>
           <div className="flex-1">
-            <h4 className="text-sm font-semibold text-emerald-400 mb-2">Tips Lokasi Akurat</h4>
+            <h4 className="text-sm font-semibold text-emerald-400 mb-2">
+              Cara Pakai
+            </h4>
             <ul className="text-xs text-slate-300 space-y-1.5">
-              <li className="flex gap-2"><span className="text-emerald-400">•</span><span>Ketik alamat lengkap dan <strong>pilih dari dropdown</strong> yang muncul</span></li>
-              <li className="flex gap-2"><span className="text-emerald-400">•</span><span>Provinsi-Kelurahan akan <strong>terisi otomatis</strong></span></li>
-              <li className="flex gap-2"><span className="text-emerald-400">•</span><span>Gunakan <strong>"GPS Saya"</strong> jika property di lokasi Anda saat ini</span></li>
+              <li className="flex gap-2">
+                <span className="text-emerald-400">1.</span>
+                <span>Ketik alamat di kotak pencarian</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-emerald-400">2.</span>
+                <span>
+                  <strong>WAJIB pilih</strong> dari dropdown yang muncul
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-emerald-400">3.</span>
+                <span>
+                  Map akan zoom & data lokasi terisi otomatis
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="text-emerald-400">4.</span>
+                <span>
+                  Data akan tersimpan saat navigasi antar step
+                </span>
+              </li>
             </ul>
           </div>
         </div>

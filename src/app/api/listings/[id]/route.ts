@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 
+// Helper untuk konversi BigInt → string
+function serializeBigInt<T>(data: T): T {
+  return JSON.parse(
+    JSON.stringify(data, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    )
+  );
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -47,9 +56,8 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      data: listing,
+      data: serializeBigInt(listing),
     });
-
   } catch (error) {
     console.error('Error fetching listing:', error);
     return NextResponse.json(
@@ -86,20 +94,50 @@ export async function PUT(
       );
     }
 
-    // Update listing
+    // TENTUKAN harga sesuai jenis_transaksi (tidak boleh null)
+    const jenisTransaksi = body.jenis_transaksi as
+      | 'PRIMARY'
+      | 'SECONDARY'
+      | 'LELANG'
+      | 'SEWA';
+
+    let harga: number;
+
+    if (jenisTransaksi === 'LELANG') {
+      // Untuk lelang, harga = nilai_limit_lelang
+      harga = Number(body.nilai_limit_lelang || 0);
+    } else {
+      harga = Number(body.harga || 0);
+    }
+
+    if (!harga || harga <= 0) {
+      return NextResponse.json(
+        {
+          error:
+            jenisTransaksi === 'LELANG'
+              ? 'Nilai limit lelang wajib diisi dan > 0'
+              : 'Harga wajib diisi dan > 0',
+        },
+        { status: 400 }
+      );
+    }
+
+    // Update listing + pilih field yang dibutuhkan untuk redirect
     const updated = await prisma.listing.update({
       where: { id_property: id },
       data: {
         judul: body.judul,
         slug: body.slug,
         deskripsi: body.deskripsi,
-        jenis_transaksi: body.jenis_transaksi,
+        jenis_transaksi: jenisTransaksi,
         kategori: body.kategori,
         vendor: body.vendor,
         status_tayang: body.status_tayang,
-        harga: body.harga,
+        harga,
         harga_promo: body.harga_promo,
-        tanggal_lelang: body.tanggal_lelang ? new Date(body.tanggal_lelang) : null,
+        tanggal_lelang: body.tanggal_lelang
+          ? new Date(body.tanggal_lelang)
+          : null,
         uang_jaminan: body.uang_jaminan,
         nilai_limit_lelang: body.nilai_limit_lelang,
         link: body.link,
@@ -126,14 +164,20 @@ export async function PUT(
         is_hot_deal: body.is_hot_deal,
         tanggal_diupdate: new Date(),
       },
+      select: {
+        id_property: true,
+        slug: true,
+        jenis_transaksi: true,
+        id_agent: true,
+        // kalau perlu field lain bisa tambahkan di sini
+      },
     });
 
     return NextResponse.json({
       success: true,
-      data: updated,
+      data: serializeBigInt(updated),
       message: 'Listing berhasil diupdate',
     });
-
   } catch (error) {
     console.error('Error updating listing:', error);
     return NextResponse.json(
@@ -169,7 +213,7 @@ export async function DELETE(
       );
     }
 
-    // Delete listing (cascade will handle related records)
+    // Delete listing
     await prisma.listing.delete({
       where: { id_property: id },
     });
@@ -178,11 +222,10 @@ export async function DELETE(
       success: true,
       message: 'Listing berhasil dihapus',
     });
-
   } catch (error) {
     console.error('Error deleting listing:', error);
     return NextResponse.json(
-      { error: 'Failed to delete listing' },
+      { error: 'Failed to delete listing', },
       { status: 500 }
     );
   }

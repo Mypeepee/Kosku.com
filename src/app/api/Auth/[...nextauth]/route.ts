@@ -4,14 +4,12 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 
-// Setup Prisma Client (Singleton Pattern)
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 export const authOptions: AuthOptions = {
   providers: [
-    // 1. LOGIN GOOGLE
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
@@ -24,7 +22,6 @@ export const authOptions: AuthOptions = {
       },
     }),
 
-    // 2. LOGIN MANUAL (Credentials)
     CredentialsProvider({
       name: "credentials",
       credentials: {
@@ -37,7 +34,6 @@ export const authOptions: AuthOptions = {
           throw new Error("Password wajib diisi");
         }
 
-        // Cari user di database (Email ATAU No HP)
         const user = await prisma.pengguna.findFirst({
           where: {
             OR: [
@@ -51,12 +47,10 @@ export const authOptions: AuthOptions = {
           throw new Error("Akun tidak ditemukan.");
         }
 
-        // Jika user ini user Google (password null), tolak login manual
         if (!user.kata_sandi) {
           throw new Error("Akun terdaftar via Google. Silakan login dengan tombol Google.");
         }
 
-        // Cek Password
         const isPasswordCorrect = await bcrypt.compare(
           credentials.password,
           user.kata_sandi
@@ -66,9 +60,8 @@ export const authOptions: AuthOptions = {
           throw new Error("Kata sandi salah.");
         }
 
-        // Return Data User Manual (Convert BigInt to String)
         return {
-          id: user.id_pengguna.toString(),
+          id: user.id_pengguna,
           name: user.nama_lengkap,
           email: user.email,
           image: user.foto_profil_url,
@@ -90,13 +83,11 @@ export const authOptions: AuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
 
   callbacks: {
-    // === CALLBACK 1: SIGN IN (Logika Simpan User Google) ===
     async signIn({ user, account, profile }: any) {
       if (account?.provider === "google") {
         try {
           if (!profile?.email) throw new Error("Google tidak memberikan email.");
 
-          // 1. Cek apakah user sudah ada (Cek Google ID ATAU Email)
           const existingUser = await prisma.pengguna.findFirst({
             where: {
               OR: [
@@ -106,9 +97,8 @@ export const authOptions: AuthOptions = {
             },
           });
 
-          // 2. JIKA BELUM ADA -> Buat User Baru
           if (!existingUser) {
-            const newUser = await prisma.pengguna.create({
+            await prisma.pengguna.create({
               data: {
                 nama_lengkap: profile.name || "Pengguna Google",
                 email: profile.email,
@@ -120,14 +110,7 @@ export const authOptions: AuthOptions = {
                 wa_terverifikasi: true,
               },
             });
-
-            console.log("✅ New Google user created:", {
-              id: newUser.id_pengguna.toString(),
-              email: newUser.email,
-            });
-          }
-          // 3. JIKA SUDAH ADA (tapi belum link Google ID) -> Update
-          else if (!existingUser.google_id) {
+          } else if (!existingUser.google_id) {
             await prisma.pengguna.update({
               where: { id_pengguna: existingUser.id_pengguna },
               data: {
@@ -135,28 +118,25 @@ export const authOptions: AuthOptions = {
                 foto_profil_url: existingUser.foto_profil_url || profile.picture,
               },
             });
-
-            console.log("✅ Google ID linked to existing user:", existingUser.email);
           }
 
           return true;
         } catch (error) {
-          console.error("❌ Error saving Google user:", error);
+          console.error("Error saving Google user:", error);
           return false;
         }
       }
       return true;
     },
 
-    // === CALLBACK 2: JWT ===
     async jwt({ token, user, account }: any) {
-      // Saat pertama kali login (credentials)
+      // Saat pertama login (credentials)
       if (user) {
-        token.id = user.id; // Sudah string dari authorize
+        token.id = user.id;
         token.role = user.role;
       }
 
-      // Khusus Google: ambil id_pengguna & peran dari DB
+      // Khusus Google: ambil id & role dari DB
       if (account?.provider === "google" && token.email) {
         const dbUser = await prisma.pengguna.findUnique({
           where: { email: token.email },
@@ -164,61 +144,43 @@ export const authOptions: AuthOptions = {
         });
 
         if (dbUser) {
-          token.id = dbUser.id_pengguna.toString();
+          token.id = dbUser.id_pengguna;
           token.role = dbUser.peran;
-          console.log("✅ JWT updated for Google user:", token.id);
         }
       }
 
-      // ✅ FIX: Tambahkan lookup agent berdasarkan id_pengguna
-      if (token.id && !token.agentId) {
-        try {
-          const agent = await prisma.agent.findFirst({
-            where: { id_pengguna: token.id }, // ✅ FIXED: id_pengguna (STRING)
-            select: { id_agent: true },
-          });
+      // ✅ LOOKUP AGENT (SELALU, baik credentials maupun Google)
+      if (token.id) {
+        const agent = await prisma.agent.findUnique({
+          where: { id_pengguna: token.id as string },
+          select: { id_agent: true },
+        });
 
-          if (agent) {
-            // Handle BigInt conversion
-            token.agentId = typeof agent.id_agent === 'bigint' 
-              ? agent.id_agent.toString() 
-              : agent.id_agent;
-            
-            console.log("✅ Agent found:", {
-              userId: token.id,
-              agentId: token.agentId,
-            });
-          } else {
-            token.agentId = null;
-            console.log("⚠️ No agent found for user:", token.id);
-          }
-        } catch (error) {
-          console.error("❌ Error fetching agent:", error);
-          token.agentId = null;
-        }
+        token.agentId = agent?.id_agent || null;
+      } else {
+        token.agentId = null;
       }
 
       return token;
     },
 
-    // === CALLBACK 3: SESSION ===
     async session({ session, token }: any) {
       if (session.user) {
         session.user.id = token.id;
         session.user.role = token.role;
-        session.user.agentId = token.agentId || null;
-        
-        console.log("✅ Session created:", {
-          id: session.user.id,
-          role: session.user.role,
-          agentId: session.user.agentId,
-        });
+        session.user.agentId = token.agentId; // ✅ agentId masuk ke session
       }
+
+      console.log('✅ Session created:', {
+        id: session.user.id,
+        role: session.user.role,
+        agentId: session.user.agentId,
+      });
+
       return session;
     },
   },
 };
 
 const handler = NextAuth(authOptions);
-
 export { handler as GET, handler as POST };

@@ -8,30 +8,83 @@ import { Input } from '@/components/ui/input';
 import { RadioGroup } from '../RadioGroup';
 import { motion, AnimatePresence } from 'framer-motion';
 import { JENIS_TRANSAKSI_OPTIONS, KATEGORI_OPTIONS } from '@/app/tambah-property/types/listing';
-import { generateSlug } from '@/lib/utils';
-import { Calendar, Sparkles, TrendingUp, Eye, Search, Award } from 'lucide-react';
+import { Calendar, TrendingUp, Eye, Award } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
 
 interface Step1Props {
   form: UseFormReturn<ListingFormData>;
 }
 
+// Helper: Generate slug from title only (no kota)
+const generateSlugFromTitle = (title: string): string => {
+  if (!title) return '';
+  
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[àáâãäå]/g, 'a')
+    .replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôõö]/g, 'o')
+    .replace(/[ùúûü]/g, 'u')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 80)
+    .replace(/-+$/, '');
+};
+
 export function Step1BasicInfo({ form }: Step1Props) {
   const { watch, setValue, formState: { errors } } = form;
   const jenisTransaksi = watch('jenis_transaksi');
   const judul = watch('judul');
-  const kota = watch('kota');
+  const tanggalLelang = watch('tanggal_lelang');
+  
   const [titleScore, setTitleScore] = useState(0);
   const [titleTips, setTitleTips] = useState<string[]>([]);
   
-  // Auto-generate slug
+  // ✅ Local state untuk datetime-local input (format: "YYYY-MM-DDTHH:MM")
+  const [dateTimeValue, setDateTimeValue] = useState('');
+  
+  // ✅ Auto-generate slug from judul only
   useEffect(() => {
-    if (judul && kota) {
-      const slug = generateSlug(judul, kota);
+    if (judul) {
+      const slug = generateSlugFromTitle(judul);
       setValue('slug', slug);
     }
-  }, [judul, kota, setValue]);
+  }, [judul, setValue]);
+
+  // ✅ Initialize datetime input dari form value (saat load atau kembali ke step 1)
+  useEffect(() => {
+    if (tanggalLelang) {
+      const date = tanggalLelang instanceof Date ? tanggalLelang : new Date(tanggalLelang);
+      if (!isNaN(date.getTime())) {
+        // Convert to local datetime string format
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const formatted = `${year}-${month}-${day}T${hours}:${minutes}`;
+        setDateTimeValue(formatted);
+      }
+    }
+  }, [tanggalLelang]);
+
+  // ✅ Handle datetime change
+  const handleDateTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setDateTimeValue(value);
+    
+    if (value) {
+      const date = new Date(value);
+      setValue('tanggal_lelang', date);
+    } else {
+      setValue('tanggal_lelang', undefined as any);
+    }
+  };
 
   // Calculate title SEO score
   useEffect(() => {
@@ -39,7 +92,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
       let score = 0;
       const tips: string[] = [];
       
-      // Length check (optimal: 40-70 characters)
       if (judul.length >= 40 && judul.length <= 70) {
         score += 25;
       } else if (judul.length < 40) {
@@ -48,24 +100,21 @@ export function Step1BasicInfo({ form }: Step1Props) {
         tips.push('Persingkat judul agar lebih mudah dibaca (max. 70 karakter)');
       }
       
-      // Contains location
-      const locationKeywords = ['jakarta', 'surabaya', 'bandung', 'bali', 'medan', 'semarang', 'yogyakarta'];
+      const locationKeywords = ['jakarta', 'surabaya', 'bandung', 'bali', 'medan', 'semarang', 'yogyakarta', 'malang', 'solo', 'denpasar'];
       if (locationKeywords.some(loc => judul.toLowerCase().includes(loc))) {
         score += 25;
       } else {
         tips.push('Tambahkan nama kota untuk SEO lokal yang lebih baik');
       }
       
-      // Contains property type
-      const propertyTypes = ['rumah', 'apartemen', 'ruko', 'villa', 'tanah', 'gudang'];
+      const propertyTypes = ['rumah', 'apartemen', 'ruko', 'villa', 'tanah', 'gudang', 'pabrik', 'toko', 'hotel'];
       if (propertyTypes.some(type => judul.toLowerCase().includes(type))) {
         score += 25;
       } else {
         tips.push('Sertakan jenis properti (rumah/apartemen/dll)');
       }
       
-      // Contains attractive words
-      const attractiveWords = ['mewah', 'strategis', 'modern', 'premium', 'eksklusif', 'view', 'minimalis'];
+      const attractiveWords = ['mewah', 'strategis', 'modern', 'premium', 'eksklusif', 'view', 'minimalis', 'luas', 'nyaman', 'siap huni'];
       if (attractiveWords.some(word => judul.toLowerCase().includes(word))) {
         score += 25;
       } else {
@@ -99,7 +148,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-8"
     >
-
       {/* Judul with SEO Score */}
       <div className="space-y-4">
         <FormField
@@ -126,11 +174,10 @@ export function Step1BasicInfo({ form }: Step1Props) {
               className="overflow-hidden"
             >
               <div className="p-4 rounded-xl bg-slate-900/50 backdrop-blur-sm border border-slate-800">
-                {/* Score Header */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center">
-                      <Search className="h-4 w-4 text-emerald-400" />
+                      <Eye className="h-4 w-4 text-emerald-400" />
                     </div>
                     <div>
                       <h4 className="text-sm font-semibold text-slate-200">SEO Score</h4>
@@ -138,7 +185,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                     </div>
                   </div>
                   
-                  {/* Score Badge */}
                   <motion.div
                     key={titleScore}
                     initial={{ scale: 0 }}
@@ -154,7 +200,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   </motion.div>
                 </div>
 
-                {/* Progress Bar */}
                 <div className="relative h-2 bg-slate-800 rounded-full overflow-hidden mb-4">
                   <motion.div
                     className={`h-full bg-gradient-to-r ${getScoreColor(titleScore)}`}
@@ -162,7 +207,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                     animate={{ width: `${titleScore}%` }}
                     transition={{ duration: 0.5, ease: 'easeOut' }}
                   />
-                  {/* Shimmer effect */}
                   <motion.div
                     className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
                     animate={{ x: ['-100%', '200%'] }}
@@ -170,7 +214,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   />
                 </div>
 
-                {/* Tips */}
                 {titleTips.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
@@ -192,7 +235,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   </div>
                 )}
 
-                {/* Perfect Score Message */}
                 {titleScore === 100 && (
                   <motion.div
                     initial={{ scale: 0, rotate: -10 }}
@@ -205,36 +247,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                     </p>
                   </motion.div>
                 )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Auto Slug Preview */}
-        <AnimatePresence>
-          {watch('slug') && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="flex items-start gap-3 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl backdrop-blur-sm">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-base">🔗</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-emerald-400 font-semibold mb-1 uppercase tracking-wider">
-                    URL Slug (Auto-generated)
-                  </p>
-                  <p className="text-sm text-slate-200 font-mono break-all bg-black/20 px-2 py-1 rounded border border-emerald-500/20">
-                    {watch('slug')}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-                    <span>💡</span>
-                    <span>URL ini akan otomatis diupdate berdasarkan judul dan kota</span>
-                  </p>
-                </div>
               </div>
             </motion.div>
           )}
@@ -281,7 +293,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                 whileHover={{ scale: 1.05, y: -2 }}
                 whileTap={{ scale: 0.95 }}
               >
-                {/* Glow effect */}
                 {isSelected && (
                   <motion.div
                     className="absolute -inset-1 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 rounded-xl blur-lg -z-10"
@@ -290,7 +301,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   />
                 )}
 
-                {/* Icon */}
                 <motion.div 
                   className="text-4xl mb-2"
                   animate={isSelected ? { scale: [1, 1.2, 1] } : {}}
@@ -299,7 +309,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   {option.icon}
                 </motion.div>
 
-                {/* Label */}
                 <div className={cn(
                   "text-xs font-semibold transition-colors",
                   isSelected ? 'text-slate-100' : 'text-slate-400 group-hover:text-slate-300'
@@ -307,7 +316,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   {option.label}
                 </div>
 
-                {/* Checkmark */}
                 {isSelected && (
                   <motion.div
                     initial={{ scale: 0, rotate: -180 }}
@@ -320,7 +328,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   </motion.div>
                 )}
 
-                {/* Shimmer on hover */}
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-emerald-500/5 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
               </motion.button>
             );
@@ -338,11 +345,9 @@ export function Step1BasicInfo({ form }: Step1Props) {
             className="overflow-hidden"
           >
             <div className="relative p-6 bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent border-2 border-amber-500/30 rounded-2xl backdrop-blur-sm overflow-hidden">
-              {/* Background decoration */}
               <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl"></div>
               
               <div className="relative z-10">
-                {/* Header */}
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
                     <span className="text-xl">⚖️</span>
@@ -357,7 +362,7 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   </div>
                 </div>
 
-                {/* Date Picker with Custom UI */}
+                {/* ✅ Date Picker with persisted value */}
                 <FormField
                   label="Tanggal & Waktu Lelang"
                   required
@@ -366,21 +371,19 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   icon={<Calendar className="h-3 w-3 text-amber-400" />}
                 >
                   <div className="relative group">
-                    <Input
+                    <input
                       type="datetime-local"
-                      {...form.register('tanggal_lelang', {
-                        valueAsDate: false,
-                        setValueAs: (v) => v ? new Date(v) : undefined
-                      })}
-                      className="pr-12"
+                      value={dateTimeValue}
+                      onChange={handleDateTimeChange}
                       min={new Date().toISOString().slice(0, 16)}
+                      className="w-full h-12 px-4 pr-12 rounded-xl bg-slate-900/50 border-2 border-slate-800 focus:border-amber-500/50 focus:outline-none focus:ring-2 focus:ring-amber-500/20 text-slate-100 transition-all duration-300"
                     />
                     <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-amber-400 pointer-events-none group-focus-within:scale-110 transition-transform" />
                   </div>
                 </FormField>
 
                 {/* Date Preview */}
-                {watch('tanggal_lelang') && (
+                {tanggalLelang && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -388,7 +391,7 @@ export function Step1BasicInfo({ form }: Step1Props) {
                   >
                     <p className="text-xs text-amber-400 font-semibold mb-1">Preview Jadwal:</p>
                     <p className="text-sm text-slate-200">
-                      {new Date(watch('tanggal_lelang')).toLocaleDateString('id-ID', {
+                      {new Date(tanggalLelang).toLocaleDateString('id-ID', {
                         weekday: 'long',
                         year: 'numeric',
                         month: 'long',
@@ -401,33 +404,6 @@ export function Step1BasicInfo({ form }: Step1Props) {
                 )}
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Vendor (Only for PRIMARY/SECONDARY) */}
-      <AnimatePresence>
-        {(jenisTransaksi === 'PRIMARY' || jenisTransaksi === 'SECONDARY') && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <FormField
-              label="Vendor / Developer"
-              error={errors.vendor?.message}
-              badge="Optional"
-              description="Nama developer atau vendor yang mengembangkan property ini"
-              hint="Contoh: Ciputra Group, Agung Sedayu Group, Sinarmas Land"
-              icon={<Award className="h-3 w-3 text-emerald-400" />}
-            >
-              <Input
-                {...form.register('vendor')}
-                placeholder="Contoh: PT Ciputra Development Tbk"
-                maxLength={100}
-              />
-            </FormField>
           </motion.div>
         )}
       </AnimatePresence>

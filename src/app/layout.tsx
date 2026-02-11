@@ -12,8 +12,8 @@ import type { Metadata } from "next";
 import ChatWidget from "@/components/Chat/ChatWidget";
 import { ChatProvider } from "@/context/ChatContext";
 import NextAuthProvider from "@/providers/NextAuthProvider";
-import { Toaster } from "react-hot-toast";
-import LoadingBar from "@/components/LoadingBar"; // <- tambahkan ini
+import { Toaster } from "sonner"; // ✅ Ganti dari react-hot-toast ke sonner
+import LoadingBar from "@/components/LoadingBar";
 
 import "@/lib/cron";
 
@@ -59,7 +59,26 @@ export default function RootLayout({
 
               <ScrollToTop />
               <ChatWidget />
-              <Toaster position="top-center" />
+              
+              {/* ✅ Sonner Toaster - Modern & Beautiful */}
+              <Toaster 
+                position="top-right"
+                expand={false}
+                richColors
+                closeButton
+                theme="system" // Ikut theme (dark/light)
+                toastOptions={{
+                  style: {
+                    background: 'rgba(15, 23, 42, 0.95)',
+                    backdropFilter: 'blur(16px)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    color: '#e2e8f0',
+                    boxShadow: '0 10px 40px rgba(0, 0, 0, 0.3)',
+                  },
+                  className: 'group',
+                  duration: 4000,
+                }}
+              />
             </ChatProvider>
           </NextAuthProvider>
         </ThemeProvider>

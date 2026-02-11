@@ -78,7 +78,7 @@ model Listing {
   id_property        BigInt                 @id @default(autoincrement())
   id_agent           String                 @db.VarChar(20)
   judul              String                 @db.VarChar(255)
-  slug               String                 @unique @db.VarChar(300)
+  slug               String                 @db.VarChar(300)
   deskripsi          String?
   jenis_transaksi    jenis_transaksi_enum
   kategori           kategori_properti_enum
