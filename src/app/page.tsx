@@ -12,6 +12,10 @@ import Proses from "@/components/Home/Proses";
 import Testimoni from "@/components/Home/Testimoni";
 import CtaPenutup from "@/components/Home/CtaPenutup";
 
+// ISR: homepage di-render statis lalu di-cache, di-refresh tiap 5 menit.
+// Kunjungan tidak lagi menunggu query DB — HTML disajikan instan dari cache.
+export const revalidate = 300;
+
 export default function Home() {
   return (
     <main className="bg-darkmode min-h-screen">

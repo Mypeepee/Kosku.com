@@ -8,7 +8,9 @@ const next = require('next')
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = 'localhost'
-const port = process.env.port || 8080
+// Default 3000 agar cocok dengan ingress Cloudflare tunnel (solusindoaset.com
+// → http://localhost:3000). Bisa ditimpa lewat env PORT (mis. di cPanel).
+const port = process.env.PORT || process.env.port || 3000
 // when using middleware `hostname` and `port` must be provided below
 const app = next({ dev, hostname, port })
 const handle = app.getRequestHandler()

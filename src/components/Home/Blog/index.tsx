@@ -1,15 +1,14 @@
 import React from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
-import { unstable_noStore as noStore } from "next/cache";
 import CoverImage from "@/components/Blog/CoverImage";
 import { getLatest } from "@/lib/berita";
 import { accentFor, formatTanggal } from "@/lib/beritaUi";
 
 const Blog = async () => {
-  // Always reflect the latest published articles (opt out of static caching).
-  noStore();
-
+  // Di-cache lewat ISR halaman (lihat `revalidate` di app/page.tsx) supaya
+  // homepage tidak query DB tiap kunjungan. Artikel baru muncul otomatis
+  // setelah jendela revalidate.
   let posts: Awaited<ReturnType<typeof getLatest>> = [];
   try {
     posts = await getLatest(3);
