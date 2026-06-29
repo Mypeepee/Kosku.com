@@ -453,18 +453,18 @@ function HeroTopBar({
   const href = resolveBackHref(backHref);
 
   return (
-    <div className="absolute inset-x-0 top-0 z-20 flex items-start justify-between p-4 md:p-6 lg:p-7">
+    <div className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-3 md:p-6 lg:p-7">
       <Link
         href={href}
-        className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-black/35 px-3 py-2 text-sm font-medium text-white backdrop-blur-2xl transition hover:border-white/20 hover:bg-black/45"
+        className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-black/35 px-2.5 py-1.5 text-xs font-medium text-white backdrop-blur-2xl transition hover:border-white/20 hover:bg-black/45 md:gap-2 md:px-3 md:py-2 md:text-sm"
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.06]">
-          <ArrowLeft className="h-3.5 w-3.5" />
+        <span className="flex h-6 w-6 items-center justify-center rounded-full border border-white/10 bg-white/[0.06] md:h-7 md:w-7">
+          <ArrowLeft className="h-3 w-3 md:h-3.5 md:w-3.5" />
         </span>
-        <span className="pr-1">Kembali</span>
+        <span className="pr-0.5 md:pr-1">Kembali</span>
       </Link>
 
-      <div className="inline-flex items-center rounded-full bg-white/90 px-3.5 py-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-950 shadow-[0_10px_30px_rgba(255,255,255,0.12)] backdrop-blur-xl md:px-4 md:text-[11px]">
+      <div className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-950 shadow-[0_10px_30px_rgba(255,255,255,0.12)] backdrop-blur-xl md:px-4 md:py-2 md:text-[11px] md:tracking-[0.28em]">
         {label}
       </div>
     </div>
@@ -765,47 +765,44 @@ function InfoPanel({
   label,
   value,
   helper,
+  helperSub,
   tone,
+  icon,
 }: {
   label: string;
   value: string;
   helper: string;
+  helperSub?: string;
   tone: Tone;
+  icon?: React.ReactNode;
 }) {
   const styles = TONE_STYLES[tone];
 
   return (
-    <div className="relative min-w-0 overflow-hidden rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,15,23,0.96),rgba(7,10,16,0.9))] p-4 backdrop-blur-xl sm:rounded-[26px] sm:p-5">
-      <div
-        className={cn(
-          "absolute inset-x-0 top-0 h-px bg-gradient-to-r",
-          styles.line
-        )}
-      />
-      <div
-        className={cn(
-          "absolute -right-8 -top-8 h-24 w-24 rounded-full blur-3xl",
-          styles.glow
-        )}
-      />
+    <div className="relative min-w-0 overflow-hidden rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,15,23,0.96),rgba(7,10,16,0.9))] p-4 backdrop-blur-xl">
+      <div className={cn("absolute inset-x-0 top-0 h-px bg-gradient-to-r", styles.line)} />
+      <div className={cn("absolute -right-8 -top-8 h-24 w-24 rounded-full blur-3xl", styles.glow)} />
 
       <div className="relative min-w-0">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 sm:text-[11px] sm:tracking-[0.24em]">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
           {label}
         </div>
 
-        <div
-          className={cn(
-            "mt-3 break-words text-[26px] font-semibold leading-none tracking-[-0.04em] sm:mt-4 sm:text-3xl",
-            styles.text
-          )}
-        >
-          {value}
+        <div className="mt-2.5 flex items-center gap-2">
+          {icon ? (
+            <span className={cn("shrink-0", styles.text)}>{icon}</span>
+          ) : null}
+          <span className={cn("break-words text-[26px] font-semibold leading-none tracking-[-0.04em]", styles.text)}>
+            {value}
+          </span>
         </div>
 
-        <div className="mt-3 text-xs leading-5 text-slate-300 sm:text-sm sm:leading-6">
+        <div className="mt-2.5 text-xs font-medium text-slate-300">
           {helper}
         </div>
+        {helperSub ? (
+          <div className="mt-0.5 text-[10px] text-slate-500">{helperSub}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -839,86 +836,76 @@ function FundingTerminal({
       : `${formatPercent(fundingProgress)} dari target pendanaan`;
 
   return (
-    <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,13,21,0.98),rgba(6,8,12,0.96))] p-5 md:p-6">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-sky-300/80 via-white/30 to-transparent" />
-      <div className="absolute -right-12 top-0 h-40 w-40 rounded-full bg-sky-300/12 blur-3xl" />
-      <div className="absolute -left-8 bottom-0 h-28 w-28 rounded-full bg-cyan-300/8 blur-3xl" />
+    <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,13,21,0.98),rgba(6,8,12,0.96))] p-4 md:p-5">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-sky-300/70 via-white/20 to-transparent" />
+      <div className="absolute -right-10 -top-4 h-32 w-32 rounded-full bg-sky-300/10 blur-3xl" />
 
       <div className="relative">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+        {/* ── Row 1: amount + target side by side ── */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
               Dana terhimpun
             </p>
-
-            <div className="mt-4 flex flex-wrap items-end gap-x-3 gap-y-2">
-              <div className="text-[40px] font-semibold leading-none tracking-[-0.06em] text-white sm:text-[54px] xl:text-[62px]">
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="text-[28px] font-semibold leading-none tracking-[-0.05em] text-white sm:text-[34px]">
                 {compactIDR(clampedFunded)}
-              </div>
-
+              </span>
               {excessFunding > 0 ? (
-                <div className="mb-2 inline-flex items-center rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
+                <span className="inline-flex items-center rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-200">
                   +{compactIDR(excessFunding)}
-                </div>
+                </span>
               ) : null}
             </div>
-
-            <p className="mt-3 text-sm text-slate-300">{headlineHelper}</p>
-
+            <p className="mt-1 text-[11px] text-slate-400">{headlineHelper}</p>
             {fundedFromInvestorBook ? (
-              <p className="mt-2 text-xs text-slate-500">
-                Mengacu Investor Book • hanya pembayaran berstatus lunas yang dihitung
+              <p className="mt-0.5 text-[10px] text-slate-600">
+                Investor Book · lunas saja
               </p>
             ) : null}
           </div>
 
-          <div className="rounded-[22px] border border-white/10 bg-white/[0.04] px-4 py-3 text-right">
-            <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">
-              Target
-            </p>
-            <p className="mt-2 text-lg font-medium text-white">
+          <div className="shrink-0 rounded-[14px] border border-white/8 bg-white/[0.04] px-3 py-2.5 text-right">
+            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Target</p>
+            <p className="mt-1 text-sm font-semibold text-white">
               {compactIDR(fundingTarget)}
             </p>
           </div>
         </div>
 
-        <div className="mt-6">
-          <div className="relative h-2.5 rounded-full bg-white/10">
-            {progressWidth > 0 ? (
-              <div
-                className="relative h-full rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-indigo-300 shadow-[0_0_24px_rgba(56,189,248,0.25)]"
-                style={{ width: `${progressWidth}%` }}
-              >
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2">
-                  <div className="absolute inset-0 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-300/30 blur-md" />
-                  <div className="absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/50 animate-ping" />
-                  <div className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[4px] bg-cyan-200/70" />
-                  <div className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_14px_rgba(255,255,255,0.65)]" />
-                </div>
+        {/* ── Progress bar ── */}
+        <div className="mt-4 relative h-[7px] rounded-full bg-white/[0.08]">
+          {progressWidth > 0 ? (
+            <div
+              className="relative h-full rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-indigo-300 shadow-[0_0_16px_rgba(56,189,248,0.28)]"
+              style={{ width: `${progressWidth}%` }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2">
+                <div className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-300/30 blur-sm" />
+                <div className="absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/40 animate-ping" />
+                <div className="absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.7)]" />
               </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4">
-            <div className="text-[10px] uppercase tracking-[0.24em] text-slate-500">
-              Sisa kebutuhan
-            </div>
-            <div className="mt-2 text-xl font-semibold tracking-[-0.03em] text-white">
-              {remainingFunding > 0 ? compactIDR(remainingFunding) : "Terpenuhi"}
-            </div>
+        {/* ── Bottom stats: 2 cols ── */}
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <div className="rounded-[14px] border border-white/8 bg-white/[0.03] px-3 py-2.5">
+            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Sisa kebutuhan</p>
+            <p className="mt-1.5 text-sm font-semibold tracking-[-0.02em] text-white">
+              {remainingFunding > 0 ? compactIDR(remainingFunding) : "Terpenuhi ✓"}
+            </p>
           </div>
-
-          <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4">
-            <div className="text-[10px] uppercase tracking-[0.24em] text-slate-500">
-              {excessFunding > 0 ? "Selisih di atas target" : "Kecepatan progres"}
-            </div>
-            <div className="mt-2 text-xl font-semibold tracking-[-0.03em] text-white">
+          <div className="rounded-[14px] border border-white/8 bg-white/[0.03] px-3 py-2.5">
+            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">
+              {excessFunding > 0 ? "Kelebihan dana" : "Progres"}
+            </p>
+            <p className="mt-1.5 text-sm font-semibold tracking-[-0.02em] text-white">
               {excessFunding > 0
                 ? `+${compactIDR(excessFunding)}`
                 : formatPercent(fundingProgress)}
-            </div>
+            </p>
           </div>
         </div>
       </div>
@@ -1353,17 +1340,19 @@ export default function BloombergHeroCard({
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.08),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(168,85,247,0.08),transparent_24%)]" />
 
             <div className="relative flex h-full flex-col p-5 md:p-7 lg:p-8">
-              <div className="relative z-[30] overflow-visible rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5 md:p-6 backdrop-blur-2xl">
-                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-white/70 via-white/20 to-transparent" />
+              <div className="relative z-[30] overflow-visible rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-4 backdrop-blur-2xl md:rounded-[30px] md:p-5">
+                {/* rounded inner glow — follows border-radius unlike inset-x-0 h-px */}
+                <div className="pointer-events-none absolute inset-0 rounded-[25px] bg-[linear-gradient(180deg,rgba(255,255,255,0.07),transparent_35%)] md:rounded-[29px]" />
                 <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-white/10 blur-3xl" />
 
                 <div className="relative z-0">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
+                  {/* Mobile: stacked / md+: side-by-side (card is wide enough at md) */}
+                  <div className="flex flex-col gap-3 md:grid md:grid-cols-2">
                     <div>
-                      <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                      <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
                         Live status
                       </div>
-                      <div className="mt-4">
+                      <div className="mt-2.5">
                         <StatusBadge
                           projectId={projectId}
                           createdByAgentId={createdByAgentId}
@@ -1373,14 +1362,14 @@ export default function BloombergHeroCard({
                       </div>
                     </div>
 
-                    <div className="text-right">
-                      <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                    <div className="md:text-right">
+                      <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">
                         Timeline
                       </div>
-                      <div className="mt-2 text-lg font-medium text-white">
+                      <div className="mt-2 text-base font-semibold leading-tight text-white md:text-lg">
                         {timeline.headline}
                       </div>
-                      <div className="mt-1 text-sm text-slate-400">
+                      <div className="mt-1 text-xs text-slate-400 md:text-sm">
                         {timeline.deadlineLabel}
                       </div>
                     </div>
@@ -1402,15 +1391,28 @@ export default function BloombergHeroCard({
                 <InfoPanel
                   label="ROI proyeksi"
                   value={formatPercent(roi)}
-                  helper={`${formatMultiple(multiple)} equity multiple`}
+                  helper={`${formatMultiple(multiple)} return`}
+                  helperSub={multiple > 0 ? `Tiap Rp 1 modal kembali Rp ${multiple.toFixed(2)}` : undefined}
                   tone="emerald"
+                  icon={
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-4 w-4">
+                      <path fill="currentColor" d="M2 12c0-4.714 0-7.071 1.464-8.536C4.93 2 7.286 2 12 2s7.071 0 8.535 1.464C22 4.93 22 7.286 22 12s0 7.071-1.465 8.535C19.072 22 16.714 22 12 22s-7.071 0-8.536-1.465C2 19.072 2 16.714 2 12" opacity=".4"/>
+                      <path fill="currentColor" d="M14.5 10.75a.75.75 0 0 1 0-1.5H17a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-1.5 0v-.69l-2.013 2.013a1.75 1.75 0 0 1-2.474 0l-1.586-1.586a.25.25 0 0 0-.354 0L7.53 14.53a.75.75 0 0 1-1.06-1.06l2.293-2.293a1.75 1.75 0 0 1 2.474 0l1.586 1.586a.25.25 0 0 0 .354 0l2.012-2.013z"/>
+                    </svg>
+                  }
                 />
 
                 <InfoPanel
-                  label="Pendapatan kotor"
+                  label="Pendapatan"
                   value={compactIDR(estimatedSellPrice)}
                   helper="Estimasi nilai exit"
                   tone="fuchsia"
+                  icon={
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-4 w-4">
+                      <path fill="currentColor" d="m17.967 6.558l-1.83-1.83c-1.546-1.545-2.318-2.318-3.321-2.605c-1.003-.288-2.068-.042-4.197.45l-1.228.283c-1.792.413-2.688.62-3.302 1.233S3.27 5.6 2.856 7.391l-.284 1.228c-.491 2.13-.737 3.194-.45 4.197c.288 1.003 1.061 1.775 2.606 3.32l1.83 1.83C9.248 20.657 10.592 22 12.262 22c1.671 0 3.015-1.344 5.704-4.033c2.69-2.69 4.034-4.034 4.034-5.705c0-1.67-1.344-3.015-4.033-5.704" opacity=".5"/>
+                      <path fill="currentColor" d="M11.147 14.328c-.673-.672-.667-1.638-.265-2.403a.75.75 0 0 1 1.04-1.046c.34-.18.713-.276 1.085-.272a.75.75 0 0 1-.014 1.5a.88.88 0 0 0-.609.277c-.387.387-.285.775-.177.884c.11.109.497.21.884-.177c.784-.784 2.138-1.044 3.006-.177c.673.673.667 1.639.264 2.404a.75.75 0 0 1-1.04 1.045a2.2 2.2 0 0 1-1.472.232a.75.75 0 1 1 .302-1.47c.177.037.463-.021.708-.266c.388-.388.286-.775.177-.884s-.496-.21-.884.177c-.784.784-2.138 1.044-3.005.176m-1.126-4.035a2 2 0 1 0-2.828-2.828a2 2 0 0 0 2.828 2.828"/>
+                    </svg>
+                  }
                 />
               </div>
             </div>

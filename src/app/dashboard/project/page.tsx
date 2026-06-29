@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 
 import ProjectWalletCard from "./components/ProjectWalletCard";
@@ -336,6 +337,9 @@ function enrichProjectsWithUserInvestment(
 
 export default function ProjectPage() {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const scrollToId = searchParams.get("scrollTo");
+  const didAutoScroll = useRef(false);
 
   const [campaigns, setCampaigns] = useState<ProjectCampaign[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -396,6 +400,19 @@ export default function ProjectPage() {
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  // Auto-scroll ke project card saat halaman pertama kali load dengan ?scrollTo=ID
+  useEffect(() => {
+    if (!scrollToId || loadingProjects || didAutoScroll.current) return;
+    const el = document.getElementById(`project-card-${scrollToId}`);
+    if (!el) return;
+    didAutoScroll.current = true;
+    window.setTimeout(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-violet-400/70", "transition-all");
+      window.setTimeout(() => el.classList.remove("ring-2", "ring-violet-400/70"), 2500);
+    }, 300);
+  }, [scrollToId, loadingProjects, campaigns]);
 
   async function handleProjectCreated(_values: CreateProjectFormValues) {
     await fetchProjects();
@@ -560,13 +577,14 @@ export default function ProjectPage() {
                   project.createdById === currentAgentId;
 
                 return (
-                  <ProjectCampaignCard
-                    key={project.id}
-                    project={project}
-                    adminMode={canManage}
-                    isDeleting={deletingProjectId === project.id}
-                    onDelete={canManage ? handleAskDeleteProject : undefined}
-                  />
+                  <div key={project.id} id={`project-card-${project.id}`} className="rounded-[28px] transition-shadow duration-300">
+                    <ProjectCampaignCard
+                      project={project}
+                      adminMode={canManage}
+                      isDeleting={deletingProjectId === project.id}
+                      onDelete={canManage ? handleAskDeleteProject : undefined}
+                    />
+                  </div>
                 );
               })}
             </div>

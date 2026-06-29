@@ -369,23 +369,30 @@ async function recalculateInvestorOwnership(
     new Prisma.Decimal(0)
   );
 
-  for (const investor of investors) {
-    const nominal = toDecimal(investor.nominal_komitmen);
+  if (investors.length > 0) {
+    if (totalCommitment.gt(0)) {
+      // Satu UPDATE dengan CASE WHEN — menggantikan N update serial (N+1 fix)
+      const cases = investors.map((investor) => {
+        const nominal = toDecimal(investor.nominal_komitmen);
+        const percent = nominal
+          .div(totalCommitment)
+          .mul(100)
+          .toDecimalPlaces(6);
+        return Prisma.sql`WHEN id_project_investor = ${investor.id_project_investor} THEN ${percent}::numeric`;
+      });
 
-    const percent = totalCommitment.gt(0)
-      ? nominal.div(totalCommitment).mul(100)
-      : new Prisma.Decimal(0);
-
-    await tx.projectInvestor.update({
-      where: {
-        id_project_investor: investor.id_project_investor,
-      },
-      data: {
-        persentase_kepemilikan: new Prisma.Decimal(
-          percent.toDecimalPlaces(6).toString()
-        ),
-      },
-    });
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE project_investor
+        SET persentase_kepemilikan = CASE ${Prisma.join(cases, " ")} ELSE persentase_kepemilikan END
+        WHERE id_project = ${idProject}
+      `);
+    } else {
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE project_investor
+        SET persentase_kepemilikan = 0
+        WHERE id_project = ${idProject}
+      `);
+    }
   }
 
   return totalCommitment;

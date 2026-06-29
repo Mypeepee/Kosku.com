@@ -97,6 +97,7 @@ export async function getProjectFundDetail(
         },
       },
       orderBy: [{ tanggal_transaksi: "desc" }, { id_project_arus_kas: "desc" }],
+      take: 500,
       select: {
         id_project_arus_kas: true,
         id_project: true,

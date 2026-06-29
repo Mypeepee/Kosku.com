@@ -472,7 +472,7 @@ export default function GlobalSearch() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div ref={containerRef} className="relative flex-1 max-w-xl">
+    <div ref={containerRef} className="relative w-full min-w-0 max-w-xl">
       {/* Input bar */}
       <div className={`flex items-center gap-2 rounded-2xl border px-4 py-2.5 transition-all duration-200 ${open ? "border-white/20 bg-[#0e1016] shadow-lg shadow-black/40" : "border-white/5 bg-[#0b0d11]"}`}>
         <Icon icon={loading ? "svg-spinners:ring-resize" : "solar:magnifer-linear"} className="h-4 w-4 shrink-0 text-slate-400" />

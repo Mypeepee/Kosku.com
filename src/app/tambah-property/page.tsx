@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ListingFormData, listingSchema } from '@/lib/validations/listing';
 import { ProgressIndicator } from './components/listing/ProgressIndicator';
@@ -35,6 +35,19 @@ const STEPS = [
   { id: 5, label: 'Media', icon: '📸' },
 ];
 
+// Isolated subscriber: hanya re-render LivePreview, bukan seluruh halaman
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function LivePreviewWrapper({
+  control,
+  images,
+}: {
+  control: Control<ListingFormData, any, any>;
+  images: ImageFile[];
+}) {
+  const data = useWatch({ control }) as Partial<ListingFormData>;
+  return <LivePreview data={data} images={images} />;
+}
+
 function TambahPropertyContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -51,6 +64,10 @@ function TambahPropertyContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
+
+  // Ref untuk cleanup blob URL saat unmount
+  const imagesRef = useRef<ImageFile[]>([]);
+  imagesRef.current = images;
 
   const form = useForm<ListingFormData>({
     resolver: zodResolver(listingSchema),
@@ -155,6 +172,17 @@ function TambahPropertyContent() {
 
   const { clearDraft } = useFormPersist(form);
 
+  // Cleanup blob URLs saat halaman unmount (cegah memory leak)
+  useEffect(() => {
+    return () => {
+      imagesRef.current.forEach((img) => {
+        if (img.preview?.startsWith('blob:')) {
+          URL.revokeObjectURL(img.preview);
+        }
+      });
+    };
+  }, []);
+
   const validateStep = async (step: number): Promise<boolean> => {
     const fieldsToValidate: Record<number, (keyof ListingFormData)[]> = {
       1: ['judul', 'jenis_transaksi', 'kategori'],
@@ -178,16 +206,6 @@ function TambahPropertyContent() {
       toast.error('Mohon lengkapi field yang diperlukan');
       return;
     }
-
-    const values = watch();
-    console.log('[DEBUG NEXT] currentStep =', currentStep, {
-      jenis_transaksi: values.jenis_transaksi,
-      alamat_lengkap: values.alamat_lengkap,
-      kota: values.kota,
-      provinsi: values.provinsi,
-      latitude: values.latitude,
-      longitude: values.longitude,
-    });
 
     if (currentStep < 5) {
       setCurrentStep((prev) => {
@@ -242,12 +260,7 @@ function TambahPropertyContent() {
   };
 
   const onSubmit = async (data: ListingFormData) => {
-    console.log('[ON SUBMIT] DIPANGGIL, currentStep =', currentStep);
-
-    if (currentStep < 5) {
-      console.warn('[ON SUBMIT] DIBLOKIR karena currentStep < 5');
-      return;
-    }
+    if (currentStep < 5) return;
 
     if (images.length === 0) {
       toast.error('Minimal 1 foto harus diupload');
@@ -395,12 +408,6 @@ function TambahPropertyContent() {
 
   const handleFormSubmit: React.FormEventHandler<HTMLFormElement> = (e) => {
     e.preventDefault();
-    console.log(
-      '[FORM onSubmit] currentStep =',
-      currentStep,
-      'justEnteredStep5 =',
-      justEnteredStep5
-    );
 
     if (currentStep < 5) {
       void handleNext();
@@ -408,9 +415,6 @@ function TambahPropertyContent() {
     }
 
     if (justEnteredStep5) {
-      console.warn(
-        '[FORM onSubmit] submit pertama setelah masuk step 5 → diabaikan'
-      );
       setJustEnteredStep5(false);
       return;
     }
@@ -452,9 +456,6 @@ function TambahPropertyContent() {
       </div>
     );
   }
-
-  const allValues = watch();
-  console.log('[RENDER PAGE] values:', allValues);
 
   return (
     <div className="min-h-screen bg-black">
@@ -750,7 +751,7 @@ function TambahPropertyContent() {
             className="lg:col-span-1"
           >
             <div className="sticky top-24">
-              <LivePreview data={allValues} images={images} />
+              <LivePreviewWrapper control={form.control} images={images} />
             </div>
           </motion.div>
         </div>

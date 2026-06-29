@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import {
-  AlertTriangle,
   Crown,
   Gem,
   Rocket,
   Shield,
 } from "lucide-react";
+
+
 import { toast } from "sonner";
 import AddProjectModal, {
   type CreateProjectFormValues,
@@ -160,36 +161,38 @@ function getTierTheme(totalDana: number): TierTheme {
   };
 }
 
-function ShortcutButton({
+function StatCard({
+  className,
   label,
   value,
-  helper,
+  sub,
+  accentValue,
   theme,
 }: {
+  className?: string;
   label: string;
-  value: string;
-  helper: string;
+  value: React.ReactNode;
+  sub: string;
+  accentValue?: boolean;
   theme: TierTheme;
 }) {
   return (
     <a
       href="#daftar-project"
-      className={`group block w-full rounded-[24px] border p-4 text-left backdrop-blur-md transition duration-300 hover:-translate-y-0.5 ${theme.shortcut} ${theme.shortcutHover}`}
+      className={[
+        "group flex flex-col gap-1.5 rounded-[16px] sm:rounded-[24px] border p-3 sm:p-4 backdrop-blur-md transition duration-300 hover:-translate-y-0.5",
+        theme.shortcut,
+        theme.shortcutHover,
+        className ?? "",
+      ].join(" ")}
     >
-      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-slate-400 sm:text-[10px]">
         {label}
       </p>
-
-      <p className="mt-2 text-2xl font-black text-white">{value}</p>
-
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <p className="text-sm leading-6 text-slate-400">{helper}</p>
-        <span
-          className={`text-sm font-bold transition group-hover:translate-x-0.5 ${theme.accentText}`}
-        >
-          →
-        </span>
-      </div>
+      <p className={["text-2xl font-black tracking-tight sm:text-3xl", accentValue ? theme.accentText : "text-white"].join(" ")}>
+        {value}
+      </p>
+      <p className="text-[10px] text-slate-500 sm:text-xs">{sub}</p>
     </a>
   );
 }
@@ -259,7 +262,7 @@ export default function ProjectWalletCard({
   return (
     <>
       <section
-        className={`relative overflow-hidden rounded-[34px] border p-6 sm:p-7 ${theme.shell} ${theme.edgeGlow}`}
+        className={`relative overflow-hidden rounded-[24px] border p-4 sm:rounded-[34px] sm:p-7 ${theme.shell} ${theme.edgeGlow}`}
       >
         <div className={`absolute inset-0 ${theme.overlay}`} />
         <div className="absolute inset-[1px] rounded-[33px] border border-white/[0.04]" />
@@ -275,85 +278,62 @@ export default function ProjectWalletCard({
           className={`absolute right-[28%] bottom-[-88px] h-36 w-36 rounded-full blur-3xl ${theme.orbC}`}
         />
 
-        <div className="relative space-y-6">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-white/55">
+        <div className="relative space-y-4 sm:space-y-6">
+          {/* ── Main header row ── */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-white/50 sm:text-[11px] sm:tracking-[0.24em]">
                 Dana saya yang telah diinvestasikan
               </p>
 
-              <h1 className="mt-3 text-3xl font-black tracking-tight text-white sm:text-5xl">
+              <h1 className="mt-2 text-[26px] font-black tracking-tight text-white sm:mt-3 sm:text-5xl">
                 {formatCurrency(totalDana)}
               </h1>
 
               <div
-                className={`mt-4 inline-flex items-center gap-3 rounded-full border px-4 py-2 text-sm font-semibold backdrop-blur-md ${theme.badge}`}
+                className={`mt-2.5 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold backdrop-blur-md sm:mt-4 sm:gap-3 sm:px-4 sm:py-2 sm:text-sm ${theme.badge}`}
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-black/15">
-                  <TierIcon className="h-4 w-4" />
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-black/15 sm:h-7 sm:w-7">
+                  <TierIcon className="h-3 w-3 sm:h-4 sm:w-4" />
                 </span>
                 <span>{theme.nama}</span>
               </div>
 
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
+              {/* Description — hidden on mobile */}
+              <p className="mt-4 hidden max-w-2xl text-sm leading-7 text-slate-300 sm:block">
                 {theme.deskripsi}
               </p>
-
-              {hasPendingPayment ? (
-                <div className="mt-4 max-w-2xl rounded-[22px] border border-amber-300/20 bg-amber-400/10 px-4 py-3.5 backdrop-blur-md">
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-300/15 text-amber-100">
-                      <AlertTriangle className="h-4 w-4" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-amber-100">
-                        Segera selesaikan pembayaran
-                      </p>
-                      <p className="mt-1 text-sm leading-6 text-amber-100/85">
-                        {pendingHelper}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
             </div>
 
             {isOwner && (
               <button
                 type="button"
                 onClick={() => setOpenAddModal(true)}
-                className={`inline-flex h-12 shrink-0 items-center justify-center rounded-2xl px-5 text-sm font-bold shadow-[0_16px_40px_rgba(0,0,0,0.22)] transition active:scale-[0.99] ${theme.actionButton}`}
+                className={`mt-0.5 inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3.5 text-xs font-bold shadow-[0_16px_40px_rgba(0,0,0,0.22)] transition active:scale-[0.99] sm:mt-0 sm:h-12 sm:rounded-2xl sm:px-5 sm:text-sm ${theme.actionButton}`}
               >
-                Tambah Project
+                <span className="sm:hidden">+</span>
+                <span className="hidden sm:inline">Tambah Project</span>
+                <span className="sm:hidden text-[11px] font-semibold">Project</span>
               </button>
             )}
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <ShortcutButton
-              label="Property Didanai"
-              value={String(jumlahPropertyDidanai ?? 0)}
-              helper="Jumlah properti yang saat ini sudah masuk ke portofolio pendanaanmu"
+          {/* ── Stats: property (1/3) + profit (2/3) ── */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <StatCard
               theme={theme}
+              accentValue
+              label="Property"
+              value={jumlahPropertyDidanai ?? 0}
+              sub="didanai"
             />
-
-            <ShortcutButton
-              label="Pendanaan Saya"
-              value={formatCurrency(totalDana)}
-              helper={
-                hasPendingPayment
-                  ? `Termasuk pending ${formatCurrency(totalDanaPending)}`
-                  : "Total nominal komitmen pendanaan atas akun kamu"
-              }
+            <StatCard
+              className="col-span-2"
               theme={theme}
-            />
-
-            <ShortcutButton
               label="Profit Terealisasi"
               value={formatCurrency(realizedProfit)}
-              helper="Total profit yang dihasilkan!"
-              theme={theme}
+              sub="total profit"
+              accentValue={realizedProfit > 0}
             />
           </div>
         </div>

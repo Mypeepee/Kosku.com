@@ -23,6 +23,15 @@ import {
   type JenisProperti,
 } from "@/app/dashboard/components/agent/premium/titipLeads";
 
+/* ── Pembayaran Project — investor belum bayar komitmen ── */
+interface PembayaranItem {
+  id_project: string;
+  nama_project: string;
+  lokasi: string;
+  status_project: string;
+  nominal_komitmen: number;
+}
+
 /* ── Survei Lokasi — booking dari halaman properti ── */
 interface SurveiItem {
   id_booking: string;
@@ -142,6 +151,7 @@ export default function NotificationBell() {
   const [items, setItems] = useState<NotifItem[]>([]);
   const [surveiItems, setSurveiItems] = useState<SurveiItem[]>([]);
   const [penawaranItems, setPenawaranItems] = useState<PenawaranItem[]>([]);
+  const [pembayaranItems, setPembayaranItems] = useState<PembayaranItem[]>([]);
   const [sysNotifs, setSysNotifs] = useState<SysNotif[]>([]);
   const [surveiActing, setSurveiActing] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
@@ -150,6 +160,7 @@ export default function NotificationBell() {
   const seenSurveiCountRef = useRef<number>(0);
   const seenPenawaranCountRef = useRef<number>(0);
   const seenSysCountRef = useRef<number>(0);
+  const seenPembayaranCountRef = useRef<number>(0);
   const [pulse, setPulse] = useState(false);
   // Track timer per id supaya cleanup rapi dan tidak double-schedule
   const dismissTimersRef = useRef<Map<string, number>>(new Map());
@@ -301,9 +312,10 @@ export default function NotificationBell() {
 
     async function loadAgentInboxes() {
       try {
-        const [surveiRes, penawaranRes] = await Promise.allSettled([
+        const [surveiRes, penawaranRes, pembayaranRes] = await Promise.allSettled([
           fetch("/api/survei/inbox", { cache: "no-store" }),
           fetch("/api/leads/penawaran/inbox", { cache: "no-store" }),
+          fetch("/api/project/pembayaran-pending", { cache: "no-store" }),
         ]);
         if (!active) return;
 
@@ -330,6 +342,19 @@ export default function NotificationBell() {
             }
             seenPenawaranCountRef.current = list.length;
             setPenawaranItems(list);
+          }
+        }
+
+        if (pembayaranRes.status === "fulfilled" && pembayaranRes.value.ok) {
+          const json = await pembayaranRes.value.json().catch(() => null);
+          if (active && json?.ok) {
+            const list = (json.items as PembayaranItem[]) || [];
+            if (list.length > seenPembayaranCountRef.current && seenPembayaranCountRef.current > 0) {
+              setPulse(true);
+              window.setTimeout(() => setPulse(false), 2200);
+            }
+            seenPembayaranCountRef.current = list.length;
+            setPembayaranItems(list);
           }
         }
       } catch {
@@ -364,6 +389,20 @@ export default function NotificationBell() {
         cleanupFns.push(() => {
           penawaranCh.unbind("penawaran:new", onPenawaran);
           pc.unsubscribe(`lead-agent-${agentId}`);
+        });
+
+        // Real-time: hapus notif pembayaran begitu project creator menandai lunas
+        const pembayaranCh = pc.subscribe(`project-investor-${agentId}`);
+        const onLunas = (data: { id_project: string }) => {
+          setPembayaranItems((prev) =>
+            prev.filter((x) => x.id_project !== data.id_project)
+          );
+          seenPembayaranCountRef.current = Math.max(0, seenPembayaranCountRef.current - 1);
+        };
+        pembayaranCh.bind("pembayaran:lunas", onLunas);
+        cleanupFns.push(() => {
+          pembayaranCh.unbind("pembayaran:lunas", onLunas);
+          pc.unsubscribe(`project-investor-${agentId}`);
         });
       } catch {
         /* fallback polling jalan */
@@ -488,6 +527,7 @@ export default function NotificationBell() {
     items.filter((x) => !x.locked).length +
     surveiItems.length +
     penawaranItems.length +
+    pembayaranItems.length +
     sysNotifs.length;
 
   /** Dismiss notif locked. Kalau persistent (dari API missed_items),
@@ -520,6 +560,23 @@ export default function NotificationBell() {
       window.dispatchEvent(new CustomEvent("hot-leads:focus"));
     } else {
       router.push("/dashboard#hot-leads-card");
+    }
+  };
+
+  // Navigasi ke halaman project lalu auto-scroll ke kartu project tertentu
+  const goToProject = (idProject: string) => {
+    setOpen(false);
+    const targetId = `project-card-${idProject}`;
+    if (pathname === "/dashboard/project") {
+      // Sudah di halaman project — langsung scroll
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("ring-2", "ring-amber-400/70");
+        window.setTimeout(() => el.classList.remove("ring-2", "ring-amber-400/70"), 2500);
+      }
+    } else {
+      router.push(`/dashboard/project?scrollTo=${idProject}`);
     }
   };
 
@@ -591,7 +648,7 @@ export default function NotificationBell() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.97 }}
             transition={{ type: "spring", stiffness: 460, damping: 30 }}
-            className="absolute right-0 mt-2 w-[340px] sm:w-[380px] max-h-[480px] flex flex-col rounded-2xl border border-white/10 bg-[#0A0D14] shadow-[0_24px_70px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)] overflow-hidden z-50"
+            className="fixed left-3 right-3 top-[61px] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-[380px] max-h-[80dvh] sm:max-h-[480px] flex flex-col rounded-2xl border border-white/10 bg-[#0A0D14] shadow-[0_24px_70px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)] overflow-hidden z-50"
           >
             <div className="h-px bg-gradient-to-r from-transparent via-emerald-400/45 to-transparent" />
 
@@ -620,7 +677,7 @@ export default function NotificationBell() {
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {items.length === 0 && surveiItems.length === 0 && penawaranItems.length === 0 && sysNotifs.length === 0 ? (
+              {items.length === 0 && surveiItems.length === 0 && penawaranItems.length === 0 && pembayaranItems.length === 0 && sysNotifs.length === 0 ? (
                 <div className="px-6 py-10 text-center">
                   <div className="mx-auto h-12 w-12 rounded-2xl border border-white/10 bg-white/[0.025] flex items-center justify-center">
                     <Icon
@@ -643,6 +700,13 @@ export default function NotificationBell() {
                         key={it.id_notifikasi}
                         item={it}
                         onClick={() => handleSysNotifClick(it)}
+                      />
+                    ))}
+                    {pembayaranItems.map((it) => (
+                      <PembayaranRow
+                        key={it.id_project}
+                        item={it}
+                        onClick={() => goToProject(it.id_project)}
                       />
                     ))}
                     {surveiItems.map((it) => (
@@ -685,6 +749,17 @@ export default function NotificationBell() {
                 className="border-t border-white/[0.06] px-4 py-2.5 text-[11.5px] font-bold text-amber-300 hover:bg-amber-500/[0.06] flex items-center justify-center gap-1.5 transition-colors"
               >
                 Buka Jadwal Survei
+                <Icon icon="solar:arrow-right-bold" className="text-sm" />
+              </button>
+            )}
+
+            {pembayaranItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() => { setOpen(false); router.push("/dashboard/project"); }}
+                className="border-t border-white/[0.06] px-4 py-2.5 text-[11.5px] font-bold text-violet-300 hover:bg-violet-500/[0.06] flex items-center justify-center gap-1.5 transition-colors"
+              >
+                Lihat Semua Project
                 <Icon icon="solar:arrow-right-bold" className="text-sm" />
               </button>
             )}
@@ -1085,6 +1160,63 @@ function SysNotifRow({ item, onClick }: { item: SysNotif; onClick: () => void })
 
         <span className="inline-flex items-center gap-1 text-[10.5px] font-bold text-sky-300 opacity-70 transition-opacity group-hover:opacity-100 shrink-0">
           Lihat
+          <Icon icon="solar:arrow-right-linear" className="text-[12px] transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </button>
+    </motion.li>
+  );
+}
+
+function formatRupiahCompact(n: number): string {
+  if (n >= 1_000_000_000) return `Rp ${(n / 1_000_000_000).toLocaleString("id-ID", { maximumFractionDigits: 1 })} M`;
+  if (n >= 1_000_000) return `Rp ${(n / 1_000_000).toLocaleString("id-ID", { maximumFractionDigits: 0 })} Jt`;
+  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
+}
+
+function PembayaranRow({ item, onClick }: { item: PembayaranItem; onClick: () => void }) {
+  return (
+    <motion.li
+      layout
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, x: 12, height: 0, marginTop: 0, marginBottom: 0 }}
+      transition={{ duration: 0.25 }}
+      className="relative"
+    >
+      <span
+        aria-hidden
+        className="absolute inset-y-2 left-0 w-[2px] rounded-full bg-gradient-to-b from-violet-400 to-purple-600 shadow-[0_0_8px_rgba(167,139,250,0.5)]"
+      />
+      <button
+        type="button"
+        onClick={onClick}
+        className="group w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-violet-500/[0.05] transition-colors"
+      >
+        <div className="relative shrink-0">
+          <div className="absolute inset-0 rounded-xl blur-[6px] bg-gradient-to-br from-violet-400/30 to-purple-600/15 animate-pulse" />
+          <div className="relative h-10 w-10 rounded-xl border border-violet-400/35 bg-violet-500/[0.08] flex items-center justify-center">
+            <Icon icon="solar:wallet-money-bold-duotone" className="text-xl text-violet-300" />
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-bold leading-tight text-violet-100 flex items-center gap-1.5">
+            <Icon icon="solar:clock-circle-bold-duotone" className="text-violet-300 text-[14px] shrink-0" />
+            Pembayaran Menunggu
+          </p>
+          <p className="mt-0.5 text-[11.5px] font-semibold text-white truncate">{item.nama_project}</p>
+          <p className="mt-0.5 text-[11px] text-white/50 truncate flex items-center gap-1">
+            <Icon icon="solar:map-point-linear" className="h-3 w-3 shrink-0" />
+            {item.lokasi}
+          </p>
+          <p className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-bold text-violet-300/80">
+            <Icon icon="solar:banknote-bold-duotone" className="text-[12px]" />
+            Komitmen: {formatRupiahCompact(item.nominal_komitmen)}
+          </p>
+        </div>
+
+        <span className="inline-flex items-center gap-1 text-[10.5px] font-bold text-violet-300 opacity-70 transition-opacity group-hover:opacity-100 shrink-0 pt-0.5">
+          Bayar
           <Icon icon="solar:arrow-right-linear" className="text-[12px] transition-transform group-hover:translate-x-0.5" />
         </span>
       </button>

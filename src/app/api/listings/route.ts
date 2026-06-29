@@ -34,7 +34,6 @@ export async function POST(request: NextRequest) {
       where: { id_agent: agentId },
       select: {
         id_agent: true,
-        poin: true,
         nama_kantor: true,
         pengguna: {
           select: {
@@ -204,11 +203,11 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ Listing created:', listing.id_property.toString());
 
-    // Tambah poin
-    const newPoin = agent.poin + 10;
-    await prisma.agent.update({
+    // Tambah poin secara atomic (cegah race condition jika ada request bersamaan)
+    const updatedAgent = await prisma.agent.update({
       where: { id_agent: agent.id_agent },
-      data: { poin: newPoin },
+      data: { poin: { increment: 10 } },
+      select: { poin: true },
     });
 
     await prisma.riwayatPoin.create({
@@ -220,8 +219,8 @@ export async function POST(request: NextRequest) {
         tipe_transaksi: 'DAPAT',
         id_referensi: listing.id_property.toString(),
         tabel_referensi: 'listing',
-        saldo_sebelum: agent.poin,
-        saldo_sesudah: newPoin,
+        saldo_sebelum: updatedAgent.poin - 10,
+        saldo_sesudah: updatedAgent.poin,
       },
     });
 

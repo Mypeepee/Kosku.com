@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 import { prisma } from "@/lib/prisma";
+import { pusherServer } from "@/lib/pusher-server";
 
 const ALLOWED_STATUSES = new Set(["menunggu_pembayaran", "lunas"]);
 
@@ -74,6 +75,7 @@ export async function PATCH(request: NextRequest) {
       },
       select: {
         id_project_investor: true,
+        id_agent: true,
         status: true,
         project: {
           select: {
@@ -118,6 +120,15 @@ export async function PATCH(request: NextRequest) {
         diupdate_tanggal: true,
       },
     });
+
+    // Real-time: beri tahu investor langsung jika statusnya berubah ke lunas
+    if (nextStatus === "lunas" && investor.id_agent) {
+      pusherServer
+        .trigger(`project-investor-${investor.id_agent}`, "pembayaran:lunas", {
+          id_project: investor.project.id_project,
+        })
+        .catch(() => {});
+    }
 
     return NextResponse.json({
       success: true,

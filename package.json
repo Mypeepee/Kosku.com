@@ -17,6 +17,7 @@
     "@google-cloud/vision": "^5.3.6",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^5.2.2",
+    "@iconify-json/solar": "^1.2.5",
     "@iconify/icons-ion": "^1.2.10",
     "@iconify/react": "^5.2.1",
     "@radix-ui/react-dialog": "^1.1.15",

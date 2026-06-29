@@ -43,12 +43,6 @@ function getRecordValue(
   return undefined;
 }
 
-function findExistingColumn(columns: string[], candidates: string[]) {
-  const lowered = new Set(columns.map((column) => column.toLowerCase()));
-  return (
-    candidates.find((candidate) => lowered.has(candidate.toLowerCase())) ?? null
-  );
-}
 
 function pickDisplayName(
   record: Record<string, unknown> | null | undefined,
@@ -102,24 +96,69 @@ export default async function DetailTransaksiPage({
 }: {
   params: { id_project: string };
 }) {
+  // Query 1: project data — semua query berikutnya bergantung padanya
   const project = await prisma.project.findUnique({
     where: { id_project: params.id_project },
-    include: {
-      pembuat: true,
+    select: {
+      id_project: true,
+      dibuat_oleh: true,
+      id_listing: true,
+      nama_project: true,
+      alamat_property: true,
+      provinsi: true,
+      kota: true,
+      kecamatan: true,
+      kelurahan: true,
+      gambar_thumbnail: true,
+      tanggal_pembelian: true,
+      harga_pembelian: true,
+      estimasi_harga_jual: true,
+      estimasi_profit_bersih: true,
+      target_pendanaan: true,
+      total_pendanaan: true,
+      jenis_pendanaan: true,
+      status: true,
+      mulai_tanggal: true,
+      estimasi_selesai: true,
+      estimasi_bulan: true,
+      pendanaan_ditutup_pada: true,
+      deskripsi_project: true,
+      nilai_limit_lelang: true,
+      spare_bidding: true,
+      biaya_eksekusi: true,
+      biaya_renov: true,
+      biaya_balik_nama: true,
+      total_biaya_akuisisi: true,
+      dana_cadangan: true,
+      dibuat_tanggal: true,
+      diupdate_tanggal: true,
       investorProject: {
-        include: {
-          agent: true,
+        select: {
+          id_project_investor: true,
+          id_agent: true,
+          nominal_komitmen: true,
+          persentase_kepemilikan: true,
+          status: true,
+          agent: {
+            select: { foto_profil_url: true },
+          },
         },
       },
-      cmaEntries: true,
+      cmaEntries: {
+        select: {
+          id_project_cma: true,
+          nama: true,
+          luas_tanah: true,
+          harga: true,
+          catatan: true,
+        },
+      },
     },
   });
 
   if (!project) {
     notFound();
   }
-
-  const creator = project.pembuat as Record<string, unknown> | null;
 
   const relatedAgentIds = Array.from(
     new Set(
@@ -131,19 +170,19 @@ export default async function DetailTransaksiPage({
     )
   );
 
-  const agentIdentityRows =
+  // Queries 2-4 dijalankan paralel — dari 5 round-trip serial menjadi 2
+  const [agentIdentityRows, listing, projectSelesaiRows] = await Promise.all([
+    // Identitas semua agent (creator + investor) dalam satu query
     relatedAgentIds.length > 0
-      ? await prisma.$queryRaw<
+      ? prisma.$queryRaw<
           Array<{
             id_agent: string;
-            id_pengguna: string | null;
             nama_lengkap: string | null;
             foto_profil_url: string | null;
           }>
         >(Prisma.sql`
           SELECT
             a.id_agent,
-            a.id_pengguna,
             a.foto_profil_url,
             p.nama_lengkap
           FROM public.agent a
@@ -151,7 +190,61 @@ export default async function DetailTransaksiPage({
             ON p.id_pengguna = a.id_pengguna
           WHERE a.id_agent IN (${Prisma.join(relatedAgentIds)})
         `)
-      : [];
+      : Promise.resolve(
+          [] as Array<{ id_agent: string; nama_lengkap: string | null; foto_profil_url: string | null }>
+        ),
+
+    // Data listing via Prisma — menggantikan information_schema + $queryRawUnsafe
+    project.id_listing != null
+      ? prisma.listing.findUnique({
+          where: { id_property: project.id_listing },
+          select: { luas_tanah: true, luas_bangunan: true, jenis_transaksi: true },
+        })
+      : Promise.resolve(null),
+
+    // Data project selesai
+    prisma.$queryRaw<
+      Array<{
+        id_project: string;
+        id_listing: number | null;
+        tanggal_pembelian: Date | string | null;
+        tanggal_terjual: Date | string | null;
+        durasi_hari: number | null;
+        harga_jual: Prisma.Decimal | number | string | null;
+        total_biaya_akuisisi: Prisma.Decimal | number | string | null;
+        profit_kotor: Prisma.Decimal | number | string | null;
+        pph_percent: Prisma.Decimal | number | string | null;
+        ajb_percent: Prisma.Decimal | number | string | null;
+        agent_fee_percent: Prisma.Decimal | number | string | null;
+        total_biaya_transaksi: Prisma.Decimal | number | string | null;
+        profit_bersih: Prisma.Decimal | number | string | null;
+        roi_bersih: Prisma.Decimal | number | string | null;
+        dibuat_tanggal: Date | string | null;
+        diupdate_tanggal: Date | string | null;
+      }>
+    >(Prisma.sql`
+      SELECT
+        id_project,
+        id_listing,
+        tanggal_pembelian,
+        tanggal_terjual,
+        durasi_hari,
+        harga_jual,
+        total_biaya_akuisisi,
+        profit_kotor,
+        pph_percent,
+        ajb_percent,
+        agent_fee_percent,
+        total_biaya_transaksi,
+        profit_bersih,
+        roi_bersih,
+        dibuat_tanggal,
+        diupdate_tanggal
+      FROM public.project_selesai
+      WHERE id_project = ${params.id_project}
+      LIMIT 1
+    `),
+  ]);
 
   const agentIdentityMap = new Map(
     agentIdentityRows.map((row) => [
@@ -163,87 +256,10 @@ export default async function DetailTransaksiPage({
     ])
   );
 
-  const listingColumnRows = await prisma.$queryRaw<
-    Array<{ table_schema: string; column_name: string }>
-  >`
-    SELECT table_schema, column_name
-    FROM information_schema.columns
-    WHERE table_name = 'listing'
-      AND table_schema NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY table_schema, ordinal_position
-  `;
-
-  const availableSchemas = Array.from(
-    new Set(listingColumnRows.map((row) => row.table_schema))
-  );
-
-  const listingSchema =
-    availableSchemas.find((schema) => schema === "public") ??
-    availableSchemas[0] ??
-    null;
-
-  const listingColumns = listingColumnRows
-    .filter((row) => row.table_schema === listingSchema)
-    .map((row) => row.column_name);
-
-  const listingKeyColumn = findExistingColumn(listingColumns, [
-    "id_listing",
-    "listing_id",
-    "id_property",
-    "property_id",
-    "id",
-    "idlisting",
-    "idproperty",
-  ]);
-
-  const listingRows =
-    project.id_listing != null && listingSchema && listingKeyColumn
-      ? await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
-          `SELECT *
-           FROM "${listingSchema}"."listing"
-           WHERE "${listingKeyColumn}" = $1
-           LIMIT 1`,
-          project.id_listing
-        )
-      : [];
-
-  const listing = listingRows[0] ?? null;
-
-  const listingLandArea = toNumeric(
-    getRecordValue(listing, [
-      "luas_tanah",
-      "land_area",
-      "landArea",
-      "lt",
-      "luastanah",
-    ])
-  );
-
-  const listingBuildingArea = toNumeric(
-    getRecordValue(listing, [
-      "luas_bangunan",
-      "building_area",
-      "buildingArea",
-      "lb",
-      "luasbangunan",
-    ])
-  );
-
-  const listingKind = toText(
-    getRecordValue(listing, [
-      "jenis_listing",
-      "tipe_listing",
-      "kategori_listing",
-      "jenis_property",
-      "property_type",
-      "jenis",
-      "tipe",
-      "category",
-    ])
-  ).toLowerCase();
-
-  const isSecondary =
-    listingKind.includes("secondary") || listingKind.includes("sekunder");
+  // Akses field listing langsung — tidak perlu getRecordValue lagi
+  const listingLandArea = toNumeric(listing?.luas_tanah);
+  const listingBuildingArea = toNumeric(listing?.luas_bangunan);
+  const isSecondary = listing?.jenis_transaksi === "SECONDARY";
 
   const assetArea =
     isSecondary && listingBuildingArea > 0
@@ -254,53 +270,11 @@ export default async function DetailTransaksiPage({
 
   const creatorIdentity = agentIdentityMap.get(project.dibuat_oleh);
 
-  const projectSelesaiRows = await prisma.$queryRaw<
-    Array<{
-      id_project: string;
-      id_listing: number | null;
-      tanggal_pembelian: Date | string | null;
-      tanggal_terjual: Date | string | null;
-      durasi_hari: number | null;
-      harga_jual: Prisma.Decimal | number | string | null;
-      total_biaya_akuisisi: Prisma.Decimal | number | string | null;
-      profit_kotor: Prisma.Decimal | number | string | null;
-      pph_percent: Prisma.Decimal | number | string | null;
-      ajb_percent: Prisma.Decimal | number | string | null;
-      agent_fee_percent: Prisma.Decimal | number | string | null;
-      total_biaya_transaksi: Prisma.Decimal | number | string | null;
-      profit_bersih: Prisma.Decimal | number | string | null;
-      roi_bersih: Prisma.Decimal | number | string | null;
-      dibuat_tanggal: Date | string | null;
-      diupdate_tanggal: Date | string | null;
-    }>
-  >(Prisma.sql`
-    SELECT
-      id_project,
-      id_listing,
-      tanggal_pembelian,
-      tanggal_terjual,
-      durasi_hari,
-      harga_jual,
-      total_biaya_akuisisi,
-      profit_kotor,
-      pph_percent,
-      ajb_percent,
-      agent_fee_percent,
-      total_biaya_transaksi,
-      profit_bersih,
-      roi_bersih,
-      dibuat_tanggal,
-      diupdate_tanggal
-    FROM public.project_selesai
-    WHERE id_project = ${params.id_project}
-    LIMIT 1
-  `);
-
   const projectSelesai = projectSelesaiRows[0] ?? null;
 
   const viewModel = {
     id: project.id_project,
-    listingId: project.id_listing,
+    listingId: project.id_listing != null ? Number(project.id_listing) : undefined,
     name: project.nama_project,
     address: project.alamat_property,
     province: project.provinsi,
@@ -330,9 +304,8 @@ export default async function DetailTransaksiPage({
     description: project.deskripsi_project,
 
     createdById: project.dibuat_oleh,
-    createdByName:
-      creatorIdentity?.name || pickDisplayName(creator, project.dibuat_oleh),
-    createdByAvatar: creatorIdentity?.avatar || pickAvatar(creator),
+    createdByName: creatorIdentity?.name || project.dibuat_oleh,
+    createdByAvatar: creatorIdentity?.avatar || null,
 
     auctionLimitValue: toNumeric(project.nilai_limit_lelang),
     spareBidding: toNumeric(project.spare_bidding),
@@ -359,7 +332,7 @@ export default async function DetailTransaksiPage({
             ? toNumeric(item.persentase_kepemilikan)
             : null,
         status: item.status,
-        note: item.catatan,
+        note: null,
       };
     }),
 
@@ -403,7 +376,7 @@ export default async function DetailTransaksiPage({
           diupdate_tanggal: projectSelesai.diupdate_tanggal,
         }
       : null,
-  } as ProjectDetailViewModel & {
+  } as unknown as ProjectDetailViewModel & {
     tanggal_terjual?: Date | string | null;
     harga_jual?: number;
     total_biaya_transaksi?: number;
