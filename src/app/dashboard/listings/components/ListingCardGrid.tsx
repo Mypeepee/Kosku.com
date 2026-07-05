@@ -42,12 +42,14 @@ function toPropertyItem(l: Listing): PropertyItem {
     agent_name: l.agentName,
     agent_photo: l.agentPhoto,
     agent_office: l.agentOffice,
+    is_hot_deal: !!l.isHotDeal,
   };
 }
 
 interface ListingCardGridProps {
   listings: Listing[];
   currentAgentId?: string | null;
+  userRole?: string;
   currentPage: number;
   totalItems: number;
   pageSize: number;
@@ -72,11 +74,13 @@ function buildSearchParams(
 
 export default function ListingCardGrid({
   listings,
+  userRole,
   currentPage,
   totalItems,
   pageSize,
   initialFilters,
 }: ListingCardGridProps) {
+  const canManageAll = userRole === "OWNER" || userRole === "STOKER";
   const router = useRouter();
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
@@ -85,6 +89,8 @@ export default function ListingCardGrid({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [marking, setMarking] = useState(false);
+  const [takedownOpen, setTakedownOpen] = useState(false);
+  const [takingDown, setTakingDown] = useState(false);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const prevPageRef = useRef<number>(currentPage);
@@ -218,6 +224,37 @@ export default function ListingCardGrid({
     }
   };
 
+  const handleConfirmTakedown = async () => {
+    if (!selectedIds.length || takingDown) return;
+    setTakingDown(true);
+    try {
+      const res = await fetch("/api/listings/status", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds, status: "TARIK_LISTING" }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Gagal menarik listing.");
+      }
+
+      const count = data?.count ?? selectedIds.length;
+      toast.success(`${count} listing berhasil ditarik dari penayangan.`, {
+        description: "Data tetap tersimpan dan bisa diaktifkan kembali.",
+      });
+      setSelectedIds([]);
+      setTakedownOpen(false);
+      router.refresh();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Terjadi kesalahan, coba lagi."
+      );
+    } finally {
+      setTakingDown(false);
+    }
+  };
+
   // Scroll to the first card row whenever the page actually changes.
   // Runs AFTER new data has rendered, so the smooth scroll lands correctly.
   useEffect(() => {
@@ -288,6 +325,17 @@ export default function ListingCardGrid({
             Tandai Terjual ({selectedIds.length})
           </button>
 
+          {canManageAll && (
+            <button
+              onClick={() => selectedIds.length > 0 && setTakedownOpen(true)}
+              disabled={selectedIds.length === 0}
+              className="group inline-flex items-center gap-1.5 rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-200 transition-all hover:border-red-300/70 hover:bg-red-500/20 hover:shadow-[0_0_16px_rgba(239,68,68,0.35)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none"
+            >
+              <Icon icon="solar:eye-closed-bold-duotone" className="text-sm text-red-300" />
+              Takedown ({selectedIds.length})
+            </button>
+          )}
+
           <Link
             href="/tambah-property"
             className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-4 py-1.5 text-[11px] font-bold text-emerald-100 shadow-[0_0_16px_rgba(16,185,129,0.3)] transition-all hover:border-emerald-300 hover:bg-emerald-500/25 hover:shadow-[0_0_20px_rgba(16,185,129,0.5)]"
@@ -330,7 +378,18 @@ export default function ListingCardGrid({
                     isSelected ? "drop-shadow-[0_0_18px_rgba(52,211,153,0.45)]" : ""
                   }`}
                 >
-                  <PropertyCard item={toPropertyItem(listing)} forceAlamatLengkap />
+                  <PropertyCard
+                    item={toPropertyItem(listing)}
+                    forceAlamatLengkap
+                    idBadge={listing.id}
+                    onIdBadgeClick={(e, id) => {
+                      navigator.clipboard.writeText(id);
+                      toast.success(`ID #${id} disalin`, {
+                        duration: 1500,
+                        description: "ID properti tersalin ke clipboard",
+                      });
+                    }}
+                  />
                 </div>
 
                 <div
@@ -373,9 +432,6 @@ export default function ListingCardGrid({
                       </span>
                     </div>
 
-                    <span className="hidden font-mono text-[10px] text-zinc-600 sm:block">
-                      #{listing.id}
-                    </span>
                   </div>
 
                   <Link
@@ -485,6 +541,17 @@ export default function ListingCardGrid({
         loading={marking}
         onConfirm={handleConfirmSold}
         onCancel={() => !marking && setConfirmOpen(false)}
+      />
+
+      {/* ── Takedown confirm (OWNER / STOKER only) ── */}
+      <MarkSoldDialog
+        open={takedownOpen}
+        count={selectedIds.length}
+        preview={selectedPreview}
+        loading={takingDown}
+        onConfirm={handleConfirmTakedown}
+        onCancel={() => !takingDown && setTakedownOpen(false)}
+        variant="takedown"
       />
     </div>
   );

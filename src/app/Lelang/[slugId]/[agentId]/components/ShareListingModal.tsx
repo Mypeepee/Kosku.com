@@ -229,7 +229,7 @@ export default function ShareListingModal({
     copy();
   };
 
-  const dlPoster = () => downloadPropertyImages(posterImages, setDownloading);
+  const dlImages = () => downloadPropertyImages(posterImages, setDownloading);
 
   const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=4&color=86efac&bgcolor=0c0c0c&data=${encodeURIComponent(shareUrl)}`;
 
@@ -593,7 +593,7 @@ export default function ShareListingModal({
             <div>
               <p
                 className="text-[9px] font-black mb-2 uppercase"
-                style={{ color: "rgba(255,255,255,0.2)", letterSpacing: "0.17em" }}
+                style={{ color: "#ffffff", letterSpacing: "0.17em" }}
               >
                 Link kamu — kode ditempel otomatis
               </p>
@@ -703,9 +703,9 @@ export default function ShareListingModal({
                 <span className="text-[10px] font-bold text-white/60">Bagikan…</span>
               </button>
 
-              {/* Download Poster */}
+              {/* Download Gambar */}
               <button
-                onClick={dlPoster}
+                onClick={dlImages}
                 disabled={downloading || posterImages.length === 0}
                 className="flex flex-col items-center gap-2.5 py-4 rounded-2xl transition-all active:scale-95 hover:scale-[1.03] disabled:opacity-40"
                 style={{
@@ -727,7 +727,7 @@ export default function ShareListingModal({
                   />
                 </div>
                 <span className="text-[10px] font-bold text-white/60">
-                  {downloading ? "..." : "Poster"}
+                  {downloading ? "..." : "Gambar"}
                 </span>
               </button>
             </div>

@@ -3615,6 +3615,26 @@ export function PremiumAgentDashboard() {
   // /api/dashboard/agent/kpi-cards. Sekarang cukup 1 request.
   const kpi = useAgentKpiCards();
 
+  // Auto-scroll ke kalender bila dibuka lewat link email pengingat acara
+  // (mis. /dashboard#kalender). Dashboard di-load async (dynamic import +
+  // data), jadi hash-scroll native browser tidak jalan — kita polling
+  // elemennya lalu scroll manual begitu muncul.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash !== "#kalender") return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      const el = document.getElementById("kalender");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        clearInterval(timer);
+      } else if (++tries > 40) {
+        clearInterval(timer); // menyerah setelah ~10 detik
+      }
+    }, 250);
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* ROW 1 — KPI STRIP: 4 uniform premium tiles
@@ -3636,7 +3656,7 @@ export function PremiumAgentDashboard() {
          cards scroll internally when content overflows. On mobile/tablet
          the column reverts to a natural vertical stack. */}
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-3 lg:items-stretch">
-        <div className="lg:col-span-2 min-w-0">
+        <div id="kalender" className="lg:col-span-2 min-w-0 scroll-mt-24">
           <AgentCalendar compact />
         </div>
 

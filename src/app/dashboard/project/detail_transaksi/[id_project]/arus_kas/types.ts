@@ -8,19 +8,27 @@ export type WalletKey =
 export type DbProject = {
   id_project: string;
   nama_project: string;
+  dibuat_oleh: string;
+  status?: string;
+  target_pendanaan?: number;
+  total_pendanaan?: number;
+  total_biaya_akuisisi?: number;
+  nilai_limit_lelang?: number;
+  spare_bidding?: number;
+  biaya_balik_nama?: number;
+  biaya_eksekusi?: number;
+  biaya_renov?: number;
+  dana_cadangan?: number;
+  estimasi_harga_jual?: number;
+  estimasi_profit_bersih?: number;
+  dibuat_tanggal?: string | Date;
+};
+
+export type CurrentInvestorInfo = {
+  nama: string | null;
+  nominal_komitmen: number;
+  persentase_kepemilikan: number | null;
   status: string;
-  target_pendanaan: number;
-  total_pendanaan: number;
-  total_biaya_akuisisi: number;
-  nilai_limit_lelang: number;
-  spare_bidding: number;
-  biaya_balik_nama: number;
-  biaya_eksekusi: number;
-  biaya_renov: number;
-  dana_cadangan: number;
-  estimasi_harga_jual: number;
-  estimasi_profit_bersih: number;
-  dibuat_tanggal: string | Date;
 };
 
 export type DbCashflow = {
@@ -58,6 +66,7 @@ export type ManageFundData = {
   totalExpense: number;
   totalBalance: number;
   totalRemainingBudget: number;
+  currentInvestorInfo: CurrentInvestorInfo | null;
 };
 
 export type ProjectInvestorOption = {

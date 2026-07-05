@@ -2,10 +2,10 @@
 import { Icon } from "@iconify/react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-const Sidebar = () => {
+const Sidebar = ({ baseUrl = "/Jual" }: { baseUrl?: string }) => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const BASE_URL = "/Jual";
+  const BASE_URL = baseUrl;
 
   // Helper Update URL
   const updateFilter = (key: string, value: string | null) => {

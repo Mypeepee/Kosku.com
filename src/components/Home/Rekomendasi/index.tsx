@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
+import { HotDealBadge, HOT_DEAL_CARD_CLASS } from "@/components/HotDeal/HotDealBadge";
+import { SliderDots } from "@/components/SliderDots";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +29,7 @@ interface ListingItem {
   agent_name: string;
   agent_photo: string;
   agent_office: string;
+  is_hot_deal: boolean;
 }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
@@ -130,16 +133,11 @@ function MiniGallery({
           >
             <Icon icon="solar:alt-arrow-right-linear" className="text-lg" />
           </button>
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
-            {images.map((_, i) => (
-              <div
-                key={i}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === idx ? "bg-white w-4" : "bg-white/40 w-2"
-                }`}
-              />
-            ))}
-          </div>
+          <SliderDots
+            total={images.length}
+            index={idx}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20"
+          />
         </>
       )}
     </div>
@@ -162,36 +160,53 @@ function JualCard({ item }: { item: ListingItem }) {
     ? Math.round(((item.harga - item.harga_promo!) / item.harga) * 100)
     : 0;
   const mainPrice = hasDiscount ? item.harga_promo! : item.harga;
+  const [idCopied, setIdCopied] = useState(false);
 
   return (
-    <div className="bg-[#111111] border border-white/5 rounded-3xl overflow-hidden group transition-all duration-300 flex flex-col h-full hover:border-emerald-400/70 hover:shadow-[0_24px_70px_-30px_rgba(16,185,129,0.7)]">
+    <div className={`bg-[#111111] rounded-3xl overflow-hidden group transition-all duration-300 flex flex-col h-full ${item.is_hot_deal ? HOT_DEAL_CARD_CLASS : "border border-white/5 hover:border-emerald-400/70 hover:shadow-[0_24px_70px_-30px_rgba(16,185,129,0.7)]"}`}>
       <div className="relative">
         <MiniGallery images={images} alt={item.judul} height="h-64 md:h-72" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/0 pointer-events-none" />
 
-        <div className="absolute top-3 left-3 right-3 z-20 flex items-center gap-2">
+        {/* Kategori — pojok kanan atas, posisi TETAP baik ada/tidak Hot Deal */}
+        <span className="absolute top-3 right-3 z-20 bg-black/70 backdrop-blur-sm border border-white/10 text-white text-[10px] font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5">
+          <Icon icon={getPropertyIcon(item.kategori)} className="text-sm opacity-90" />
+          {item.kategori}
+        </span>
+
+        {/* Badge kiri — Hot Deal paling atas (bikin FOMO) + tipe transaksi */}
+        <div className="absolute top-3 left-3 z-20 flex flex-col items-start gap-2 max-w-[calc(100%-6.5rem)]">
+          {item.is_hot_deal && <HotDealBadge />}
           <span
             className={`${getBadgeColor(item.jenis_transaksi)} text-white text-[10px] font-semibold px-3 py-1.5 rounded-full shadow-md uppercase tracking-wide inline-flex items-center gap-1`}
           >
             <Icon icon="solar:star-bold-duotone" className="text-xs opacity-90" />
             {item.jenis_transaksi}
           </span>
-          <span className="ml-auto bg-black/70 backdrop-blur-sm border border-white/10 text-white text-[10px] font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5">
-            <Icon icon={getPropertyIcon(item.kategori)} className="text-sm opacity-90" />
-            {item.kategori}
-          </span>
         </div>
 
-        {hasDiscount && (
-          <div className="absolute bottom-4 right-3 z-20">
-            <div className="absolute inset-0 blur-xl bg-gradient-to-r from-rose-500/40 via-orange-500/40 to-amber-400/40 opacity-70 animate-pulse pointer-events-none" />
-            <span className="absolute -top-2 -right-1 w-3 h-3 rounded-full bg-amber-300 animate-ping" />
-            <div className="relative bg-gradient-to-r from-rose-600 via-orange-500 to-amber-400 text-white px-3.5 py-1.5 rounded-full text-[11px] font-extrabold tracking-wide shadow-[0_0_20px_rgba(248,113,113,0.9)] flex items-center gap-1.5">
-              <Icon icon="solar:fire-bold-duotone" className="text-sm" />
-              -{discountPct}%
-            </div>
-          </div>
-        )}
+        {/* ID pill — pojok kiri bawah */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            navigator.clipboard.writeText(item.id_property);
+            setIdCopied(true);
+            setTimeout(() => setIdCopied(false), 2000);
+          }}
+          title="Salin ID properti"
+          className="group/id absolute bottom-3 left-3 z-30 inline-flex items-stretch overflow-hidden rounded-md font-mono text-[11px] shadow-md ring-1 ring-white/10 transition-transform duration-200 hover:scale-[1.03]"
+        >
+          <span className="flex items-center bg-emerald-500 px-1.5 text-[9px] font-bold uppercase tracking-wider text-black">ID</span>
+          <span className="flex items-center gap-1.5 bg-black px-2 py-1 tracking-wide text-white">
+            {item.id_property}
+            <Icon
+              icon={idCopied ? "solar:check-circle-bold-duotone" : "solar:copy-line-duotone"}
+              className={`text-[11px] transition-all duration-200 ${idCopied ? "text-emerald-400 opacity-100" : "text-white/40 opacity-0 group-hover/id:opacity-100"}`}
+            />
+          </span>
+        </button>
       </div>
 
       <div className="p-5 md:p-6 flex flex-col flex-grow gap-3">
@@ -199,16 +214,16 @@ function JualCard({ item }: { item: ListingItem }) {
           {hasDiscount ? (
             <>
               <div className="flex items-center gap-2">
-                <h3 className="text-white text-xl font-black tracking-tight">
-                  {formatCurrency(mainPrice)}
-                </h3>
-                <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                  Hemat {formatCurrency(item.harga - mainPrice)}
+                <span className="text-gray-500 text-xs line-through">
+                  {formatCurrency(item.harga)}
+                </span>
+                <span className="rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-400">
+                  -{discountPct}%
                 </span>
               </div>
-              <p className="text-xs text-gray-500 line-through decoration-rose-400/80">
-                {formatCurrency(item.harga)}
-              </p>
+              <h3 className="text-white text-xl font-black tracking-tight">
+                {formatCurrency(mainPrice)}
+              </h3>
             </>
           ) : (
             <h3 className="text-white text-xl font-black tracking-tight">
@@ -344,14 +359,17 @@ function LelangCard({ item }: { item: ListingItem }) {
     item.foto_list?.length > 0
       ? item.foto_list
       : [item.gambar || "/images/hero/banner.jpg"];
+  const [idCopied, setIdCopied] = useState(false);
 
   return (
-    <div className="bg-[#050608] border border-white/10 rounded-3xl overflow-hidden group relative flex flex-col h-full shadow-[0_18px_60px_rgba(0,0,0,0.9)] before:content-[''] before:absolute before:inset-px before:rounded-[22px] before:border before:border-white/5 before:pointer-events-none hover:border-emerald-400/60 hover:shadow-[0_22px_70px_rgba(34,197,94,0.3)] transition-all duration-300">
+    <div className={`bg-[#050608] rounded-3xl overflow-hidden group relative flex flex-col h-full before:content-[''] before:absolute before:inset-px before:rounded-[22px] before:border before:pointer-events-none transition-all duration-300 ${item.is_hot_deal ? HOT_DEAL_CARD_CLASS : "border border-white/10 shadow-[0_18px_60px_rgba(0,0,0,0.9)] before:border-white/5 hover:border-emerald-400/60 hover:shadow-[0_22px_70px_rgba(34,197,94,0.3)]"}`}>
       <div className="relative after:content-[''] after:absolute after:inset-x-6 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-emerald-400/40 after:to-transparent after:opacity-70">
         <MiniGallery images={images} alt={item.judul} height="h-64" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-70 pointer-events-none" />
 
-        <div className="absolute top-4 left-4 z-10">
+        {/* Badge kiri: Hot Deal paling atas (bikin FOMO) + kategori */}
+        <div className="absolute top-4 left-4 z-20 flex flex-col items-start gap-2">
+          {item.is_hot_deal && <HotDealBadge />}
           <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-black/80 text-emerald-300 text-[11px] font-semibold border border-emerald-400/40 backdrop-blur-sm">
             <Icon icon={getPropertyIcon(item.kategori)} className="text-base" />
             {item.kategori}
@@ -361,6 +379,29 @@ function LelangCard({ item }: { item: ListingItem }) {
         <div className="absolute top-4 right-4 z-10">
           <LelangCountdownBadge tanggal_lelang={item.tanggal_lelang} />
         </div>
+
+        {/* ID pill — pojok kiri bawah */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            navigator.clipboard.writeText(String(item.id_property));
+            setIdCopied(true);
+            setTimeout(() => setIdCopied(false), 2000);
+          }}
+          title="Salin ID properti"
+          className="group/id absolute bottom-3 left-3 z-30 inline-flex items-stretch overflow-hidden rounded-md font-mono text-[11px] shadow-md ring-1 ring-white/10 transition-transform duration-200 hover:scale-[1.03]"
+        >
+          <span className="flex items-center bg-emerald-500 px-1.5 text-[9px] font-bold uppercase tracking-wider text-black">ID</span>
+          <span className="flex items-center gap-1.5 bg-black px-2 py-1 tracking-wide text-white">
+            {item.id_property}
+            <Icon
+              icon={idCopied ? "solar:check-circle-bold-duotone" : "solar:copy-line-duotone"}
+              className={`text-[11px] transition-all duration-200 ${idCopied ? "text-emerald-400 opacity-100" : "text-white/40 opacity-0 group-hover/id:opacity-100"}`}
+            />
+          </span>
+        </button>
       </div>
 
       <div className="p-5 flex flex-col flex-grow bg-gradient-to-b from-slate-900/80 via-slate-950/90 to-black border-t border-slate-800 backdrop-blur-sm">

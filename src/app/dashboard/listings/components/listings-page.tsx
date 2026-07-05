@@ -88,6 +88,7 @@ export default function ListingsPage({
         <ListingCardGrid
           listings={listings}
           currentAgentId={currentAgentId}
+          userRole={userRole}
           currentPage={currentPage}
           totalItems={totalItems}
           pageSize={pageSize}

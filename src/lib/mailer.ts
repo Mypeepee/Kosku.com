@@ -121,6 +121,50 @@ function formatJoinedAt(d?: Date | null): string {
   }
 }
 
+/** Tanggal lengkap + nama hari, mis. "Senin, 6 Juli 2026" (zona WIB). */
+function formatEventDate(d?: Date | null): string {
+  const date = d ? new Date(d) : new Date();
+  try {
+    return new Intl.DateTimeFormat("id-ID", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "Asia/Jakarta",
+    }).format(date);
+  } catch {
+    return date.toISOString();
+  }
+}
+
+/** Jam:menit 24-jam, mis. "10:00" (zona WIB). */
+function formatEventClock(d?: Date | null): string {
+  const date = d ? new Date(d) : new Date();
+  try {
+    return new Intl.DateTimeFormat("id-ID", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: "Asia/Jakarta",
+    })
+      .format(date)
+      .replace(/\./g, ":");
+  } catch {
+    return "--:--";
+  }
+}
+
+/** Frasa hitung mundur yang ramah, mis. "3 jam lagi" / "45 menit lagi". */
+function humanizeUntil(start?: Date | null, now: Date = new Date()): string {
+  if (!start) return "Segera";
+  const diffMs = new Date(start).getTime() - now.getTime();
+  if (diffMs <= 60 * 1000) return "Dimulai sekarang";
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 60) return `${mins} menit lagi`;
+  const hours = Math.round(mins / 60);
+  return `${hours} jam lagi`;
+}
+
 /** Satu baris data: label kecil uppercase mint + value terang. */
 function dataRow(label: string, value: string, link?: { href: string }): string {
   const inner = link
@@ -152,8 +196,22 @@ function helpRow() {
  * Shell email bersama (DARK EMERALD). bgcolor solid di tiap sel + override
  * dark-mode untuk menjaga keterbacaan.
  */
-function renderEmailShell(opts: { title: string; preheader: string; content: string }) {
+function renderEmailShell(opts: {
+  title: string;
+  preheader: string;
+  content: string;
+  hideLogo?: boolean;
+}) {
   const year = new Date().getFullYear();
+  // Sebagian email (mis. pengingat acara) sengaja tanpa logo di atas —
+  // langsung mulai dari pill. Sisanya tetap tampil logo brand.
+  const brandHeader = opts.hideLogo
+    ? ""
+    : `
+          <!-- brand header -->
+          <tr><td bgcolor="${E.card}" align="center" style="padding:30px 40px 6px;background-color:${E.card};">
+            <img src="${BASE_URL}/images/logo/LogoSolusindoPremier.png" alt="Solusindo Aset" width="180" height="auto" style="display:block;height:auto;max-width:180px;border:0;" />
+          </td></tr>`;
   return `<!doctype html>
 <html lang="id" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -199,10 +257,7 @@ function renderEmailShell(opts: { title: string; preheader: string; content: str
           <!-- accent bar -->
           <tr><td bgcolor="${E.emerald}" height="6" style="height:6px;line-height:6px;font-size:0;background-color:${E.emerald};background-image:linear-gradient(90deg,${E.emeraldBright},${E.emerald},${E.teal},${E.emeraldBright});">&nbsp;</td></tr>
 
-          <!-- brand header -->
-          <tr><td bgcolor="${E.card}" align="center" style="padding:30px 40px 6px;background-color:${E.card};">
-            <img src="${BASE_URL}/images/logo/LogoSolusindoPremier.png" alt="Solusindo Aset" width="180" height="auto" style="display:block;height:auto;max-width:180px;border:0;" />
-          </td></tr>
+          ${brandHeader}
 
           ${opts.content}
 
@@ -971,6 +1026,215 @@ export async function sendOtpEmail(to: string, otp: string): Promise<{ delivered
     return { delivered: true };
   } catch (err) {
     console.error("❌ Gagal mengirim email OTP:", err);
+    return { delivered: false };
+  }
+}
+
+/* ===========================================================================
+ *  EMAIL 6: PENGINGAT ACARA  →  AGENT (dikirim H-3 jam sebelum acara mulai)
+ *
+ *  Contoh: acara Senin, 6 Juli 2026 pukul 10:00–11:00 → email dikirim
+ *  pukul 07:00 (3 jam sebelum mulai). Didesain agar SANGAT mudah dibaca:
+ *  waktu ditampilkan besar, bahasa formal & ramah, tips singkat di bawah.
+ * ========================================================================= */
+
+export type AgentEventReminderEmailOpts = {
+  agentName?: string | null;
+  eventTitle: string;
+  startAt: Date; // waktu mulai acara
+  endAt?: Date | null; // waktu selesai (opsional)
+  category?: string | null; // kategori acara, mis. "Open House", "Meeting"
+  location?: string | null; // lokasi / tempat acara
+  locationUrl?: string | null; // link Google Maps / link meeting online
+  notes?: string | null; // catatan tambahan dari agent
+  detailUrl: string; // link ke detail acara di dashboard
+  now?: Date; // waktu acuan hitung mundur (default: sekarang) — untuk testing
+};
+
+export function agentEventReminderEmailHtml(o: AgentEventReminderEmailOpts) {
+  const greet = o.agentName ? `Halo, ${esc(o.agentName)}` : "Halo";
+  const title = esc(o.eventTitle || "Acara Anda");
+  const dateStr = esc(formatEventDate(o.startAt));
+  const startClock = esc(formatEventClock(o.startAt));
+  const endClock = o.endAt ? esc(formatEventClock(o.endAt)) : "";
+  const countdown = esc(humanizeUntil(o.startAt, o.now));
+  const category = o.category ? esc(o.category) : "";
+  const location = o.location ? esc(o.location) : "";
+  const locationUrl = o.locationUrl ? esc(o.locationUrl) : "";
+  const notes = o.notes ? esc(o.notes) : "";
+  const detail = esc(o.detailUrl);
+
+  const strong = (t: string) =>
+    `<strong class="em-mint" style="color:${E.mint};font-weight:700;">${t}</strong>`;
+
+  const timeRange = endClock
+    ? `${startClock} &ndash; ${endClock} WIB`
+    : `${startClock} WIB`;
+
+  // Chip kategori di dalam tiket (hanya bila ada).
+  const categoryChip = category
+    ? `<span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:${E.mint};background-color:#082018;border:1px solid ${E.panelBorder};border-radius:999px;padding:5px 13px;margin-bottom:12px;">${category}</span>`
+    : "";
+
+  // Blok LOKASI menonjol dengan ikon + tombol "Buka di Peta" (bila ada link).
+  const locationBlock = location
+    ? `
+          <tr><td bgcolor="${E.card}" style="padding:16px 40px 0;background-color:${E.card};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:16px;">
+              <tr>
+                <td valign="top" width="46" style="padding:16px 0 16px 16px;font-size:20px;">&#128205;</td>
+                <td style="padding:16px 18px 16px 6px;">
+                  <div class="em-emerald" style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:${E.emeraldBright};font-weight:700;margin-bottom:5px;">Lokasi</div>
+                  <div class="em-ink" style="font-size:15px;font-weight:700;color:${E.ink};line-height:1.45;">${location}</div>
+                  ${
+                    locationUrl
+                      ? `<a href="${locationUrl}" target="_blank" rel="noopener noreferrer" class="em-mint" style="display:inline-block;margin-top:10px;font-size:12.5px;font-weight:700;color:${E.mint};text-decoration:none;">&#128506;&nbsp; Buka di Peta &nbsp;&rarr;</a>`
+                      : ""
+                  }
+                </td>
+              </tr>
+            </table>
+          </td></tr>`
+    : "";
+
+  // Catatan tambahan (bila ada).
+  const notesBlock = notes
+    ? `
+          <tr><td bgcolor="${E.card}" style="padding:16px 40px 0;background-color:${E.card};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:16px;">
+              <tr>
+                <td valign="top" width="46" style="padding:16px 0 16px 16px;font-size:20px;">&#128221;</td>
+                <td style="padding:16px 18px 16px 6px;">
+                  <div class="em-emerald" style="font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:${E.emeraldBright};font-weight:700;margin-bottom:5px;">Catatan</div>
+                  <div class="em-soft" style="font-size:13.5px;color:${E.inkSoft};line-height:1.6;">${notes}</div>
+                </td>
+              </tr>
+            </table>
+          </td></tr>`
+    : "";
+
+  const content = `
+          <!-- pill -->
+          <tr><td bgcolor="${E.card}" align="center" style="padding:20px 40px 0;background-color:${E.card};">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:999px;">
+              <tr><td class="em-mint" style="padding:7px 16px 7px 14px;font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;color:${E.mint};font-weight:800;">
+                &#128276;&nbsp;&nbsp;Pengingat Acara
+              </td></tr>
+            </table>
+          </td></tr>
+
+          <!-- countdown -->
+          <tr><td bgcolor="${E.card}" align="center" style="padding:18px 40px 0;background-color:${E.card};">
+            <div class="em-emerald" style="font-size:10px;letter-spacing:3px;text-transform:uppercase;color:${E.emeraldBright};font-weight:700;">Dimulai dalam</div>
+            <div class="em-mint" style="font-size:30px;line-height:1.15;font-weight:800;color:${E.mint};letter-spacing:-0.5px;margin-top:4px;">&#9200;&nbsp;${countdown}</div>
+          </td></tr>
+
+          <!-- hero -->
+          <tr><td bgcolor="${E.card}" align="center" style="padding:14px 40px 0;background-color:${E.card};">
+            <h1 class="em-ink" style="margin:0;font-size:23px;line-height:1.3;font-weight:800;color:${E.ink};letter-spacing:-0.2px;">${greet}! &#128075;</h1>
+            <p class="em-soft" style="margin:12px auto 0;font-size:15px;line-height:1.7;color:${E.inkSoft};max-width:440px;">
+              Ini pengingat untuk acara Anda hari ini. Mohon persiapkan diri dan hadir tepat waktu &mdash; berikut detail lengkapnya di bawah ini.
+            </p>
+          </td></tr>
+
+          <!-- TIKET ACARA -->
+          <tr><td bgcolor="${E.card}" style="padding:24px 40px 0;background-color:${E.card};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:20px;">
+              <!-- judul acara -->
+              <tr><td align="center" style="padding:26px 24px 0;">
+                ${categoryChip}
+                <div class="em-ink" style="font-size:20px;line-height:1.35;font-weight:800;color:${E.ink};">${title}</div>
+              </td></tr>
+              <!-- pemisah bergaris putus-putus (perforasi tiket) -->
+              <tr><td style="padding:20px 28px 0;">
+                <div style="border-top:2px dashed ${E.panelBorder};font-size:0;line-height:0;">&nbsp;</div>
+              </td></tr>
+              <!-- tanggal -->
+              <tr><td align="center" style="padding:20px 24px 0;">
+                <div class="em-emerald" style="font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:${E.emeraldBright};font-weight:700;">&#128197;&nbsp; Hari &amp; Tanggal</div>
+                <div class="em-ink" style="font-size:17px;font-weight:800;color:${E.ink};margin-top:6px;">${dateStr}</div>
+              </td></tr>
+              <!-- waktu (elemen paling besar & jelas) -->
+              <tr><td align="center" style="padding:18px 24px 28px;">
+                <div class="em-emerald" style="font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:${E.emeraldBright};font-weight:700;">&#128336;&nbsp; Waktu (WIB)</div>
+                <div class="em-mint" style="font-size:32px;line-height:1.1;font-weight:800;color:${E.mint};letter-spacing:0.5px;margin-top:8px;">${timeRange}</div>
+              </td></tr>
+            </table>
+          </td></tr>
+          ${locationBlock}
+          ${notesBlock}
+
+          <!-- CTA -->
+          <tr><td bgcolor="${E.card}" align="center" style="padding:24px 40px 4px;background-color:${E.card};">
+            ${ctaButton(detail, "Lihat Detail Acara")}
+            <div class="em-mute" style="margin-top:13px;font-size:11.5px;color:${E.inkMute};line-height:1.6;">Buka <strong style="color:${E.inkSoft};font-weight:700;">Dashboard</strong> untuk melihat atau mengubah detail acara ini.</div>
+          </td></tr>
+
+          <!-- tips note -->
+          <tr><td bgcolor="${E.card}" style="padding:22px 40px 0;background-color:${E.card};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.amberBg}" style="background-color:${E.amberBg};border:1px solid ${E.amberBorder};border-radius:14px;">
+              <tr>
+                <td valign="top" width="40" style="padding:14px 0 14px 16px;font-size:17px;">&#128161;</td>
+                <td class="em-soft" style="padding:14px 16px 14px 8px;font-size:12.5px;line-height:1.7;color:${E.inkSoft};">
+                  <strong style="color:${E.amber};font-weight:700;">Agar acara berjalan lancar:</strong><br>
+                  &bull;&nbsp; Usahakan hadir 10&ndash;15 menit lebih awal.<br>
+                  &bull;&nbsp; Pastikan baterai HP terisi penuh.<br>
+                  &bull;&nbsp; Siapkan dokumen atau kartu nama yang diperlukan.
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+          ${helpRow()}`;
+
+  return renderEmailShell({
+    title: `${BRAND} — Pengingat Acara`,
+    preheader: `Pengingat: "${o.eventTitle}" ${humanizeUntil(o.startAt, o.now)} · ${formatEventDate(o.startAt)}, pukul ${formatEventClock(o.startAt)} WIB.`,
+    content,
+    hideLogo: true,
+  });
+}
+
+export async function sendAgentEventReminderEmail(
+  to: string,
+  opts: AgentEventReminderEmailOpts
+): Promise<{ delivered: boolean }> {
+  if (!isMailConfigured()) {
+    console.warn(
+      `\n📧 [DEV] SMTP belum dikonfigurasi. Email pengingat acara untuk ${to} tidak dikirim.\n` +
+        `   Acara: ${opts.eventTitle} — ${formatEventDate(opts.startAt)} pukul ${formatEventClock(opts.startAt)} WIB.\n`
+    );
+    return { delivered: false };
+  }
+
+  const countdown = humanizeUntil(opts.startAt, opts.now);
+  const timeRange = opts.endAt
+    ? `${formatEventClock(opts.startAt)}–${formatEventClock(opts.endAt)}`
+    : formatEventClock(opts.startAt);
+
+  try {
+    await getTransport().sendMail({
+      from: `"${BRAND}" <${GMAIL_USER}>`,
+      to,
+      subject: `🔔 Pengingat acara: ${opts.eventTitle} — ${countdown} · ${BRAND}`,
+      text:
+        `Pengingat Acara — ${BRAND}\n\n` +
+        `${opts.agentName ? `Halo, ${opts.agentName}.` : "Halo."} Acara Anda ${countdown}.\n\n` +
+        `Acara       : ${opts.eventTitle}\n` +
+        (opts.category ? `Kategori    : ${opts.category}\n` : "") +
+        `Hari/Tgl    : ${formatEventDate(opts.startAt)}\n` +
+        `Waktu       : ${timeRange} WIB\n` +
+        (opts.location ? `Lokasi      : ${opts.location}\n` : "") +
+        (opts.locationUrl ? `Peta/Link   : ${opts.locationUrl}\n` : "") +
+        (opts.notes ? `Catatan     : ${opts.notes}\n` : "") +
+        `\nTips: hadir 10–15 menit lebih awal, pastikan baterai HP penuh, siapkan dokumen yang diperlukan.\n\n` +
+        `Lihat detail acara: ${opts.detailUrl}\n\n` +
+        `Butuh bantuan? WhatsApp ${SUPPORT_WA} · email ${SUPPORT_EMAIL}\n` +
+        `© ${new Date().getFullYear()} ${LEGAL} · ${SITE}`,
+      html: agentEventReminderEmailHtml(opts),
+    });
+    return { delivered: true };
+  } catch (err) {
+    console.error("❌ Gagal mengirim email pengingat acara:", err);
     return { delivered: false };
   }
 }

@@ -232,6 +232,7 @@ export async function getSimilarItems(current: any): Promise<PropertyItem[]> {
         agent_name: c.agent?.pengguna?.nama_lengkap || "Agent Premier",
         agent_photo: normalizeAgentPhoto(c.agent?.foto_profil_url),
         agent_office: c.agent?.nama_kantor || "Premier Asset",
+        is_hot_deal: !!c.is_hot_deal,
       } as PropertyItem;
     });
   } catch (err) {

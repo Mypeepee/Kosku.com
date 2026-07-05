@@ -97,13 +97,19 @@ const buildFormData = (
   maxLb: init.maxLB ? formatIdNumber(String(init.maxLB)) : "",
 });
 
-const SearchHero = ({ initial = {} }: { initial?: SearchHeroInitial }) => {
+const SearchHero = ({
+  initial = {},
+  initialTab = "beli",
+}: {
+  initial?: SearchHeroInitial;
+  initialTab?: TxTab;
+}) => {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
-  const [activeTab, setActiveTab] = useState<TxTab>("beli");
+  const [activeTab, setActiveTab] = useState<TxTab>(initialTab);
 
   const [rangeErrors, setRangeErrors] = useState<{ price?: string; lt?: string; lb?: string }>({});
   const [shaking, setShaking] = useState(false);

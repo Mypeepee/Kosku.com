@@ -61,7 +61,9 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    if (role !== 'OWNER' && !agentId) {
+    const isPrivileged = role === 'OWNER' || role === 'STOKER';
+
+    if (!isPrivileged && !agentId) {
       return NextResponse.json(
         { error: 'Akun ini belum terhubung sebagai agent.' },
         { status: 403 }
@@ -70,8 +72,8 @@ export async function PATCH(request: NextRequest) {
 
     const where = {
       id_property: { in: ids },
-      // Batasi ke listing milik agent kecuali OWNER (mirip scope di dashboard).
-      ...(role !== 'OWNER' ? { id_agent: agentId } : {}),
+      // OWNER dan STOKER bisa ubah listing siapapun; agent hanya miliknya sendiri.
+      ...(!isPrivileged ? { id_agent: agentId } : {}),
     };
 
     const result = await prisma.listing.updateMany({

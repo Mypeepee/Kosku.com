@@ -341,6 +341,7 @@ export default async function SearchPage({ searchParams }: Props) {
       agent_name: item.agent?.pengguna?.nama_lengkap || "Agent Premier",
       agent_photo: agentPhotoUrl,
       agent_office: item.agent?.nama_kantor || "Solusindo Aset",
+      is_hot_deal: !!item.is_hot_deal,
     };
   });
 

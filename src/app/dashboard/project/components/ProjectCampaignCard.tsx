@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Share2 } from "lucide-react";
 
 type UserInvestment = {
   nominalKomitmen: number;
@@ -672,9 +674,11 @@ function getActualInvestorProfit(
 function UserInvestmentPanel({
   investment,
   projectSelesai,
+  onShare,
 }: {
   investment?: UserInvestment;
   projectSelesai?: ProjectSelesai | null;
+  onShare?: () => void;
 }) {
   const isSold = !!projectSelesai;
 
@@ -788,7 +792,7 @@ function UserInvestmentPanel({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-2xl border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+        "relative overflow-hidden rounded-2xl border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
         tone.wrap
       )}
     >
@@ -799,31 +803,67 @@ function UserInvestmentPanel({
         )}
       />
 
-      <div className="relative">
-        {/* Badge row */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Pill className={tone.statusBadge}>
-            {String(investment.status).replace(/_/g, " ").toUpperCase()}
-          </Pill>
-          {ownership && (
-            <Pill className={tone.ownershipBadge}>PORSI {ownership}</Pill>
-          )}
+      <div className="relative grid grid-cols-4 items-stretch gap-2 px-4 py-4">
+        {/* 3/4 — Investment info */}
+        <div className="col-span-3 min-w-0">
+          {/* Badge row */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Pill className={tone.statusBadge}>
+              {String(investment.status).replace(/_/g, " ").toUpperCase()}
+            </Pill>
+            {ownership && (
+              <Pill className={tone.ownershipBadge}>PORSI {ownership}</Pill>
+            )}
+          </div>
+
+          {/* Amount */}
+          <p
+            className={cn(
+              "mt-3 text-[clamp(20px,4.5vw,30px)] font-bold leading-none tracking-[-0.04em]",
+              tone.amount
+            )}
+          >
+            {formatCompactIDR(investment.nominalKomitmen)}
+          </p>
+
+          {/* Full amount as subtle reference */}
+          <p className="mt-1 text-[10px] text-slate-600">
+            {formatCurrency(investment.nominalKomitmen)}
+          </p>
         </div>
 
-        {/* Amount — compact format fixes overflow for large numbers */}
-        <p
-          className={cn(
-            "mt-3 text-[clamp(22px,5vw,32px)] font-bold leading-none tracking-[-0.04em]",
-            tone.amount
-          )}
-        >
-          {formatCompactIDR(investment.nominalKomitmen)}
-        </p>
+        {/* 1/4 — Share button */}
+        {onShare && (
+          <div className="col-span-1 flex items-stretch">
+            {/* Vertical separator */}
+            <div className="mr-2 w-px shrink-0 bg-gradient-to-b from-transparent via-white/10 to-transparent" />
 
-        {/* Full amount as subtle reference */}
-        <p className="mt-1 text-[10px] text-slate-600">
-          {formatCurrency(investment.nominalKomitmen)}
-        </p>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onShare();
+              }}
+              className="group/share relative flex w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-cyan-500/25 bg-[linear-gradient(160deg,rgba(6,182,212,0.14)_0%,rgba(8,145,178,0.06)_60%,rgba(0,0,0,0)_100%)] px-1.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_0_18px_rgba(6,182,212,0.10)] transition-all duration-300 hover:border-cyan-400/45 hover:bg-[linear-gradient(160deg,rgba(6,182,212,0.20)_0%,rgba(8,145,178,0.10)_60%,rgba(0,0,0,0)_100%)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_0_28px_rgba(6,182,212,0.22)] active:scale-[0.96]"
+            >
+              {/* Top glint */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent" />
+
+              {/* Shimmer sweep on hover */}
+              <span className="pointer-events-none absolute inset-0 -translate-x-full bg-[linear-gradient(105deg,transparent_25%,rgba(34,211,238,0.12)_50%,transparent_75%)] transition-transform duration-700 group-hover/share:translate-x-full" />
+
+              {/* Icon ring with glow */}
+              <div className="relative flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/35 bg-cyan-400/[0.12] text-cyan-300 shadow-[0_0_14px_rgba(6,182,212,0.28),inset_0_1px_0_rgba(255,255,255,0.10)] transition-all duration-300 group-hover/share:border-cyan-400/60 group-hover/share:shadow-[0_0_22px_rgba(6,182,212,0.48),inset_0_1px_0_rgba(255,255,255,0.14)]">
+                <Share2 className="h-[14px] w-[14px] transition-transform duration-300 group-hover/share:scale-110" />
+              </div>
+
+              <span className="text-[7px] font-bold uppercase tracking-[0.18em] text-cyan-300/65 transition-colors duration-200 group-hover/share:text-cyan-200">
+                Bagikan
+              </span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -914,6 +954,24 @@ export default function ProjectFundraisingCard({
     if (isDeleting || !onDelete) return;
     void onDelete(project);
   };
+
+  async function handleShare() {
+    const shareUrl = `${window.location.origin}/share/project/${project.id}`;
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({ title: project.nama, url: shareUrl });
+      } catch {
+        // user cancelled — no-op
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+        toast.success("Link berhasil disalin!");
+      } catch {
+        toast.error("Gagal menyalin link.");
+      }
+    }
+  }
 
   const durasiParts = project.projectSelesai
     ? formatDurationDetailedParts(project.projectSelesai.durasi_hari)
@@ -1014,6 +1072,7 @@ export default function ProjectFundraisingCard({
         <UserInvestmentPanel
           investment={project.userInvestment}
           projectSelesai={project.projectSelesai}
+          onShare={project.userInvestment ? handleShare : undefined}
         />
 
         {/* 2. Key Metrics */}

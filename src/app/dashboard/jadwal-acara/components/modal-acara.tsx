@@ -75,6 +75,18 @@ const extractTime = (iso: string): string => {
   return `${h}:${m}`;
 };
 
+// Tambah 1 jam ke string "HH:MM". Di-clamp ke 23:59 supaya jam selesai
+// tidak wrap ke hari berikutnya (00:xx) yang bakal lebih kecil dari jam
+// mulai dan memicu error validasi di tanggal yang sama.
+const addOneHour = (time: string): string => {
+  const [h, m] = time.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return time;
+  const total = Math.min(h * 60 + m + 60, 23 * 60 + 59);
+  const nh = String(Math.floor(total / 60)).padStart(2, "0");
+  const nm = String(total % 60).padStart(2, "0");
+  return `${nh}:${nm}`;
+};
+
 export default function ModalAcara({
   open,
   onClose,
@@ -609,7 +621,13 @@ export default function ModalAcara({
                           <TimeInput
                             value={formData.jam_mulai}
                             onChange={(v) =>
-                              setFormData((prev) => ({ ...prev, jam_mulai: v }))
+                              setFormData((prev) => ({
+                                ...prev,
+                                jam_mulai: v,
+                                // Auto-set jam selesai ke +1 jam dari jam
+                                // mulai untuk kurangi friksi user.
+                                jam_selesai: addOneHour(v),
+                              }))
                             }
                             readOnly={isViewMode}
                             error={hasDateTimeError}

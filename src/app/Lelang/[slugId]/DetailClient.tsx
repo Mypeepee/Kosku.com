@@ -340,6 +340,7 @@ export default function DetailClient({
               currentJabatan={currentJabatan}
               stokerPhone={stokerPhone}
               canEdit={canEdit}
+              selfAgent={selfAgent}
               onShareOpen={canShare ? () => setShareOpen(true) : undefined}
             />
           ) : (

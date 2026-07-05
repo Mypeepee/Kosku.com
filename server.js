@@ -13,6 +13,54 @@ const port = process.env.port || 8080
 const app = next({ dev, hostname, port })
 const handle = app.getRequestHandler()
 
+// Scheduler in-process: PENGINGAT ACARA (H-3 jam).
+// cPanel menjalankan satu proses `node server.js`, jadi aman tanpa risiko
+// multi-instance. Tiap 15 menit memanggil endpoint /api/cron/acara-reminder;
+// endpoint itu yang menentukan acara mana yang jatuh dalam jendela 3 jam,
+// mengirim email ke pembuat + peserta, lalu menandai reminder_sent.
+function startAcaraReminderScheduler(port) {
+  let cron
+  try {
+    cron = require('node-cron')
+  } catch (e) {
+    console.error('[acara-reminder] node-cron tidak tersedia:', e.message)
+    return
+  }
+  const http = require('http')
+  const cronSecret = process.env.CRON_SECRET || ''
+
+  const trigger = () => {
+    const reqRem = http.request(
+      {
+        hostname: 'localhost',
+        port,
+        path: '/api/cron/acara-reminder',
+        method: 'GET',
+        headers: cronSecret ? { Authorization: `Bearer ${cronSecret}` } : {},
+      },
+      (r) => {
+        let body = ''
+        r.on('data', (c) => (body += c))
+        r.on('end', () => {
+          try {
+            const j = JSON.parse(body || '{}')
+            if (j.emailsSent || j.eventsFailed) {
+              console.log(
+                `[acara-reminder] terkirim=${j.emailsSent} gagal=${j.eventsFailed} total=${j.totalAcara}`,
+              )
+            }
+          } catch (_) {}
+        })
+      },
+    )
+    reqRem.on('error', (e) => console.error('[acara-reminder] error:', e.message))
+    reqRem.end()
+  }
+
+  cron.schedule('*/15 * * * *', trigger)
+  console.log('> Scheduler pengingat acara aktif (cek tiap 15 menit)')
+}
+
 app.prepare().then(() => {
   createServer(async (req, res) => {
     try {
@@ -36,5 +84,6 @@ app.prepare().then(() => {
   }).listen(port, (err) => {
     if (err) throw err
     console.log(`> Ready on http://${hostname}:${port}`)
+    startAcaraReminderScheduler(port)
   })
 })

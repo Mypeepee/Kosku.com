@@ -301,6 +301,7 @@ export default async function KategoriPage({ params, searchParams }: Props) {
       agent_name:      item.agent?.pengguna?.nama_lengkap || "Agent Kosku",
       agent_photo:     normalizeAgentPhoto(item.agent?.foto_profil_url),
       agent_office:    item.agent?.nama_kantor || "Kosku",
+      is_hot_deal:     !!item.is_hot_deal,
     };
   });
 

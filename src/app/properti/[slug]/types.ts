@@ -18,6 +18,7 @@ export interface PropertyItem {
   agent_name: string;
   agent_photo: string;
   agent_office: string;
+  is_hot_deal: boolean;
 }
 
 export interface PaginationData {

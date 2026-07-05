@@ -66,7 +66,7 @@ export default function SimilarProperties({ items = [] }: SimilarPropertiesProps
             key={item.id_property}
             className="w-[270px] shrink-0 snap-start sm:w-[300px]"
           >
-            <PropertyCard item={item} compact />
+            <PropertyCard item={item} compact idBadge={item.id_property} />
           </div>
         ))}
       </div>

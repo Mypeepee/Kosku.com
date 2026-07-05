@@ -91,9 +91,11 @@ export default async function DashboardListingsPage({ searchParams }: Props) {
     (VALID_KATEGORI as readonly string[]).includes(kategoriRaw) ? (kategoriRaw as Prisma.kategori_properti_enum) : undefined;
 
   // ── Build Prisma where ──
+  const isPrivileged = userRole === "OWNER" || userRole === "STOKER";
+
   const where: Prisma.ListingWhereInput = {
     status_tayang: "TERSEDIA",
-    ...(userRole !== "OWNER" && { id_agent: agentId }),
+    ...(!isPrivileged && { id_agent: agentId }),
     ...(jenis && { jenis_transaksi: jenis }),
     ...(kategori && { kategori }),
     ...(provinsi && { provinsi: { contains: provinsi, mode: "insensitive" } }),
@@ -166,6 +168,7 @@ export default async function DashboardListingsPage({ searchParams }: Props) {
       agentName: p.agent?.pengguna?.nama_lengkap || "Agent Kosku",
       agentPhoto: normalizeAgentPhoto(p.agent?.foto_profil_url),
       agentOffice: p.agent?.nama_kantor || "Kosku",
+      isHotDeal: !!(p as any).is_hot_deal,
     };
   });
 
