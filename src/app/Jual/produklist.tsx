@@ -9,6 +9,8 @@ import Sidebar from "./sidebar";
 import { useSwipe } from "@/hooks/useSwipe";
 import { smoothScrollToElement } from "@/lib/pagination";
 import Pagination from "@/components/Pagination";
+import { HotDealBadge, HOT_DEAL_CARD_CLASS } from "@/components/HotDeal/HotDealBadge";
+import { SliderDots } from "@/components/SliderDots";
 
 // --- TIPE DATA ---
 interface PropertyDB {
@@ -29,6 +31,7 @@ interface PropertyDB {
   agent_name: string;
   agent_photo: string;
   agent_office: string;
+  is_hot_deal: boolean;
 }
 
 interface PaginationData {
@@ -40,6 +43,10 @@ interface PaginationData {
 interface ProductListProps {
   initialData: PropertyDB[];
   pagination: PaginationData;
+  /** URL dasar untuk pagination & reset filter (mis. "/Jual" atau "/Sewa"). */
+  baseUrl?: string;
+  /** Judul di atas grid (mis. "Listing Primary & Secondary" atau "Listing Sewa"). */
+  heading?: string;
 }
 
 // --- CONSTANTS ---
@@ -97,6 +104,8 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const currentImage = images[currentImageIndex];
+  const [idCopied, setIdCopied] = useState(false);
+  const idBadge = String(item.id_property);
 
   const nextImage = (e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -122,9 +131,13 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
     : 0;
 
   const mainPrice = hasDiscount ? item.harga_promo! : item.harga;
+  const isSewa = item.jenis_transaksi?.toUpperCase() === "SEWA";
+  const periodSuffix = isSewa ? (
+    <span className="text-gray-500 text-xs font-medium"> /bulan</span>
+  ) : null;
 
   return (
-    <div className="bg-[#111111] border border-white/5 rounded-3xl overflow-hidden group transition-all duration-300 flex flex-col h-full hover:border-emerald-400/70 hover:shadow-[0_24px_70px_-30px_rgba(16,185,129,0.7)]">
+    <div className={`bg-[#111111] rounded-3xl overflow-hidden group transition-all duration-300 flex flex-col h-full ${item.is_hot_deal ? HOT_DEAL_CARD_CLASS : "border border-white/5 hover:border-emerald-400/70 hover:shadow-[0_24px_70px_-30px_rgba(16,185,129,0.7)]"}`}>
       {/* IMAGE */}
       <div
         className="relative w-full h-72 md:h-80 overflow-hidden"
@@ -156,23 +169,26 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
               <Icon icon="solar:alt-arrow-right-linear" className="text-lg" />
             </button>
 
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
-              {images.map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`h-1.5 rounded-full transition-all ${
-                    idx === currentImageIndex
-                      ? "bg-white w-4"
-                      : "bg-white/40 w-2"
-                  }`}
-                />
-              ))}
-            </div>
+            <SliderDots
+              total={images.length}
+              index={currentImageIndex}
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20"
+            />
           </>
         )}
 
-        {/* BADGE BAR */}
-        <div className="absolute top-3 left-3 right-3 z-20 flex items-center gap-2">
+        {/* Kategori — pojok kanan atas, posisi TETAP baik ada/tidak Hot Deal */}
+        <span className="absolute top-3 right-3 z-20 bg-black/70 backdrop-blur-sm border border-white/10 text-white text-[10px] font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5">
+          <Icon
+            icon={getPropertyIcon(item.kategori)}
+            className="text-sm opacity-90"
+          />
+          {kategoriUpper}
+        </span>
+
+        {/* BADGE BAR kiri — Hot Deal paling atas (bikin FOMO) + tipe transaksi */}
+        <div className="absolute top-3 left-3 z-20 flex flex-col items-start gap-2 max-w-[calc(100%-6.5rem)]">
+          {item.is_hot_deal && <HotDealBadge />}
           <span
             className={`${getBadgeColor(
               item.jenis_transaksi
@@ -184,33 +200,35 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
             />
             {item.jenis_transaksi}
           </span>
-
-          <span className="ml-auto bg-black/70 backdrop-blur-sm border border-white/10 text-white text-[10px] font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5">
-            <Icon
-              icon={getPropertyIcon(item.kategori)}
-              className="text-sm opacity-90"
-            />
-            {kategoriUpper}
-          </span>
         </div>
 
-        {/* DISCOUNT BADGE API */}
-        {hasDiscount && (
-          <div className="absolute bottom-4 right-3 z-20">
-            {/* glow api belakang */}
-            <div className="absolute inset-0 blur-xl bg-gradient-to-r from-rose-500/40 via-orange-500/40 to-amber-400/40 opacity-70 animate-pulse pointer-events-none" />
-            {/* titik api kecil */}
-            <span className="absolute -top-2 -right-1 w-3 h-3 rounded-full bg-amber-300 animate-ping" />
 
-            <div className="relative bg-gradient-to-r from-rose-600 via-orange-500 to-amber-400 text-white px-3.5 py-1.5 rounded-full text-[11px] font-extrabold tracking-wide shadow-[0_0_20px_rgba(248,113,113,0.9)] flex items-center gap-1.5 animate-[wiggle_1.2s_ease-in-out_infinite]">
-              <Icon
-                icon="solar:fire-bold-duotone"
-                className="text-sm drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]"
-              />
-              <span>-{discountPercent}%</span>
-            </div>
-          </div>
-        )}
+        {/* ID badge — pojok kiri bawah, gaya sobekan tiket */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            navigator.clipboard.writeText(idBadge);
+            setIdCopied(true);
+            setTimeout(() => setIdCopied(false), 2000);
+          }}
+          title="Salin ID properti"
+          className="group/id absolute bottom-3 left-3 z-30 inline-flex items-stretch overflow-hidden rounded-md font-mono text-[11px] shadow-md ring-1 ring-white/10 transition-transform duration-200 hover:scale-[1.03]"
+        >
+          <span className="flex items-center bg-emerald-500 px-1.5 text-[9px] font-bold uppercase tracking-wider text-black">ID</span>
+          <span className="flex items-center gap-1.5 bg-black px-2 py-1 tracking-wide text-white">
+            {idBadge}
+            <Icon
+              icon={idCopied ? "solar:check-circle-bold-duotone" : "solar:copy-line-duotone"}
+              className={`text-[11px] transition-all duration-200 ${
+                idCopied
+                  ? "text-emerald-400 opacity-100"
+                  : "text-white/40 opacity-0 group-hover/id:opacity-100"
+              }`}
+            />
+          </span>
+        </button>
       </div>
 
       {/* CONTENT */}
@@ -220,25 +238,22 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
           {hasDiscount ? (
             <>
               <div className="flex items-center gap-2">
-                <h3 className="text-white text-xl font-black tracking-tight">
-                  {formatCurrency(mainPrice)}
-                </h3>
-                <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                  Hemat {formatCurrency(item.harga - mainPrice)}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-gray-500 line-through decoration-2 decoration-rose-400/80">
+                <span className="text-gray-500 text-xs line-through">
                   {formatCurrency(item.harga)}
                 </span>
-                <span className="text-gray-500">
-                  Sebelum diskon
+                <span className="rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-400">
+                  -{discountPercent}%
                 </span>
               </div>
+              <h3 className="text-white text-xl font-black tracking-tight">
+                {formatCurrency(mainPrice)}
+                {periodSuffix}
+              </h3>
             </>
           ) : (
             <h3 className="text-white text-xl font-black tracking-tight">
               {formatCurrency(mainPrice)}
+              {periodSuffix}
             </h3>
           )}
         </div>
@@ -330,7 +345,12 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 };
 
 // --- MAIN COMPONENT ---
-const ProductList = ({ initialData, pagination }: ProductListProps) => {
+const ProductList = ({
+  initialData,
+  pagination,
+  baseUrl = "/Jual",
+  heading = "Listing Primary & Secondary",
+}: ProductListProps) => {
   const router = useRouter();
   const searchParams = useSearchParams();
   const productListRef = useRef<HTMLDivElement>(null);
@@ -339,7 +359,7 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
 
   const filterKota = searchParams.get("kota") || "";
-  const BASE_URL = "/Jual";
+  const BASE_URL = baseUrl;
 
   const handlePageChange = (newPage: number) => {
     if (newPage === pagination.currentPage) return;
@@ -398,7 +418,7 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
                     </button>
                   </div>
                   <div className="pb-20">
-                    <Sidebar />
+                    <Sidebar baseUrl={baseUrl} />
                   </div>
                 </div>
               </motion.div>
@@ -414,7 +434,7 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
                 <h2 className="text-white font-bold text-lg md:text-xl leading-tight">
                   {filterKota
                     ? `Properti di "${filterKota}"`
-                    : "Listing Primary & Secondary"}
+                    : heading}
                 </h2>
                 <span className="text-xs md:text-sm font-normal text-gray-400 mt-1 block">
                   ({pagination.totalItems} ditemukan)
@@ -477,7 +497,7 @@ const ProductList = ({ initialData, pagination }: ProductListProps) => {
 
           {/* SIDEBAR DESKTOP */}
           <div className="hidden lg:block w-full lg:w-1/4 sticky top-32">
-            <Sidebar />
+            <Sidebar baseUrl={baseUrl} />
           </div>
         </div>
       </div>

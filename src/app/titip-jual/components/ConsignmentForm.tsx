@@ -1028,6 +1028,8 @@ const AddressMapPicker: React.FC<{
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
     libraries: GMAPS_LIBS,
+    language: 'id',
+    region: 'ID',
   });
 
   const [map, setMap] = useState<any>(null);

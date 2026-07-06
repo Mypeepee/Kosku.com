@@ -81,7 +81,7 @@ export default function KategoriGrid({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.04, duration: 0.3 }}
               >
-                <PropertyCard item={item} />
+                <PropertyCard item={item} idBadge={item.id_property} />
               </motion.div>
             ))}
           </motion.div>

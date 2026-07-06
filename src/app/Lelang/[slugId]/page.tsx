@@ -8,6 +8,7 @@ import DetailClient from "./DetailClient";
 import { getSimilarItems } from "@/app/Jual/[slug]/lib/similar";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
+import { SITE_URL, lelangOgImageUrl } from "@/lib/site";
 
 // --- TYPES ---
 type ParamsShape = {
@@ -167,12 +168,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     ? product.deskripsi.substring(0, 155) + "..."
     : `${product.jenis_transaksi} ${product.kategori} di ${product.kota}, ${product.provinsi}. ${specs}. Hubungi ${namaAgent} untuk info lebih lanjut.`;
 
-  const fotoArray = normalizeListingImages(product.gambar);
-  const firstImage = fotoArray[0];
+  // og:image disajikan lewat proxy domain sendiri (lihat /api/og/lelang/[id])
+  // supaya crawler WhatsApp bisa mengambilnya — bukan langsung dari Google Drive
+  // / file.lelang.go.id yang sering gagal di-fetch oleh crawler.
+  const ogImage = lelangOgImageUrl(id.toString());
 
   const safeSlugId =
     slugId || `${product.slug}-${product.id_property.toString()}`;
-  const canonicalUrl = `https://premierasset.com/Lelang/${safeSlugId}`;
+  const canonicalUrl = `${SITE_URL}/Lelang/${safeSlugId}`;
 
   return {
     title: `${product.judul} - ${hargaFormatted} | Solusindo Aset`,
@@ -197,9 +200,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description,
       images: [
         {
-          url: firstImage,
+          url: ogImage,
           width: 1200,
           height: 630,
+          type: "image/jpeg",
           alt: product.judul,
         },
       ],
@@ -208,7 +212,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       card: "summary_large_image",
       title: `${product.judul} - ${hargaFormatted}`,
       description,
-      images: [firstImage],
+      images: [ogImage],
     },
     robots: {
       index: product.status_tayang === "TERSEDIA",
@@ -273,7 +277,7 @@ export default async function DetailPage({ params }: Props) {
 
   const safeSlugId =
     slugId || `${product.slug}-${product.id_property.toString()}`;
-  const canonicalUrl = `https://premierasset.com/Lelang/${safeSlugId}`;
+  const canonicalUrl = `${SITE_URL}/Lelang/${safeSlugId}`;
 
   // ✅ NORMALISASI GAMBAR LISTING UTAMA
   const fotoArray = normalizeListingImages(product.gambar);
@@ -313,19 +317,19 @@ export default async function DetailPage({ params }: Props) {
         "@type": "ListItem",
         position: 1,
         name: "Home",
-        item: "https://premierasset.com",
+        item: SITE_URL,
       },
       {
         "@type": "ListItem",
         position: 2,
         name: "Lelang",
-        item: "https://premierasset.com/Lelang",
+        item: `${SITE_URL}/Lelang`,
       },
       {
         "@type": "ListItem",
         position: 3,
         name: product.kota,
-        item: `https://premierasset.com/Lelang?kota=${product.kota}`,
+        item: `${SITE_URL}/Lelang?kota=${product.kota}`,
       },
       {
         "@type": "ListItem",

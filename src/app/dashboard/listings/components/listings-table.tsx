@@ -40,6 +40,7 @@ export type Listing = {
   agentName: string;
   agentPhoto: string;
   agentOffice: string;
+  isHotDeal?: boolean;
 };
 
 const PAGE_SIZE = 10;

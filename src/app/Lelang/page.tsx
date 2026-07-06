@@ -397,6 +397,7 @@ export default async function SearchPage({ searchParams }: Props) {
       tanggal_lelang: item.tanggal_lelang
         ? item.tanggal_lelang.toISOString()
         : null,
+      is_hot_deal: !!item.is_hot_deal,
     };
   });
 

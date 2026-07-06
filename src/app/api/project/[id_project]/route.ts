@@ -21,6 +21,123 @@ type RouteContext = {
   };
 };
 
+function toNum(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: RouteContext
+) {
+  const idProject = params?.id_project?.trim();
+
+  if (!idProject) {
+    return NextResponse.json(
+      { success: false, message: "ID project tidak valid." },
+      { status: 400 }
+    );
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, message: "Body tidak valid." },
+      { status: 400 }
+    );
+  }
+
+  const allowed = [
+    "nama_project",
+    "deskripsi_project",
+    "status",
+    "mulai_tanggal",
+    "estimasi_selesai",
+    "estimasi_bulan",
+    "harga_pembelian",
+    "estimasi_harga_jual",
+    "estimasi_profit_bersih",
+    "target_pendanaan",
+    "nilai_limit_lelang",
+    "spare_bidding",
+    "biaya_eksekusi",
+    "biaya_renov",
+    "biaya_balik_nama",
+    "dana_cadangan",
+  ] as const;
+
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  for (const field of allowed) {
+    if (!(field in body)) continue;
+    const raw = body[field];
+
+    const numericFields = [
+      "estimasi_bulan",
+      "harga_pembelian",
+      "estimasi_harga_jual",
+      "estimasi_profit_bersih",
+      "target_pendanaan",
+      "nilai_limit_lelang",
+      "spare_bidding",
+      "biaya_eksekusi",
+      "biaya_renov",
+      "biaya_balik_nama",
+      "dana_cadangan",
+    ];
+
+    if (numericFields.includes(field)) {
+      const num = toNum(raw);
+      if (num === null) continue;
+      setClauses.push(`${field} = $${idx++}`);
+      values.push(num);
+    } else {
+      setClauses.push(`${field} = $${idx++}`);
+      values.push(raw === "" ? null : raw);
+    }
+  }
+
+  if (setClauses.length === 0) {
+    return NextResponse.json(
+      { success: false, message: "Tidak ada field yang diupdate." },
+      { status: 400 }
+    );
+  }
+
+  setClauses.push(`diupdate_tanggal = NOW()`);
+  values.push(idProject);
+
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      `UPDATE public.project SET ${setClauses.join(", ")} WHERE id_project = $${idx} RETURNING id_project, nama_project`,
+      values
+    );
+
+    if (result.rowCount === 0) {
+      return NextResponse.json(
+        { success: false, message: "Project tidak ditemukan." },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error("[PATCH_PROJECT_ERROR]", error);
+    return NextResponse.json(
+      { success: false, message: "Gagal mengupdate project." },
+      { status: 500 }
+    );
+  } finally {
+    client.release();
+  }
+}
+
 export async function DELETE(
   _request: NextRequest,
   { params }: RouteContext

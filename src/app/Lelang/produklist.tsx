@@ -9,6 +9,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useSwipe } from "@/hooks/useSwipe";
 import { smoothScrollToElement } from "@/lib/pagination";
 import Pagination from "@/components/Pagination";
+import { HotDealBadge, HOT_DEAL_CARD_CLASS } from "@/components/HotDeal/HotDealBadge";
+import { SliderDots } from "@/components/SliderDots";
 
 interface PropertyDB {
   id_property: number | string;
@@ -31,6 +33,7 @@ interface PropertyDB {
   agent_photo: string;
   agent_office: string;
   tanggal_lelang?: string | null;
+  is_hot_deal?: boolean;
 }
 
 interface PaginationData {
@@ -92,6 +95,8 @@ const getPropertyUrl = (
 // --- CARD LELANG ---
 const PropertyCard = ({ item }: { item: PropertyDB }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [idCopied, setIdCopied] = useState(false);
+  const idBadge = String(item.id_property);
 
   const images =
     item.foto_list && item.foto_list.length > 0
@@ -195,13 +200,12 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 
   return (
     <div
-      className="bg-[#050608] border border-white/10 rounded-3xl overflow-hidden group
+      className={`bg-[#050608] rounded-3xl overflow-hidden group
                  relative flex flex-col h-full mx-1.5
-                 shadow-[0_18px_60px_rgba(0,0,0,0.9)]
                  before:content-[''] before:absolute before:inset-px before:rounded-[22px]
-                 before:border before:border-white/5 before:pointer-events-none
-                 hover:border-emerald-400/60 hover:shadow-[0_22px_70px_rgba(34,197,94,0.3)]
-                 transition-all duration-300"
+                 before:border before:pointer-events-none
+                 transition-all duration-300
+                 ${item.is_hot_deal ? HOT_DEAL_CARD_CLASS : "border border-white/10 shadow-[0_18px_60px_rgba(0,0,0,0.9)] before:border-white/5 hover:border-emerald-400/60 hover:shadow-[0_22px_70px_rgba(34,197,94,0.3)]"}`}
     >
       {/* IMAGE SECTION */}
       <div
@@ -242,21 +246,17 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
             </button>
 
             {/* Indicator bullets */}
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1 z-20">
-              {images.map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`w-1.5 h-1.5 rounded-full transition-all ${
-                    idx === currentImageIndex ? "bg-primary w-3" : "bg-white/50"
-                  }`}
-                />
-              ))}
-            </div>
+            <SliderDots
+              total={images.length}
+              index={currentImageIndex}
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20"
+            />
           </>
         )}
 
-        {/* Badge kiri: kategori */}
-        <div className="absolute top-4 left-4 z-10">
+        {/* Badge kiri: Hot Deal paling atas (bikin FOMO) + kategori */}
+        <div className="absolute top-4 left-4 z-20 flex flex-col items-start gap-2">
+          {item.is_hot_deal && <HotDealBadge />}
           <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-black/80 text-emerald-300 text-[11px] font-semibold border border-emerald-400/40 backdrop-blur-sm">
             <Icon
               icon={
@@ -272,6 +272,33 @@ const PropertyCard = ({ item }: { item: PropertyDB }) => {
 
         {/* Badge kanan: dinamis */}
         {badgeContent}
+
+        {/* ID badge — pojok kiri bawah, gaya sobekan tiket */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            navigator.clipboard.writeText(idBadge);
+            setIdCopied(true);
+            setTimeout(() => setIdCopied(false), 2000);
+          }}
+          title="Salin ID properti"
+          className="group/id absolute bottom-3 left-3 z-30 inline-flex items-stretch overflow-hidden rounded-md font-mono text-[11px] shadow-md ring-1 ring-white/10 transition-transform duration-200 hover:scale-[1.03]"
+        >
+          <span className="flex items-center bg-emerald-500 px-1.5 text-[9px] font-bold uppercase tracking-wider text-black">ID</span>
+          <span className="flex items-center gap-1.5 bg-black px-2 py-1 tracking-wide text-white">
+            {idBadge}
+            <Icon
+              icon={idCopied ? "solar:check-circle-bold-duotone" : "solar:copy-line-duotone"}
+              className={`text-[11px] transition-all duration-200 ${
+                idCopied
+                  ? "text-emerald-400 opacity-100"
+                  : "text-white/40 opacity-0 group-hover/id:opacity-100"
+              }`}
+            />
+          </span>
+        </button>
       </div>
 
       {/* CONTENT SECTION */}

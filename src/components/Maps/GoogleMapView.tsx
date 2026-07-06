@@ -78,6 +78,8 @@ export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps)
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
     libraries,
+    language: 'id',
+    region: 'ID',
   });
 
   const mapRef = useRef<google.maps.Map | null>(null);

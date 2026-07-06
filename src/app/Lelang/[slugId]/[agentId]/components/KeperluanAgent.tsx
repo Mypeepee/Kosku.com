@@ -3,13 +3,22 @@
 import React, { useState } from "react";
 import { Icon } from "@iconify/react";
 import Link from "next/link";
-import { downloadPropertyImages } from "@/lib/downloadPropertyImages";
+import { buildLelangPosterPayload, downloadLelangPoster } from "@/lib/lelangPoster";
+
+interface SelfAgentLite {
+  nama?: string;
+  whatsapp?: string;
+  telepon?: string;
+}
+
 interface KeperluanAgentProps {
   data: any;
   currentAgentId?: string | null;
   currentJabatan?: string | null;
   stokerPhone?: string | null;
   canEdit?: boolean;
+  /** Profil agent yang sedang login — dipakai sebagai kontak di poster. */
+  selfAgent?: SelfAgentLite | null;
   /** Dipanggil saat tombol Bagikan ditekan — modal dirender di level atas (DetailClient). */
   onShareOpen?: () => void;
 }
@@ -58,7 +67,7 @@ const formatTanggalLelang = (val?: string | null): string => {
   });
 };
 
-export default function KeperluanAgent({ data, currentAgentId, currentJabatan, stokerPhone, onShareOpen }: KeperluanAgentProps) {
+export default function KeperluanAgent({ data, currentAgentId, currentJabatan, stokerPhone, selfAgent, onShareOpen }: KeperluanAgentProps) {
   const rawLimit =
     data?.nilai_limit_lelang || data?.harga || data?.priceRates?.monthly || 0;
 
@@ -77,7 +86,7 @@ export default function KeperluanAgent({ data, currentAgentId, currentJabatan, s
   // ✅ Get property ID for edit
   const propertyId = data?.id_property || data?.id || "";
 
-  const [isDownloadingImages, setIsDownloadingImages] = useState(false);
+  const [isBuildingPoster, setIsBuildingPoster] = useState(false);
 
   const canShare = !!onShareOpen;
 
@@ -85,9 +94,9 @@ export default function KeperluanAgent({ data, currentAgentId, currentJabatan, s
   //    Role lain (Owner, Agent, Admin, Principal, dst) -> pesan dikirim ke nomor STOKER.
   const isStoker = currentJabatan === "STOKER";
 
-  const handleDownloadImages = async () => {
-    const urls: string[] = data?.foto_list || [];
-    await downloadPropertyImages(urls, setIsDownloadingImages);
+  const handleDownloadPoster = async () => {
+    const payload = buildLelangPosterPayload(data, { agentCode: currentAgentId, selfAgent });
+    await downloadLelangPoster(payload, setIsBuildingPoster);
   };
 
   const handleAskStock = () => {
@@ -290,31 +299,25 @@ export default function KeperluanAgent({ data, currentAgentId, currentJabatan, s
             )}
 
             <button
-              onClick={handleDownloadImages}
-              disabled={isDownloadingImages}
-              className="w-full flex items-center justify-between px-4 py-2 rounded-2xl
-                bg-white/[0.03] border border-white/10 hover:border-sky-400/60
-                hover:bg-sky-500/5 transition-all active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={handleDownloadPoster}
+              disabled={isBuildingPoster}
+              className="btn-lux btn-lux--poster w-full flex items-center justify-between px-4 py-2.5 rounded-2xl disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-400/40 flex items-center justify-center">
-                  {isDownloadingImages ? (
-                    <Icon icon="solar:spinner-bold" className="text-sky-300 text-lg animate-spin" />
-                  ) : (
-                    <Icon icon="solar:gallery-download-bold-duotone" className="text-sky-300 text-lg" />
-                  )}
-                </div>
+                <span className="btn-lux__chip w-8 h-8">
+                  <Icon icon={isBuildingPoster ? "solar:spinner-bold" : "solar:gallery-wide-bold-duotone"} className={`lux-ico text-sky-100 text-lg ${isBuildingPoster ? "animate-spin" : ""}`} />
+                </span>
                 <div className="text-left">
-                  <p className="text-[11px] font-semibold text-white">
-                    {isDownloadingImages ? "Menyiapkan..." : "Download Gambar"}
+                  <p className="text-[11px] font-bold text-white">
+                    {isBuildingPoster ? "Membuat poster…" : "Download Poster"}
                   </p>
-                  <p className="text-[10px] text-gray-400">
-                    {isDownloadingImages ? "Sedang mengunduh foto..." : `Unduh semua ${(data?.foto_list?.length ?? 0)} foto ke galeri`}
+                  <p className="text-[10px] text-sky-100/60">
+                    {isBuildingPoster ? "Merender katalog aset…" : "Katalog story 1080×1920 siap dibagikan"}
                   </p>
                 </div>
               </div>
-              {!isDownloadingImages && (
-                <Icon icon="solar:download-minimalistic-bold" className="text-gray-500 text-sm" />
+              {!isBuildingPoster && (
+                <Icon icon="solar:download-minimalistic-bold" className="lux-ico text-sky-300 text-sm" />
               )}
             </button>
 
@@ -431,15 +434,15 @@ export default function KeperluanAgent({ data, currentAgentId, currentJabatan, s
           )}
 
           <button
-            onClick={handleDownloadImages}
-            disabled={isDownloadingImages}
-            className="flex-1 bg-sky-500/20 border border-sky-400/60 text-sky-50 font-semibold text-[11px] py-2.5 rounded-xl hover:bg-sky-500/30 transition-all active:scale-[0.97] flex justify-center items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+            onClick={handleDownloadPoster}
+            disabled={isBuildingPoster}
+            className="btn-lux btn-lux--poster flex-1 text-sky-50 font-bold text-[11px] py-2.5 rounded-xl flex justify-center items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Icon
-              icon={isDownloadingImages ? "solar:spinner-bold" : "solar:gallery-download-bold-duotone"}
-              className={`text-base${isDownloadingImages ? " animate-spin" : ""}`}
+              icon={isBuildingPoster ? "solar:spinner-bold" : "solar:gallery-wide-bold-duotone"}
+              className={`lux-ico text-sky-100 text-base${isBuildingPoster ? " animate-spin" : ""}`}
             />
-            {isDownloadingImages ? "..." : "Gambar"}
+            {isBuildingPoster ? "..." : "Poster"}
           </button>
 
           <button

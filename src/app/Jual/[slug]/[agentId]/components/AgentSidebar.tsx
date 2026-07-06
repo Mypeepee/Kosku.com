@@ -13,6 +13,7 @@ import { PAYMENT_METHODS, PaymentMethod } from "@/lib/paymentMethods";
 import { pusherClient } from "@/lib/pusher-client";
 import CobrokeModal, { CobrokeClaimSummary } from "@/components/PropertyDetail/CobrokeModal";
 import { downloadPropertyImages } from "@/lib/downloadPropertyImages";
+import { buildJualPosterData, downloadJualPoster } from "@/lib/jualPoster";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PENAWARAN — status penawaran milik user untuk properti ini
@@ -991,6 +992,7 @@ export default function AgentSidebar({ data, onShareOpen }: AgentSidebarProps) {
   const [myOffer, setMyOffer] = useState<MyOfferSummary | null>(null);
   const [myCobroke, setMyCobroke] = useState<CobrokeClaimSummary | null>(null);
   const [isDownloadingBrosur, setIsDownloadingBrosur] = useState(false);
+  const [isBuildingPoster, setIsBuildingPoster] = useState(false);
 
   // ── Cek status penawaran milik user untuk properti ini (mewarnai tombol CTA) ──
   useEffect(() => {
@@ -1059,6 +1061,11 @@ export default function AgentSidebar({ data, onShareOpen }: AgentSidebarProps) {
   }, [isCobrokeViewer, data.id_property]);
 
   const handleDownloadBrosur = () => downloadPropertyImages(data.foto_list || [], setIsDownloadingBrosur);
+
+  const handleDownloadPoster = () => {
+    const payload = buildJualPosterData(data, { agentCode: viewerAgentId, selfAgent: data.agent });
+    return downloadJualPoster(payload, setIsBuildingPoster);
+  };
 
   // ── Avatar ──
   const rawAvatar: string = owner.avatar || "";
@@ -1323,10 +1330,14 @@ export default function AgentSidebar({ data, onShareOpen }: AgentSidebarProps) {
                   Edit Properti
                 </Link>
               </div>
-              <button onClick={handleDownloadBrosur} disabled={isDownloadingBrosur}
-                className="w-full bg-white/[0.04] border border-white/[0.09] hover:bg-white/[0.08] text-white/70 hover:text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 disabled:opacity-60">
-                <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-base ${isDownloadingBrosur ? "animate-spin" : ""}`} />
-                {isDownloadingBrosur ? "Mengunduh..." : "Download Poster"}
+              <button onClick={handleDownloadPoster} disabled={isBuildingPoster}
+                className="btn-lux btn-lux--poster w-full py-3 rounded-xl flex justify-center items-center gap-2.5 disabled:opacity-60">
+                <span className="btn-lux__chip w-7 h-7">
+                  <Icon icon={isBuildingPoster ? "solar:refresh-bold" : "solar:gallery-wide-bold-duotone"} className={`lux-ico text-[15px] text-sky-100 ${isBuildingPoster ? "animate-spin" : ""}`} />
+                </span>
+                <span className="font-extrabold text-[13px] tracking-wide text-white">
+                  {isBuildingPoster ? "Membuat poster…" : "Download Poster"}
+                </span>
               </button>
             </>
           ) : (
@@ -1361,9 +1372,11 @@ export default function AgentSidebar({ data, onShareOpen }: AgentSidebarProps) {
                 </button>
               )}
               <button onClick={handleDownloadBrosur} disabled={isDownloadingBrosur}
-                className="w-full bg-white/[0.04] border border-white/[0.09] hover:bg-white/[0.08] text-white/70 hover:text-white font-bold text-sm py-3 rounded-xl transition-all flex justify-center items-center gap-2 disabled:opacity-60">
-                <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-base ${isDownloadingBrosur ? "animate-spin" : ""}`} />
-                {isDownloadingBrosur ? "Mengunduh..." : "Brosur"}
+                className="btn-lux btn-lux--brosur w-full py-3 rounded-xl flex justify-center items-center gap-2 disabled:opacity-60">
+                <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`lux-ico text-[15px] text-amber-100 ${isDownloadingBrosur ? "animate-spin" : ""}`} />
+                <span className="font-extrabold text-[12.5px] tracking-wide text-amber-50">
+                  {isDownloadingBrosur ? "..." : "Brosur"}
+                </span>
               </button>
             </div>
           ) : (
@@ -1467,13 +1480,12 @@ export default function AgentSidebar({ data, onShareOpen }: AgentSidebarProps) {
 
                 {/* Download Poster */}
                 <button
-                  onClick={handleDownloadBrosur}
-                  disabled={isDownloadingBrosur}
-                  className="flex-1 flex flex-col items-center justify-center gap-[3px] rounded-2xl transition-all active:scale-[0.96] disabled:opacity-60"
-                  style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}
+                  onClick={handleDownloadPoster}
+                  disabled={isBuildingPoster}
+                  className="btn-lux btn-lux--poster flex-1 flex flex-col items-center justify-center gap-[3px] py-2 rounded-2xl disabled:opacity-60"
                 >
-                  <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-white/70 text-[17px] ${isDownloadingBrosur ? "animate-spin" : ""}`} />
-                  <span className="text-[8px] font-black text-white/35 uppercase tracking-widest">Poster</span>
+                  <Icon icon={isBuildingPoster ? "solar:refresh-bold" : "solar:gallery-wide-bold-duotone"} className={`lux-ico text-sky-100 text-[17px] ${isBuildingPoster ? "animate-spin" : ""}`} />
+                  <span className="text-[8px] font-black text-sky-100/80 uppercase tracking-widest">Poster</span>
                 </button>
 
                 {/* Bagikan */}
@@ -1542,11 +1554,10 @@ export default function AgentSidebar({ data, onShareOpen }: AgentSidebarProps) {
                 <button
                   onClick={handleDownloadBrosur}
                   disabled={isDownloadingBrosur}
-                  className="flex-1 flex flex-col items-center justify-center gap-[3px] rounded-2xl transition-all active:scale-[0.96] disabled:opacity-60"
-                  style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)" }}
+                  className="btn-lux btn-lux--brosur flex-1 flex flex-col items-center justify-center gap-[3px] py-2 rounded-2xl disabled:opacity-60"
                 >
-                  <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-white/70 text-[17px] ${isDownloadingBrosur ? "animate-spin" : ""}`} />
-                  <span className="text-[8px] font-black text-white/35 uppercase tracking-widest">
+                  <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`lux-ico text-amber-100 text-[17px] ${isDownloadingBrosur ? "animate-spin" : ""}`} />
+                  <span className="text-[8px] font-black text-amber-100/80 uppercase tracking-widest">
                     Brosur
                   </span>
                 </button>

@@ -2,12 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileSpreadsheet, Plus } from "lucide-react";
+import {
+  FileSpreadsheet,
+  Plus,
+} from "lucide-react";
 import type { DbCashflow, ManageFundData, WalletKey } from "../types";
 import WalletGrid from "./wallet-grid";
 import CashflowTable from "./cashflow-table";
 import CashflowEntrySheet from "./cashflow-entry-sheet";
 import WalletDropdown from "./wallet-dropdown";
+
+// ─── helpers ────────────────────────────────────────────────────────────────
 
 function getRowTimestamp(row: unknown) {
   if (!row || typeof row !== "object") return 0;
@@ -40,8 +45,10 @@ function getRowTimestamp(row: unknown) {
 
 export default function ManageFundScreen({
   data,
+  isCreator = false,
 }: {
   data: ManageFundData;
+  isCreator?: boolean;
 }) {
   const router = useRouter();
   const [selectedWallet, setSelectedWallet] = useState<WalletKey | "all">("all");
@@ -158,7 +165,6 @@ export default function ManageFundScreen({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    // Reset setelah delay singkat
     setTimeout(() => setIsExporting(false), 2000);
   }
 
@@ -180,15 +186,17 @@ export default function ManageFundScreen({
               </div>
 
               <h2 className="mt-3 text-[clamp(1.4rem,2vw,1.9rem)] font-semibold text-white">
-                Transaksi terbaru
+                Riwayat transaksi
               </h2>
 
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                Riwayat transaksi terbaru dari dompet yang sedang dipilih.
+                {isCreator
+                  ? "Riwayat transaksi terbaru dari dompet yang sedang dipilih."
+                  : "Seluruh transaksi proyek yang sudah dicatat oleh pengelola."}
               </p>
             </div>
 
-            {/* Controls — satu baris di semua ukuran layar */}
+            {/* Controls */}
             <div className="flex items-center gap-2 flex-wrap xl:flex-nowrap xl:justify-end">
               <WalletDropdown value={selectedWallet} onChange={setSelectedWallet} />
 
@@ -206,31 +214,25 @@ export default function ManageFundScreen({
                 {isExporting ? "Mengekspor..." : "Export Excel"}
               </button>
 
-              <button
-                type="button"
-                onClick={handleOpenCreate}
-                className="hidden lg:inline-flex items-center gap-1.5 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition hover:bg-cyan-400/16 whitespace-nowrap"
-              >
-                <Plus className="h-3.5 w-3.5 shrink-0" />
-                Catat transaksi
-              </button>
-
-              {editingTransaction && (
-                <div className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-xs text-cyan-200 whitespace-nowrap">
-                  Edit:{" "}
-                  <span className="font-medium">
-                    {editingTransaction.judul_transaksi || "Transaksi"}
-                  </span>
-                </div>
+              {isCreator && (
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  className="hidden lg:inline-flex items-center gap-1.5 rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition hover:bg-cyan-400/16 whitespace-nowrap"
+                >
+                  <Plus className="h-3.5 w-3.5 shrink-0" />
+                  Catat transaksi
+                </button>
               )}
+
             </div>
           </div>
 
           <CashflowTable
             rows={latestRows}
-            onCreateTransaction={handleOpenCreate}
-            onEditTransaction={handleEditTransaction}
-            onDeleteTransaction={handleDeleteTransaction}
+            onCreateTransaction={isCreator ? handleOpenCreate : undefined}
+            onEditTransaction={isCreator ? handleEditTransaction : undefined}
+            onDeleteTransaction={isCreator ? handleDeleteTransaction : undefined}
           />
 
           {isDeleting ? (
@@ -241,24 +243,30 @@ export default function ManageFundScreen({
         </section>
       </div>
 
-      <button
-        type="button"
-        onClick={handleOpenCreate}
-        className="fixed bottom-6 right-6 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full border border-cyan-300/30 bg-cyan-400/15 text-cyan-100 shadow-[0_20px_50px_rgba(34,211,238,0.18)] backdrop-blur-xl transition hover:bg-cyan-400/20 lg:hidden"
-        aria-label="Catat transaksi"
-      >
-        <Plus className="h-5 w-5" />
-      </button>
+      {/* FAB hanya untuk creator */}
+      {isCreator && (
+        <button
+          type="button"
+          onClick={handleOpenCreate}
+          className="fixed bottom-6 right-6 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full border border-cyan-300/30 bg-cyan-400/15 text-cyan-100 shadow-[0_20px_50px_rgba(34,211,238,0.18)] backdrop-blur-xl transition hover:bg-cyan-400/20 lg:hidden"
+          aria-label="Catat transaksi"
+        >
+          <Plus className="h-5 w-5" />
+        </button>
+      )}
 
-      <CashflowEntrySheet
-        open={isComposerOpen}
-        onClose={handleCloseComposer}
-        idProject={data.project.id_project}
-        wallets={data.wallets}
-        defaultWallet={defaultWallet}
-        editingTransaction={editingTransaction}
-        onSubmitted={handleSubmitted}
-      />
+      {isCreator && (
+        <CashflowEntrySheet
+          open={isComposerOpen}
+          onClose={handleCloseComposer}
+          idProject={data.project.id_project}
+          wallets={data.wallets}
+          defaultWallet={defaultWallet}
+          editingTransaction={editingTransaction}
+          onSubmitted={handleSubmitted}
+        />
+      )}
+
     </>
   );
 }

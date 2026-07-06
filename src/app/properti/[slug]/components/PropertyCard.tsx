@@ -8,6 +8,8 @@ import { KATEGORI_ICONS } from "../constants";
 import { formatCurrency, formatDateShort, daysUntil, getPropertyUrl } from "../utils";
 import type { PropertyItem } from "../types";
 import { useSwipe } from "@/hooks/useSwipe";
+import { HotDealBadge, HOT_DEAL_CARD_CLASS } from "@/components/HotDeal/HotDealBadge";
+import { SliderDots } from "@/components/SliderDots";
 
 // ─── BADGES ──────────────────────────────────────────────────────────────────
 
@@ -102,10 +104,15 @@ interface PropertyCardProps {
   forceAlamatLengkap?: boolean;
   /** Mode kompak untuk tampilan "Properti Serupa" — image lebih pendek, padding lebih kecil. */
   compact?: boolean;
+  /** ID properti untuk badge di pojok kiri bawah gambar (dashboard only). */
+  idBadge?: string;
+  /** Handler saat ID badge diklik (copy ke clipboard, toast, dll). */
+  onIdBadgeClick?: (e: React.MouseEvent, id: string) => void;
 }
 
-export default function PropertyCard({ item, forceAlamatLengkap = false, compact = false }: PropertyCardProps) {
+export default function PropertyCard({ item, forceAlamatLengkap = false, compact = false, idBadge, onIdBadgeClick }: PropertyCardProps) {
   const [imgIdx, setImgIdx] = useState(0);
+  const [idCopied, setIdCopied] = useState(false);
   const images =
     item.foto_list.length > 0
       ? item.foto_list
@@ -141,15 +148,19 @@ export default function PropertyCard({ item, forceAlamatLengkap = false, compact
   return (
     <Link href={getPropertyUrl(item)} className="block h-full group">
       <div
-        className="
-          bg-[#050608] border border-white/10 rounded-3xl overflow-hidden
+        className={`
+          bg-[#050608] rounded-3xl overflow-hidden
           relative flex flex-col h-full
-          shadow-[0_18px_60px_rgba(0,0,0,0.9)]
           before:content-[''] before:absolute before:inset-px before:rounded-[22px]
-          before:border before:border-white/5 before:pointer-events-none
-          hover:border-emerald-400/60 hover:shadow-[0_22px_70px_rgba(34,197,94,0.3)]
+          before:border before:pointer-events-none
           transition-all duration-300
-        "
+          ${
+            item.is_hot_deal
+              ? HOT_DEAL_CARD_CLASS
+              : // Default → netral, hover esmeralda (brand)
+                "border border-white/10 shadow-[0_18px_60px_rgba(0,0,0,0.9)] before:border-white/5 hover:border-emerald-400/60 hover:shadow-[0_22px_70px_rgba(34,197,94,0.3)]"
+          }
+        `}
       >
         {/* ── IMAGE ── */}
         <div
@@ -189,21 +200,17 @@ export default function PropertyCard({ item, forceAlamatLengkap = false, compact
               >
                 <Icon icon="solar:alt-arrow-right-linear" />
               </button>
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-20">
-                {images.slice(0, 5).map((_, i) => (
-                  <div
-                    key={i}
-                    className={`h-1.5 rounded-full transition-all ${
-                      i === imgIdx ? "bg-white w-4" : "bg-white/40 w-1.5"
-                    }`}
-                  />
-                ))}
-              </div>
+              <SliderDots
+                total={images.length}
+                index={imgIdx}
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20"
+              />
             </>
           )}
 
-          {/* badge kiri: kategori */}
-          <div className={`absolute z-10 ${compact ? "top-3 left-3" : "top-4 left-4"}`}>
+          {/* badge kiri: hot deal (bikin FOMO) + kategori */}
+          <div className={`absolute z-10 flex flex-col items-start gap-1.5 ${compact ? "top-3 left-3" : "top-4 left-4"}`}>
+            {item.is_hot_deal && <HotDealBadge size={compact ? "sm" : "md"} />}
             <span
               className={`inline-flex items-center gap-1.5 rounded-full bg-black/80 text-emerald-300 font-semibold border border-emerald-400/40 backdrop-blur-sm ${
                 compact ? "px-2 py-0.5 text-[10px]" : "px-3 py-1.5 text-[11px]"
@@ -226,20 +233,39 @@ export default function PropertyCard({ item, forceAlamatLengkap = false, compact
             )}
           </div>
 
-          {/* discount badge */}
-          {hasDiscount && (
-            <div className="absolute bottom-4 right-3 z-20">
-              <div className="absolute inset-0 blur-xl bg-gradient-to-r from-rose-500/40 via-orange-500/40 to-amber-400/40 animate-pulse pointer-events-none" />
-              <span className="absolute -top-2 -right-1 w-3 h-3 rounded-full bg-amber-300 animate-ping" />
-              <div className="relative bg-gradient-to-r from-rose-600 via-orange-500 to-amber-400 text-white px-3.5 py-1.5 rounded-full text-[11px] font-extrabold tracking-wide shadow-[0_0_20px_rgba(248,113,113,0.9)] flex items-center gap-1.5">
+          {/* ID badge — pojok kiri bawah gambar, gaya sobekan tiket */}
+          {idBadge && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (onIdBadgeClick) {
+                  onIdBadgeClick(e, idBadge);
+                } else {
+                  navigator.clipboard.writeText(idBadge);
+                  setIdCopied(true);
+                  setTimeout(() => setIdCopied(false), 2000);
+                }
+              }}
+              title="Salin ID properti"
+              className="group/id absolute bottom-3 left-3 z-30 inline-flex items-stretch overflow-hidden rounded-md font-mono text-[11px] shadow-md ring-1 ring-white/10 transition-transform duration-200 hover:scale-[1.03]"
+            >
+              <span className="flex items-center bg-emerald-500 px-1.5 text-[9px] font-bold uppercase tracking-wider text-black">ID</span>
+              <span className="flex items-center gap-1.5 bg-black px-2 py-1 tracking-wide text-white">
+                {idBadge}
                 <Icon
-                  icon="solar:fire-bold-duotone"
-                  className="text-sm drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]"
+                  icon={idCopied ? "solar:check-circle-bold-duotone" : "solar:copy-line-duotone"}
+                  className={`text-[11px] transition-all duration-200 ${
+                    idCopied
+                      ? "text-emerald-400 opacity-100"
+                      : "text-white/40 opacity-0 group-hover/id:opacity-100"
+                  }`}
                 />
-                -{discountPct}%
-              </div>
-            </div>
+              </span>
+            </button>
           )}
+
         </div>
 
         {/* ── CONTENT ── */}
@@ -248,17 +274,17 @@ export default function PropertyCard({ item, forceAlamatLengkap = false, compact
           <div className={compact ? "mb-1" : "mb-2"}>
             {hasDiscount ? (
               <>
-                <div className="flex items-baseline gap-2">
-                  <h3 className="text-white text-xl font-black tracking-tight">
-                    {formatCurrency(mainPrice)}
-                  </h3>
-                  <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                    Hemat {formatCurrency(item.harga - mainPrice)}
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-500 text-xs line-through">
+                    {formatCurrency(item.harga)}
+                  </span>
+                  <span className="rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-bold text-rose-400">
+                    -{discountPct}%
                   </span>
                 </div>
-                <span className="text-gray-500 text-xs line-through decoration-2 decoration-rose-400/80">
-                  {formatCurrency(item.harga)}
-                </span>
+                <h3 className="text-white text-xl font-black tracking-tight">
+                  {formatCurrency(mainPrice)}
+                </h3>
               </>
             ) : (
               <h3 className="text-white text-xl font-black tracking-tight">

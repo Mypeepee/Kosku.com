@@ -69,6 +69,14 @@ html {
      jadi tanpa rule ini halaman tetap bisa di-scroll ke kanan di iPhone
      (mis. animasi framer `initial={{ x: 44 }}` yang sementara keluar layar). */
   overflow-x: clip;
+
+  /* Situs ini SELALU bertema gelap (bg gelap + teks terang di seluruh app).
+     Tanpa deklarasi ini, teks yang mewarisi warna default browser memakai
+     `canvastext` — yang jadi HITAM saat OS device dalam light mode, sehingga
+     teks hitam di atas background hitam = tak terlihat (mis. section Testimoni
+     "Bukti Nyata" & FAQ "Pusat Bantuan"). Mengunci color-scheme ke dark bikin
+     `canvastext` selalu terang & konsisten di light maupun dark mode OS. */
+  color-scheme: dark;
 }
 
 /* Cegah horizontal scroll di seluruh halaman.
@@ -78,6 +86,9 @@ html {
    Safari iOS hanya menghormati yang di root). */
 body {
   overflow-x: clip;
+  /* Jaring pengaman: teks default putih untuk elemen yang tak menyetel warna
+     eksplisit, agar tak pernah jadi hitam di atas background gelap. */
+  color: #ffffff;
 }
 
 /* Marquee logo "Ekosistem Kami" — geser mulus sejauh -50%.
@@ -797,6 +808,95 @@ section {
   animation: premiumTextShimmer 2.8s linear infinite;
 }
 
+/* ── Luxury action buttons (Download Poster / Brosur) ─────────────────────────
+   Kaca gelap + kilau cahaya berjalan + glow aksen. Elegan, futuristik, premium.
+   Radius diatur lewat util Tailwind (rounded-xl / rounded-2xl) di tiap tombol. */
+@keyframes luxShine {
+  0%        { transform: translateX(-130%) skewX(-18deg); opacity: 0; }
+  10%       { opacity: 1; }
+  46%, 100% { transform: translateX(340%) skewX(-18deg); opacity: 0; }
+}
+.btn-lux {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    linear-gradient(158deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.025) 44%, rgba(255,255,255,0.012) 100%),
+    #0b0f14;
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 0 -14px 26px rgba(0,0,0,0.36),
+    0 10px 30px rgba(0,0,0,0.45);
+  transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .3s ease, border-color .3s ease;
+}
+.btn-lux:hover  { transform: translateY(-1px); }
+.btn-lux:active { transform: translateY(0) scale(.985); }
+.btn-lux:disabled { transform: none; }
+.btn-lux::after {                 /* sheen kaca di tepi atas */
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 46%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.11), transparent);
+  pointer-events: none; z-index: 1;
+}
+.btn-lux::before {                /* cahaya menyapu (scan) */
+  content: ""; position: absolute; top: 0; left: 0; width: 36%; height: 100%;
+  background: linear-gradient(110deg, transparent, rgba(255,255,255,0.30), transparent);
+  transform: translateX(-130%) skewX(-18deg);
+  animation: luxShine 5.5s ease-in-out infinite;
+  pointer-events: none; z-index: 2;
+}
+.btn-lux:hover::before    { animation-duration: 1.5s; }
+.btn-lux:disabled::before { animation-play-state: paused; }
+.btn-lux > * { position: relative; z-index: 3; }
+
+.btn-lux__chip {
+  display: flex; align-items: center; justify-content: center;
+  border-radius: .6rem;
+  background: linear-gradient(160deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.20);
+}
+
+/* POSTER — holographic cyan */
+.btn-lux--poster {
+  border-color: rgba(56,189,248,0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(186,230,253,0.16), inset 0 -14px 26px rgba(0,0,0,0.40),
+    0 10px 30px rgba(2,132,199,0.16), 0 0 22px rgba(56,189,248,0.12);
+}
+.btn-lux--poster:hover {
+  border-color: rgba(125,211,252,0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(186,230,253,0.26),
+    0 12px 38px rgba(2,132,199,0.34), 0 0 30px rgba(56,189,248,0.26);
+}
+.btn-lux--poster .btn-lux__chip {
+  background: linear-gradient(160deg, rgba(56,189,248,0.32), rgba(2,132,199,0.10));
+  border-color: rgba(125,211,252,0.5);
+  box-shadow: inset 0 1px 0 rgba(186,230,253,0.35), 0 0 14px rgba(56,189,248,0.40);
+}
+.btn-lux--poster .lux-ico { filter: drop-shadow(0 0 6px rgba(56,189,248,0.70)); }
+
+/* BROSUR — champagne gold */
+.btn-lux--brosur {
+  border-color: rgba(224,168,48,0.44);
+  box-shadow:
+    inset 0 1px 0 rgba(245,220,150,0.16), inset 0 -14px 26px rgba(0,0,0,0.40),
+    0 10px 30px rgba(201,144,42,0.15), 0 0 22px rgba(224,168,48,0.10);
+}
+.btn-lux--brosur:hover {
+  border-color: rgba(240,200,90,0.80);
+  box-shadow:
+    inset 0 1px 0 rgba(245,220,150,0.26),
+    0 12px 38px rgba(201,144,42,0.32), 0 0 30px rgba(224,168,48,0.24);
+}
+.btn-lux--brosur .btn-lux__chip {
+  background: linear-gradient(160deg, rgba(224,168,48,0.32), rgba(201,144,42,0.10));
+  border-color: rgba(240,200,90,0.5);
+  box-shadow: inset 0 1px 0 rgba(245,220,150,0.35), 0 0 14px rgba(224,168,48,0.40);
+}
+.btn-lux--brosur .lux-ico { filter: drop-shadow(0 0 6px rgba(224,168,48,0.70)); }
+
 /* ── KPI Delta Pill animations ── */
 
 /* Diagonal shine sweep — sweeps across pill then rests */
@@ -1007,3 +1107,10 @@ section {
   text-align: left;
 }
 .article-body th { background: rgba(255, 255, 255, 0.04); color: #fff; font-weight: 700; }
+
+/* ── Hot Deal pill — sheen sweep untuk efek FOMO di kartu properti ── */
+@keyframes hotdeal-sheen {
+  0%   { transform: translateX(0); }
+  60%  { transform: translateX(400%); }
+  100% { transform: translateX(400%); }
+}

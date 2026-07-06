@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type {
+  CurrentInvestorInfo,
   DbCashflow,
   ManageFundData,
   WalletKey,
@@ -10,6 +11,7 @@ import type {
 type ProjectFundSource = {
   id_project: string;
   nama_project: string;
+  dibuat_oleh: string;
   nilai_limit_lelang: Prisma.Decimal | number | null;
   spare_bidding: Prisma.Decimal | number | null;
   biaya_balik_nama: Prisma.Decimal | number | null;
@@ -73,7 +75,8 @@ function normalizeWalletKey(value: unknown): WalletKey {
 }
 
 export async function getProjectFundDetail(
-  idProject: string
+  idProject: string,
+  currentAgentId?: string | null
 ): Promise<ManageFundData | null> {
   const [project, cashflowRows] = await Promise.all([
     prisma.project.findUnique({
@@ -81,6 +84,7 @@ export async function getProjectFundDetail(
       select: {
         id_project: true,
         nama_project: true,
+        dibuat_oleh: true,
         nilai_limit_lelang: true,
         spare_bidding: true,
         biaya_balik_nama: true,
@@ -119,6 +123,36 @@ export async function getProjectFundDetail(
     return null;
   }
 
+  let currentInvestorInfo: CurrentInvestorInfo | null = null;
+
+  if (currentAgentId && currentAgentId !== project.dibuat_oleh) {
+    const investorRow = await prisma.projectInvestor.findFirst({
+      where: { id_project: idProject, id_agent: currentAgentId },
+      select: {
+        nominal_komitmen: true,
+        persentase_kepemilikan: true,
+        status: true,
+        agent: {
+          select: {
+            pengguna: { select: { nama_lengkap: true } },
+          },
+        },
+      },
+    });
+
+    if (investorRow) {
+      currentInvestorInfo = {
+        nama: investorRow.agent?.pengguna?.nama_lengkap ?? null,
+        nominal_komitmen: toNumber(investorRow.nominal_komitmen),
+        persentase_kepemilikan:
+          investorRow.persentase_kepemilikan != null
+            ? toNumber(investorRow.persentase_kepemilikan)
+            : null,
+        status: String(investorRow.status ?? ""),
+      };
+    }
+  }
+
   const transactions: DbCashflow[] = cashflowRows.map((row) => ({
     id_project_arus_kas: row.id_project_arus_kas,
     id_project: row.id_project,
@@ -146,7 +180,7 @@ export async function getProjectFundDetail(
   for (const row of transactions) {
     const walletKey = normalizeWalletKey(row.wallet_key);
     const current = summaryMap.get(walletKey) ?? { income: 0, expense: 0 };
-    const nominal = toNumber(row.nominal);
+    const nominal = Number(row.nominal);
 
     if (row.jenis_transaksi === "pemasukan") {
       current.income += nominal;
@@ -171,6 +205,7 @@ export async function getProjectFundDetail(
       usedBudget: summary.expense,
       remainingBudget: balance,
       balance,
+      visible: true,
     };
   });
 
@@ -186,6 +221,7 @@ export async function getProjectFundDetail(
     project: {
       id_project: project.id_project,
       nama_project: project.nama_project,
+      dibuat_oleh: project.dibuat_oleh,
     },
     wallets,
     transactions,
@@ -193,5 +229,6 @@ export async function getProjectFundDetail(
     totalExpense,
     totalBalance,
     totalRemainingBudget,
+    currentInvestorInfo,
   };
 }
