@@ -15,7 +15,9 @@ function fmtDate(v: Date | string | null | undefined): string {
   if (!v) return "-";
   const d = v instanceof Date ? v : new Date(v);
   if (isNaN(d.getTime())) return "-";
-  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" });
+  // Kolom @db.Date disimpan sebagai tanggal murni — tampilkan dalam WIB agar
+  // tanggal di file ekspor sama dengan yang tampil di aplikasi.
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric", timeZone: "Asia/Jakarta" });
 }
 
 function fmtIDR(v: number) {

@@ -7,6 +7,7 @@ import type {
     FundingInvestorAllocation,
     ListingOption,
     ProjectCmaPayload,
+    ProjectFullDetail,
     ProjectInvestorPayload,
     status_pembayaran_project_enum,
   } from "./types";
@@ -416,6 +417,108 @@ import type {
     };
   }
   
+  function mapCmaEntriesFromFull(
+    entries: ProjectFullDetail["cma_entries"]
+  ): CmaEntry[] {
+    const mapped = entries.map((entry, index) => ({
+      id: `cma-existing-${index + 1}-${Math.random().toString(36).slice(2, 7)}`,
+      nama: entry.nama ?? "",
+      luas_tanah: Number(entry.luas_tanah || 0),
+      harga: Number(entry.harga || 0),
+      catatan: entry.catatan ?? "",
+    }));
+
+    // Pad up to the same comfortable 10-row layout the create flow uses.
+    if (mapped.length < 10) {
+      return [...mapped, ...createDefaultCmaEntries(10 - mapped.length)];
+    }
+
+    return mapped;
+  }
+
+  function mapInvestorAllocationsFromFull(
+    entries: ProjectFullDetail["investor_allocations"]
+  ): FundingInvestorAllocation[] {
+    const mapped = entries.map((entry, index) => ({
+      id: `alloc-existing-${index + 1}-${Math.random().toString(36).slice(2, 7)}`,
+      investor_id: entry.id_agent,
+      nominal: Number(entry.nominal_komitmen || 0),
+      investor_nama: entry.nama,
+      investor_label: entry.label,
+      investor_avatar: entry.foto_profil_url,
+      status: entry.status,
+      catatan: "",
+    }));
+
+    return mapped.length ? mapped : createDefaultInvestorAllocations(1);
+  }
+
+  /**
+   * Rebuild the full wizard form (plus the source listing snapshot) from a
+   * saved project so the edit flow starts exactly where the create flow left
+   * off — same fields, same shape.
+   */
+  export function buildFormFromProjectFull(detail: ProjectFullDetail): {
+    form: CreateProjectFormValues;
+    listing: ListingOption | null;
+  } {
+    const investorAllocations = mapInvestorAllocationsFromFull(
+      detail.investor_allocations
+    );
+
+    const invitedInvestorIds = Array.from(
+      new Set(
+        investorAllocations
+          .map((item) => String(item.investor_id || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const form: CreateProjectFormValues = {
+      id_listing: detail.id_listing || null,
+
+      nama_project: detail.nama_project ?? "",
+      alamat_property: detail.alamat_property ?? "",
+      provinsi: detail.provinsi ?? "",
+      kota: detail.kota ?? "",
+      kecamatan: detail.kecamatan ?? "",
+      kelurahan: detail.kelurahan ?? "",
+      gambar_thumbnail: detail.gambar_thumbnail ?? "",
+
+      tanggal_pembelian: detail.tanggal_pembelian,
+      harga_pembelian: Number(detail.harga_pembelian || 0),
+      estimasi_harga_jual: Number(detail.estimasi_harga_jual || 0),
+      estimasi_profit_bersih: Number(detail.estimasi_profit_bersih || 0),
+      target_pendanaan: Number(detail.target_pendanaan || 0),
+      total_pendanaan: Number(detail.total_pendanaan || 0),
+
+      jenis_pendanaan: detail.jenis_pendanaan,
+      status: detail.status,
+
+      mulai_tanggal: detail.mulai_tanggal,
+      estimasi_selesai: detail.estimasi_selesai,
+      estimasi_bulan: Number(detail.estimasi_bulan || 0),
+      pendanaan_ditutup_pada: detail.pendanaan_ditutup_pada,
+
+      deskripsi_project: detail.deskripsi_project ?? "",
+      dibuat_oleh: detail.dibuat_oleh ?? "",
+      invitedInvestorIds,
+
+      nilai_limit_lelang: Number(detail.nilai_limit_lelang || 0),
+      spare_bidding: Number(detail.spare_bidding || 0),
+      biaya_balik_nama: Number(detail.biaya_balik_nama || 0),
+      biaya_eksekusi: Number(detail.biaya_eksekusi || 0),
+      biaya_renov: Number(detail.biaya_renov || 0),
+      total_biaya_akuisisi: Number(detail.total_biaya_akuisisi || 0),
+      dana_cadangan: Number(detail.dana_cadangan || 0),
+
+      cma_entries: mapCmaEntriesFromFull(detail.cma_entries),
+      investor_allocations: investorAllocations,
+    };
+
+    return { form, listing: detail.listing };
+  }
+
   export function getInitialForm(
     createdById?: string
   ): CreateProjectFormValues {

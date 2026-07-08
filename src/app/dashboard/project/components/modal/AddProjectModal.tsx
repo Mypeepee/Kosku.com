@@ -11,6 +11,8 @@ import type {
   WizardStep,
 } from "./types";
 import { getInitialForm, getListingIdForProject } from "./utils";
+
+export type AddProjectModalMode = "create" | "edit";
 import StepOneProperty from "./components/step1/StepOneProperty";
 import PropertyValueStep from "./components/step2/PropertyValueStep";
 import FundingInvestorStep from "./components/step3/FundingInvestorStep";
@@ -29,6 +31,9 @@ type Props = {
   loading?: boolean;
   theme: ModalTierTheme;
   createdById?: string;
+  mode?: AddProjectModalMode;
+  initialValues?: CreateProjectFormValues | null;
+  initialListingSnapshot?: ListingOption | null;
 };
 
 const LISTING_PAGE_SIZE = 8;
@@ -40,22 +45,34 @@ export default function AddProjectModal({
   loading = false,
   theme,
   createdById,
+  mode = "create",
+  initialValues = null,
+  initialListingSnapshot = null,
 }: Props) {
+  const isEdit = mode === "edit";
+
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState<WizardStep>(1);
   const [form, setForm] = useState<CreateProjectFormValues>(() =>
-    getInitialForm(createdById)
+    isEdit && initialValues ? initialValues : getInitialForm(createdById)
   );
 
   const [listingQuery, setListingQuery] = useState("");
   const [listingResults, setListingResults] = useState<ListingOption[]>([]);
   const [selectedListingSnapshot, setSelectedListingSnapshot] =
-    useState<ListingOption | null>(null);
+    useState<ListingOption | null>(
+      isEdit ? initialListingSnapshot ?? null : null
+    );
   const [listingLoading, setListingLoading] = useState(false);
   const [listingError, setListingError] = useState("");
   const [listingLimit, setListingLimit] = useState(LISTING_PAGE_SIZE);
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Keep the latest seed values in refs so the "reset on open" effect can read
+  // them without re-running (and wiping the user's edits) when they change.
+  const seedRef = useRef({ isEdit, initialValues, initialListingSnapshot });
+  seedRef.current = { isEdit, initialValues, initialListingSnapshot };
 
   useEffect(() => {
     setMounted(true);
@@ -65,11 +82,19 @@ export default function AddProjectModal({
   useEffect(() => {
     if (!open) return;
 
+    const seed = seedRef.current;
+
     setStep(1);
-    setForm(getInitialForm(createdById));
+    setForm(
+      seed.isEdit && seed.initialValues
+        ? seed.initialValues
+        : getInitialForm(createdById)
+    );
     setListingQuery("");
     setListingResults([]);
-    setSelectedListingSnapshot(null);
+    setSelectedListingSnapshot(
+      seed.isEdit ? seed.initialListingSnapshot ?? null : null
+    );
     setListingError("");
     setListingLimit(LISTING_PAGE_SIZE);
   }, [open, createdById]);
@@ -405,7 +430,7 @@ export default function AddProjectModal({
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <h2 className="min-w-0 truncate text-xl font-black tracking-tight text-white sm:text-2xl">
-                  Tambahkan Project Pendanaan
+                  {isEdit ? "Edit Project Pendanaan" : "Tambahkan Project Pendanaan"}
                 </h2>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -689,7 +714,9 @@ export default function AddProjectModal({
                           <span className="truncate">Menyimpan...</span>
                         </>
                       ) : (
-                        <span className="truncate">Simpan Project</span>
+                        <span className="truncate">
+                          {isEdit ? "Simpan Perubahan" : "Simpan Project"}
+                        </span>
                       )}
                     </button>
                   )}

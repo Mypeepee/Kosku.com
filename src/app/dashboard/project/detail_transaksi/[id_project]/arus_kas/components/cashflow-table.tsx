@@ -90,16 +90,19 @@ function formatDate(value?: string | Date | null) {
 
   const normalized =
     typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
-      ? `${value}T00:00:00`
+      ? `${value}T00:00:00Z`
       : value;
 
   const date = normalized instanceof Date ? normalized : new Date(normalized);
   if (Number.isNaN(date.getTime())) return "-";
 
+  // tanggal_transaksi disimpan sebagai tanggal murni (UTC midnight, @db.Date).
+  // Tampilkan dalam timezone Indonesia (WIB) agar konsisten untuk semua user.
   return new Intl.DateTimeFormat("id-ID", {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Asia/Jakarta",
   }).format(date);
 }
 

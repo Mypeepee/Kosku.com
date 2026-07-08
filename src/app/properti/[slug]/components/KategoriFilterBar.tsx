@@ -11,7 +11,7 @@ interface KategoriFilterBarProps {
   activeSort: string;
   tabCounts: TabCounts;
   onTipeChange: (tipe: string | undefined) => void;
-  onSortChange: (sort: string) => void;
+  onSortChange: (sort: string | undefined) => void;
 }
 
 const TABS = [
@@ -81,19 +81,24 @@ function DesktopBar({ activeTipe, activeSort, tabCounts, onTipeChange, onSortCha
       {/* DIVIDER */}
       <div className="w-px h-5 shrink-0 mx-2" style={{ background: "rgba(255,255,255,0.1)" }} />
 
-      {/* SORT PILLS */}
+      {/* SORT PILLS — klik pill aktif (atau tombol silang) untuk menonaktifkan */}
       {SORT_OPTIONS.map((opt) => {
         const isActive = activeSort === opt.value;
         return (
           <button
             key={opt.value}
-            onClick={() => onSortChange(opt.value)}
-            className="relative flex items-center gap-1.5 shrink-0 px-3 h-8 rounded-full text-xs font-semibold transition-all duration-150 select-none"
+            onClick={() => onSortChange(isActive ? undefined : opt.value)}
+            title={isActive ? `Nonaktifkan urutan ${opt.label}` : `Urutkan: ${opt.label}`}
+            className="group relative flex items-center gap-1.5 shrink-0 h-8 rounded-full text-xs font-semibold transition-all duration-150 select-none"
             style={isActive ? {
+              paddingLeft: 12,
+              paddingRight: 6,
               background: "rgba(99,102,241,0.18)",
               border: "1px solid rgba(99,102,241,0.4)",
               color: "#a5b4fc",
             } : {
+              paddingLeft: 12,
+              paddingRight: 12,
               background: "transparent",
               border: "1px solid rgba(255,255,255,0.08)",
               color: "rgba(255,255,255,0.35)",
@@ -101,6 +106,20 @@ function DesktopBar({ activeTipe, activeSort, tabCounts, onTipeChange, onSortCha
           >
             <Icon icon={opt.icon} className="text-sm shrink-0" />
             <span className="whitespace-nowrap">{opt.label}</span>
+            {isActive && (
+              <span
+                aria-hidden
+                className="flex items-center justify-center rounded-full shrink-0 transition-transform duration-150 group-hover:scale-110"
+                style={{
+                  width: 18,
+                  height: 18,
+                  background: "#ef4444",
+                  boxShadow: "0 1px 4px rgba(239,68,68,0.5)",
+                }}
+              >
+                <Icon icon="mdi:close" className="text-white" style={{ fontSize: 12 }} />
+              </span>
+            )}
           </button>
         );
       })}
@@ -178,10 +197,24 @@ function MobileBar({ activeTipe, activeSort, tabCounts, onTipeChange, onSortChan
               {currentSort?.label ?? "Pilih urutan"}
             </p>
           </div>
-          <motion.div animate={{ rotate: openPanel === "sort" ? 180 : 0 }} transition={{ duration: 0.18 }}>
-            <Icon icon="solar:alt-arrow-down-bold" className="text-xs shrink-0"
-              style={{ color: "rgba(255,255,255,0.25)" }} />
-          </motion.div>
+          {currentSort ? (
+            /* Tombol silang merah: nonaktifkan urutan tanpa buka panel.
+               role=button (bukan <button>) karena berada di dalam <button>. */
+            <span
+              role="button"
+              aria-label={`Nonaktifkan urutan ${currentSort.label}`}
+              onClick={(e) => { e.stopPropagation(); onSortChange(undefined); setOpenPanel(null); }}
+              className="flex items-center justify-center rounded-full shrink-0 active:scale-90 transition-transform"
+              style={{ width: 20, height: 20, background: "#ef4444", boxShadow: "0 1px 4px rgba(239,68,68,0.5)" }}
+            >
+              <Icon icon="mdi:close" className="text-white" style={{ fontSize: 13 }} />
+            </span>
+          ) : (
+            <motion.div animate={{ rotate: openPanel === "sort" ? 180 : 0 }} transition={{ duration: 0.18 }}>
+              <Icon icon="solar:alt-arrow-down-bold" className="text-xs shrink-0"
+                style={{ color: "rgba(255,255,255,0.25)" }} />
+            </motion.div>
+          )}
         </button>
       </div>
 
@@ -247,7 +280,7 @@ function MobileBar({ activeTipe, activeSort, tabCounts, onTipeChange, onSortChan
                   return (
                     <button
                       key={opt.value}
-                      onClick={() => { onSortChange(opt.value); setOpenPanel(null); }}
+                      onClick={() => { onSortChange(isActive ? undefined : opt.value); setOpenPanel(null); }}
                       className="flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all active:scale-[0.97]"
                       style={isActive ? {
                         background: "rgba(99,102,241,0.14)",
@@ -264,8 +297,14 @@ function MobileBar({ activeTipe, activeSort, tabCounts, onTipeChange, onSortChan
                         {opt.label}
                       </span>
                       {isActive && (
-                        <Icon icon="solar:check-circle-bold" className="text-sm shrink-0"
-                          style={{ color: "#a5b4fc" }} />
+                        /* Silang merah = tekan lagi untuk menonaktifkan urutan */
+                        <span
+                          aria-hidden
+                          className="flex items-center justify-center rounded-full shrink-0"
+                          style={{ width: 20, height: 20, background: "#ef4444", boxShadow: "0 1px 4px rgba(239,68,68,0.5)" }}
+                        >
+                          <Icon icon="mdi:close" className="text-white" style={{ fontSize: 13 }} />
+                        </span>
                       )}
                     </button>
                   );

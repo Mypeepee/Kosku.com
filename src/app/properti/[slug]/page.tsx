@@ -244,16 +244,24 @@ export default async function KategoriPage({ params, searchParams }: Props) {
     jenis_transaksi: transaksiFilter(),
   };
 
-  // Sorting — is_hot_deal always floats to top, then secondary sort
+  // Sorting. Untuk sort eksplisit harga/luas, urutan HARUS murni sesuai kolom
+  // yang dipilih — is_hot_deal TIDAK boleh mengapung ke atas, kalau tidak card
+  // pertama "Termurah" bukan yang termurah. Hot deal hanya diprioritaskan untuk
+  // browsing default (Terbaru).
   let secondaryOrder: Prisma.ListingOrderByWithRelationInput = { tanggal_dibuat: "desc" };
   if (sort === "termurah")   secondaryOrder = { harga: "asc" };
   if (sort === "termahal")   secondaryOrder = { harga: "desc" };
   if (sort === "terpopuler") secondaryOrder = { dilihat: "desc" };
   if (sort === "luas-asc")   secondaryOrder = { luas_tanah: "asc" };
   if (sort === "luas-desc")  secondaryOrder = { luas_tanah: "desc" };
+
+  // Hot deal mengapung hanya pada sort default (terbaru); sort eksplisit murni.
+  const floatHotDeal = sort === "terbaru";
   const orderBy: Prisma.ListingOrderByWithRelationInput[] = [
-    { is_hot_deal: "desc" },
+    ...(floatHotDeal ? [{ is_hot_deal: "desc" } as Prisma.ListingOrderByWithRelationInput] : []),
     secondaryOrder,
+    // Tiebreak stabil supaya paginasi konsisten saat nilai sort sama.
+    { id_property: "desc" },
   ];
 
   const [totalItems, propertiesRaw] = await prisma.$transaction([
