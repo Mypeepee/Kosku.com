@@ -1209,8 +1209,10 @@ async function runScrapeJob(
                 jenis_transaksi: "LELANG",
                 kategori: kategoriEnum,
                 status_tayang: "TERSEDIA",
-                // Harga dikosongkan (0) — buyer lihat nilai_limit_lelang
-                harga: 0,
+                // Harga = nilai_limit_lelang supaya kolom `harga` menyimpan
+                // harga efektif (dipakai untuk sort termurah/termahal & filter
+                // harga). Tampilan tetap membaca nilai_limit_lelang.
+                harga: data.nilai_limit || 0,
                 // Harga per meter = nilai limit lelang / luas tanah
                 harga_per_meter:
                   data.nilai_limit && luas && luas > 0

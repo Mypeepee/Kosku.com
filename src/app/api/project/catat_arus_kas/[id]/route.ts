@@ -120,7 +120,9 @@ function normalizeTanggal(value: unknown): Date | null {
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     const [year, month, day] = raw.split("-").map(Number);
-    const date = new Date(year, month - 1, day);
+    // Simpan sebagai UTC midnight supaya kolom @db.Date menyimpan tanggal
+    // kalender yang sama persis dengan input user, apa pun timezone server.
+    const date = new Date(Date.UTC(year, month - 1, day));
     return Number.isNaN(date.getTime()) ? null : date;
   }
 

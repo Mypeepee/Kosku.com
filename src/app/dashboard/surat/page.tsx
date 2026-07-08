@@ -18,6 +18,14 @@ const KuitansiModal = dynamic(
   () => import("./components/KuitansiModal").then(m => ({ default: m.KuitansiModal })),
   { ssr: false }
 );
+const TandaTerimaModal = dynamic(
+  () => import("./components/TandaTerimaModal").then(m => ({ default: m.TandaTerimaModal })),
+  { ssr: false }
+);
+const AktaKesepakatanModal = dynamic(
+  () => import("./components/AktaKesepakatanModal").then(m => ({ default: m.AktaKesepakatanModal })),
+  { ssr: false }
+);
 
 // ── Folder definitions ────────────────────────────────────────────────────────
 
@@ -468,11 +476,16 @@ function SuratContent() {
           t.description.toLowerCase().includes(q),
       );
     }
+    // Urutan folder: Transaksi → Pengurusan Dokumen → Eksekusi Pengosongan
+    const folderRank = (t: SuratTemplate) => {
+      const idx = FOLDERS.findIndex((f) => f.id === getFolderForTemplate(t));
+      return idx === -1 ? FOLDERS.length : idx;
+    };
     return [...result].sort((a, b) => {
       if (sortBy === "name-asc")  return a.title.localeCompare(b.title);
       if (sortBy === "name-desc") return b.title.localeCompare(a.title);
       if (sortBy === "usage")     return b.usedCount - a.usedCount;
-      return 0; // date: original order
+      return folderRank(a) - folderRank(b); // default: urut sesuai folder
     });
   }, [activeFolder, byFolder, search, sortBy]);
 
@@ -691,10 +704,24 @@ function SuratContent() {
         }}
       />
 
+      {/* ── Tanda Terima modal ─────────────────────────────────────────────── */}
+      <TandaTerimaModal
+        open={selectedTemplate?.id === "tanda-terima-dokumen"}
+        template={selectedTemplate?.id === "tanda-terima-dokumen" ? selectedTemplate : null}
+        onClose={() => setSelectedTemplate(null)}
+      />
+
+      {/* ── Akta Kesepakatan modal ─────────────────────────────────────────── */}
+      <AktaKesepakatanModal
+        open={selectedTemplate?.id === "akta-kesepakatan-bersama"}
+        template={selectedTemplate?.id === "akta-kesepakatan-bersama" ? selectedTemplate : null}
+        onClose={() => setSelectedTemplate(null)}
+      />
+
       {/* ── Template wizard modal ─────────────────────────────────────────── */}
       <SuratTemplateModal
-        open={Boolean(selectedTemplate) && !["invoice-solusindo", "kuitansi-solusindo"].includes(selectedTemplate?.id ?? "")}
-        template={!["invoice-solusindo", "kuitansi-solusindo"].includes(selectedTemplate?.id ?? "") ? selectedTemplate : null}
+        open={Boolean(selectedTemplate) && !["invoice-solusindo", "kuitansi-solusindo", "tanda-terima-dokumen", "akta-kesepakatan-bersama"].includes(selectedTemplate?.id ?? "")}
+        template={!["invoice-solusindo", "kuitansi-solusindo", "tanda-terima-dokumen", "akta-kesepakatan-bersama"].includes(selectedTemplate?.id ?? "") ? selectedTemplate : null}
         onClose={() => setSelectedTemplate(null)}
         onSubmit={async ({ template, values }) => {
           // Saat ini hanya template Akte Grosse yang punya generate PDF

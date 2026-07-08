@@ -258,3 +258,72 @@ export type ProjectModalApiResponse = {
   investors?: InvestorOption[];
   message?: string;
 };
+
+export type ProjectFullInvestor = {
+  id_agent: string;
+  nominal_komitmen: number;
+  persentase_kepemilikan: number | null;
+  status: status_pembayaran_project_enum;
+  nama: string;
+  label: string;
+  nama_kantor: string;
+  kota_area: string;
+  foto_profil_url: string;
+};
+
+export type ProjectFullCma = {
+  nama: string;
+  luas_tanah: number;
+  harga: number;
+  catatan: string;
+};
+
+export type ProjectFullDetail = {
+  id_project: string;
+  id_listing: string;
+
+  nama_project: string;
+  deskripsi_project: string;
+  alamat_property: string;
+  provinsi: string;
+  kota: string;
+  kecamatan: string;
+  kelurahan: string;
+  gambar_thumbnail: string;
+
+  tanggal_pembelian: string | null;
+  mulai_tanggal: string | null;
+  estimasi_selesai: string | null;
+  pendanaan_ditutup_pada: string | null;
+  estimasi_bulan: number;
+
+  harga_pembelian: number;
+  estimasi_harga_jual: number;
+  estimasi_profit_bersih: number;
+  target_pendanaan: number;
+  total_pendanaan: number;
+
+  jenis_pendanaan: jenis_pendanaan_enum;
+  status: status_project_enum;
+
+  nilai_limit_lelang: number;
+  spare_bidding: number;
+  biaya_eksekusi: number;
+  biaya_renov: number;
+  biaya_balik_nama: number;
+  total_biaya_akuisisi: number;
+  dana_cadangan: number;
+
+  dibuat_oleh: string;
+  is_sold: boolean;
+
+  investor_allocations: ProjectFullInvestor[];
+  cma_entries: ProjectFullCma[];
+  listing: ListingOption | null;
+};
+
+export type ProjectFullResponse = {
+  success: boolean;
+  data?: ProjectFullDetail;
+  message?: string;
+};

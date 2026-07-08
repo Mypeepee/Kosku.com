@@ -659,6 +659,29 @@ export const suratTemplates: SuratTemplate[] = [
 
   // ── Pengurusan Dokumen ────────────────────────────────────────────────────────
   {
+    id: "tanda-terima-dokumen",
+    code: "PEN-002",
+    title: "Tanda Terima Dokumen",
+    category: "Pengurusan Dokumen",
+    description:
+      "Bukti serah terima dokumen properti dari agent ke penerima. Scan KTP penerima untuk auto-isi nama, NIK, dan alamat, pilih properti closing, lalu PDF ter-generate otomatis.",
+    status: "Baru",
+    updatedAt: "07 Jul 2026",
+    usedCount: 0,
+    icon: FileText,
+    templateFileName: "TandaTerima_Solusindo.docx",
+    fields: [
+      { key: "ktp_penerima_file", label: "Foto KTP Penerima", type: "file", section: "debitur", helperText: "Upload KTP agar nama, NIK, dan alamat penerima terisi otomatis." },
+      { key: "nama_pemilik", label: "Nama Penerima", type: "text", section: "debitur", required: true, placeholder: "Hasil scan KTP / koreksi manual" },
+      { key: "nik_pemilik", label: "NIK Penerima", type: "text", section: "debitur", placeholder: "16 digit NIK" },
+      { key: "alamat_pemilik", label: "Alamat Penerima", type: "textarea", section: "debitur", placeholder: "Hasil scan KTP / koreksi manual" },
+      { key: "alamat_properti", label: "Alamat Properti", type: "textarea", section: "asset", required: true, placeholder: "Alamat properti closing" },
+      { key: "tanggal_ttd", label: "Tanggal Terima", type: "date", section: "surat", required: true },
+      { key: "nama_agent", label: "Nama Agent (Yang Menyerahkan)", type: "text", section: "surat", placeholder: "Otomatis dari akun agent" },
+      { key: "no_agent", label: "No. Agent / WhatsApp", type: "text", section: "surat", placeholder: "Otomatis dari akun agent" },
+    ],
+  },
+  {
     id: "permohonan-akte-grosse",
     code: "PEN-001",
     title: "Permohonan Akte Grosse",
@@ -886,5 +909,21 @@ export const suratTemplates: SuratTemplate[] = [
         helperText: "Dijelaskan mengapa akte grosse dibutuhkan",
       },
     ],
+  },
+
+  // ── Eksekusi Pengosongan ──────────────────────────────────────────────────────
+  {
+    id: "akta-kesepakatan-bersama",
+    code: "EKS-001",
+    title: "Akta Kesepakatan Bersama",
+    category: "Eksekusi Pengosongan",
+    description:
+      "Akta kesepakatan bersama antara pemenang lelang dan debitur untuk pengosongan aset. Scan KTP kedua pihak + upload risalah lelang, lalu input kompensasi dan tanggal paling lambat pengosongan — PDF ter-generate otomatis.",
+    status: "Baru",
+    updatedAt: "08 Jul 2026",
+    usedCount: 0,
+    icon: FileText,
+    templateFileName: "Akta_kesepakatan_bersama_TemplateSolusindo.docx",
+    fields: [],
   },
 ];

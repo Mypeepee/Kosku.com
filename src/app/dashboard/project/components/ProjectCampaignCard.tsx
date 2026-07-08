@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Share2 } from "lucide-react";
+import { Pencil, Share2 } from "lucide-react";
 
 type UserInvestment = {
   nominalKomitmen: number;
@@ -929,11 +929,13 @@ export default function ProjectFundraisingCard({
   adminMode = false,
   isDeleting = false,
   onDelete,
+  onEdit,
 }: {
   project: ProjectCampaign;
   adminMode?: boolean;
   isDeleting?: boolean;
   onDelete?: (project: ProjectCampaign) => void | Promise<void>;
+  onEdit?: (project: ProjectCampaign) => void;
 }) {
   const isSold = !!project.projectSelesai;
   const progress = getProgress(project);
@@ -953,6 +955,13 @@ export default function ProjectFundraisingCard({
     e.stopPropagation();
     if (isDeleting || !onDelete) return;
     void onDelete(project);
+  };
+
+  const handleEditClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isDeleting || !onEdit) return;
+    onEdit(project);
   };
 
   async function handleShare() {
@@ -1017,17 +1026,31 @@ export default function ProjectFundraisingCard({
           </span>
 
           {adminMode ? (
-            <button
-              type="button"
-              onClick={handleDeleteClick}
-              disabled={isDeleting || !onDelete}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-rose-400/25 bg-rose-500/12 px-3 py-1.5 text-[9px] font-bold tracking-[0.16em] text-rose-200 backdrop-blur-xl transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 6h18M8 6V4.75A1.75 1.75 0 0 1 9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6M19 6l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              </svg>
-              {isDeleting ? "DELETING…" : "DELETE"}
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {!isSold && onEdit ? (
+                <button
+                  type="button"
+                  onClick={handleEditClick}
+                  disabled={isDeleting}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-cyan-400/25 bg-cyan-500/12 px-3 py-1.5 text-[9px] font-bold tracking-[0.16em] text-cyan-200 backdrop-blur-xl transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Pencil className="h-3 w-3" />
+                  EDIT
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={handleDeleteClick}
+                disabled={isDeleting || !onDelete}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-rose-400/25 bg-rose-500/12 px-3 py-1.5 text-[9px] font-bold tracking-[0.16em] text-rose-200 backdrop-blur-xl transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 6h18M8 6V4.75A1.75 1.75 0 0 1 9.75 3h4.5A1.75 1.75 0 0 1 16 4.75V6M19 6l-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                </svg>
+                {isDeleting ? "DELETING…" : "DELETE"}
+              </button>
+            </div>
           ) : (
             <Pill
               className={

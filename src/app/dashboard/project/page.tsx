@@ -10,6 +10,8 @@ import ProjectCampaignCard, {
   type ProjectCampaign,
 } from "./components/ProjectCampaignCard";
 import type { CreateProjectFormValues } from "./components/modal/AddProjectModal";
+import EditProjectModal from "./components/modal/EditProjectModal";
+import { getTierTheme } from "./components/modal/tierTheme";
 
 type InvestorWalletSummary = {
   idAgent?: string;
@@ -349,6 +351,8 @@ export default function ProjectPage() {
   );
   const [projectToDelete, setProjectToDelete] =
     useState<ProjectCampaign | null>(null);
+  const [projectToEdit, setProjectToEdit] =
+    useState<ProjectCampaign | null>(null);
   const [walletSummary, setWalletSummary] =
     useState<InvestorWalletSummary>(EMPTY_WALLET_SUMMARY);
 
@@ -422,6 +426,19 @@ export default function ProjectPage() {
     setProjectError("");
     setProjectToDelete(project);
   }, []);
+
+  const handleAskEditProject = useCallback((project: ProjectCampaign) => {
+    setProjectError("");
+    setProjectToEdit(project);
+  }, []);
+
+  const handleCloseEditModal = useCallback(() => {
+    setProjectToEdit(null);
+  }, []);
+
+  const handleProjectUpdated = useCallback(async () => {
+    await fetchProjects();
+  }, [fetchProjects]);
 
   const handleCloseDeleteModal = useCallback(() => {
     if (deletingProjectId) return;
@@ -583,6 +600,7 @@ export default function ProjectPage() {
                       adminMode={canManage}
                       isDeleting={deletingProjectId === project.id}
                       onDelete={canManage ? handleAskDeleteProject : undefined}
+                      onEdit={canManage ? handleAskEditProject : undefined}
                     />
                   </div>
                 );
@@ -671,6 +689,18 @@ export default function ProjectPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {projectToEdit ? (
+        <EditProjectModal
+          key={projectToEdit.id}
+          open
+          idProject={projectToEdit.id}
+          theme={getTierTheme(walletSummary.totalDana)}
+          createdById={currentAgentId ?? undefined}
+          onClose={handleCloseEditModal}
+          onSaved={handleProjectUpdated}
+        />
       ) : null}
     </main>
   );

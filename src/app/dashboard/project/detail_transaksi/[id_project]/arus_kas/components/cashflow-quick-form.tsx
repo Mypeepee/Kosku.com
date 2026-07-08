@@ -108,7 +108,11 @@ function normalizeDateValue(value?: string | Date | null) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return todayIso();
 
-  return toIsoDate(date);
+  // tanggal_transaksi dari DB adalah UTC midnight (@db.Date). Baca komponen
+  // tanggalnya dalam UTC supaya picker menampilkan hari yang benar.
+  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(
+    date.getUTCDate()
+  )}`;
 }
 
 function normalizeJenisValue(value?: string | null) {

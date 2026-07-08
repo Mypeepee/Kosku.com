@@ -70,7 +70,7 @@ async function pdfPageToImage(buffer: Buffer): Promise<Buffer> {
     await execFileAsync("gs", [
       "-dBATCH", "-dNOPAUSE", "-dSAFER",
       "-sDEVICE=png16m",
-      "-r200",            // 200 DPI — cukup untuk OCR
+      "-r300",            // 300 DPI — teks uraian objek kecil, butuh resolusi tinggi
       "-dFirstPage=1",    // halaman pertama saja
       "-dLastPage=1",
       "-dFIXEDMEDIA",
@@ -218,6 +218,151 @@ function isKTPLabel(line: string): boolean {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// Text-normalisasi helpers untuk parsing objek
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Bersihkan spasi ganda + hapus tanda baca menggantung di ujung. */
+function tidy(s: string): string {
+  return s.replace(/\s{2,}/g, " ").replace(/^[\s:.,;]+|[\s.,;]+$/g, "").trim();
+}
+
+/**
+ * Title-case cerdas: kalau input ALL-CAPS ("SURABAYA") → "Surabaya",
+ * tapi token singkat all-caps (DKI, RT) dipertahankan. Kalau sudah mixed-case,
+ * biarkan apa adanya ("Jawa Timur", "Babatan").
+ */
+function smartCase(s: string): string {
+  const t = tidy(s);
+  if (!t) return "";
+  if (t !== t.toUpperCase()) return t; // sudah mixed-case → jangan diutak-atik
+  return t
+    .split(/\s+/)
+    .map((w) => (w.length <= 3 && /^[A-Z]+$/.test(w) ? w : w.charAt(0) + w.slice(1).toLowerCase()))
+    .join(" ");
+}
+
+/** Normalisasi jenis hak → bentuk baku (SHM / SHGB / SHGU / Hak Pakai). */
+function normJenisHak(raw: string): string {
+  const k = raw.toLowerCase().replace(/[.\s()]/g, "");
+  if (/^(sertip?ikat)?(hakmilik|shm|hm)$/.test(k)) return "SHM";
+  if (/^(sertip?ikat)?(hakgunabangunan|shgb|hgb)$/.test(k)) return "SHGB";
+  if (/^(sertip?ikat)?(hakgunausaha|shgu|hgu)$/.test(k)) return "SHGU";
+  if (/^(sertip?ikat)?(hakpakai|shp|hp)$/.test(k)) return "Hak Pakai";
+  if (/^(sertip?ikat)?(hakmilikatassatuanrumahsusun|hmsrs|sarusun)$/.test(k)) return "HMSRS";
+  return raw.toUpperCase();
+}
+
+/** Normalisasi tipe wilayah kota: Kodya/Kotamadya → Kota, Kab. → Kabupaten. */
+function normKotaType(raw: string): string {
+  const k = raw.toLowerCase().replace(/\./g, "");
+  if (/^(kotamadya|kodya|kotamadia)$/.test(k)) return "Kota";
+  if (/^(kabupaten|kab)$/.test(k)) return "Kabupaten";
+  return "Kota";
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Objek Lelang Parser — jenis hak, sertifikat, luas, lokasi, alamat
+// ════════════════════════════════════════════════════════════════════════════
+
+type ParsedObjek = {
+  jenis_hak:        string;
+  nomor_sertifikat: string; // dipetakan ke field NIB di modal
+  luas:             string; // integer m²
+  alamat_obyek:     string; // teks setelah "terletak di"
+  kelurahan:        string;
+  kecamatan:        string;
+  kabupaten:        string; // sudah termasuk prefix "Kota"/"Kabupaten"
+  provinsi:         string;
+};
+
+const EMPTY_OBJEK: ParsedObjek = {
+  jenis_hak: "", nomor_sertifikat: "", luas: "",
+  alamat_obyek: "", kelurahan: "", kecamatan: "", kabupaten: "", provinsi: "",
+};
+
+/**
+ * Isolasi paragraf "Uraian Objek Lelang" lalu diratakan jadi satu baris.
+ * Blok dimulai dari kata "Sebidang" (atau label "Uraian") dan berhenti sebelum
+ * data pembeli / harga — supaya alamat/provinsi pemohon di atas tidak ikut terbaca.
+ */
+function extractObjekBlock(clean: string): string {
+  let start = clean.search(/\bSebidang\b/i);
+  if (start < 0) {
+    const uM = clean.match(/\bUraian\b\s*[:.]?/i);
+    if (uM && uM.index != null) start = uM.index + uM[0].length;
+  }
+  if (start < 0) return "";
+
+  let block = clean.slice(start);
+  const endM = block.match(
+    /(Nama\s+Pembeli|Harga\s+Pembelian|Nomor\s+KTP|Nomor\s+SIM|Nomor\s+Surat\s+Permohonan|Pejabat\s+Penjual\s*\n)/i,
+  );
+  if (endM && endM.index != null && endM.index > 20) block = block.slice(0, endM.index);
+
+  return block.replace(/\n+/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+function parseObjek(clean: string): ParsedObjek {
+  const flat = extractObjekBlock(clean);
+  if (!flat) return { ...EMPTY_OBJEK };
+
+  const out: ParsedObjek = { ...EMPTY_OBJEK };
+
+  // ── Jenis hak + nomor sertifikat ────────────────────────────────────────
+  // "sesuai dengan SHM No. 4823" / "Sertifikat Hak Milik (SHM) No. 4823"
+  const hakM = flat.match(
+    /\b(Sertip?ikat\s+Hak\s+Milik|Hak\s+Milik|Hak\s+Guna\s+Bangunan|Hak\s+Guna\s+Usaha|Hak\s+Pakai|SHGB|SHGU|SHM|HGB|HGU|HP|HM)\b\s*(?:\([A-Za-z]+\))?\s*(?:No\.?|Nomor|Nomer)?\s*[:.]?\s*(\d{1,7})/i,
+  );
+  if (hakM) {
+    out.jenis_hak        = normJenisHak(hakM[1]);
+    out.nomor_sertifikat = hakM[2];
+  }
+
+  // ── Luas ────────────────────────────────────────────────────────────────
+  // "Lt. 163 m2" / "Luas 163 m²" / "seluas 163 m2"
+  const luasM =
+    flat.match(/(?:Lt\.?|LT|Luas(?:\s+Tanah)?|seluas)\s*[:.±]?\s*([\d.]+(?:,\d+)?)\s*(?:m2|m²|m\s?2|meter\s*persegi)/i) ||
+    flat.match(/([\d.]+(?:,\d+)?)\s*(?:m2|m²|M2)\b/i);
+  if (luasM) {
+    out.luas = luasM[1].replace(/\./g, "").replace(/,\d+$/, "");
+  }
+
+  // ── Alamat objek (teks setelah "terletak di", berhenti di provinsi) ─────
+  // Label kolom (Nama Pembeli, dll) di risalah sering terbaca terpisah oleh
+  // OCR, jadi kita potong tepat pada nama provinsi — elemen terakhir alamat.
+  const alM =
+    flat.match(/terletak\s+di\s+(.+?(?:Provinsi|Propinsi|Prop\.?|Prov\.?)\s+[A-Za-zÀ-ÿ'’.\-]+(?:\s+[A-Za-zÀ-ÿ'’.\-]+)?)\s*\.?/i) ||
+    flat.match(/terletak\s+di\s+(.+?)(?:\.\s|$)/i);
+  if (alM) out.alamat_obyek = tidy(alM[1]);
+
+  // ── Rincian wilayah administratif ───────────────────────────────────────
+  const kelM = flat.match(/(?:Kelurahan|Kel\.?|Desa)\s+([A-Za-zÀ-ÿ'’.\-]+)/i);
+  if (kelM) out.kelurahan = smartCase(kelM[1]);
+
+  const kecM = flat.match(/(?:Kecamatan|Kec\.?)\s+([A-Za-zÀ-ÿ'’.\-]+)/i);
+  if (kecM) out.kecamatan = smartCase(kecM[1]);
+
+  const kabM = flat.match(
+    /\b(Kota|Kabupaten|Kab\.?|Kotamadya|Kodya|Kotamadia)(?:\s+Administrasi|\s+Adm\.?)?\s+([A-Za-zÀ-ÿ'’.\-]+)/i,
+  );
+  if (kabM) out.kabupaten = `${normKotaType(kabM[1])} ${smartCase(kabM[2])}`;
+
+  const provM = flat.match(/(?:Provinsi|Propinsi|Prop\.?|Prov\.?)\s+([A-Za-zÀ-ÿ'’.\-]+(?:\s+[A-Za-zÀ-ÿ'’.\-]+)?)(?=[.,)]|$)/i);
+  if (provM) out.provinsi = smartCase(provM[1]);
+
+  return out;
+}
+
+/** Kantor Pelayanan Lelang (KPKNL). */
+function extractKantorLelang(clean: string): string {
+  const m = clean.match(/KPKNL\s+([A-Za-zÀ-ÿ]+(?:\s+(?:I{1,3}|IV|VI{0,3}|IX|X|Satu|Dua|Tiga|Empat))?)/i);
+  if (m) return `KPKNL ${smartCase(m[1])}`;
+  const m2 = clean.match(/Kantor\s+Pelayanan\s+Kekayaan\s+Negara\s+dan\s+Lelang\s+([A-Za-z]+)/i);
+  if (m2) return `KPKNL ${smartCase(m2[1])}`;
+  return "";
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // Risalah Lelang Parser
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -227,6 +372,8 @@ type ParsedRisalah = {
   tanggal:        string; // DD-MM-YYYY
   pukul:          string; // HH:MM
   nip:            string;
+  kantor_lelang:  string;
+  objek:          ParsedObjek;
 };
 
 function parseRisalah(text: string): ParsedRisalah {
@@ -383,7 +530,11 @@ function parseRisalah(text: string): ParsedRisalah {
     }
   }
 
-  return { nomor_risalah, pejabat_lelang, tanggal, pukul, nip };
+  // ── 6. Objek lelang + kantor lelang ───────────────────────────────────
+  const objek         = parseObjek(clean);
+  const kantor_lelang = extractKantorLelang(clean);
+
+  return { nomor_risalah, pejabat_lelang, tanggal, pukul, nip, kantor_lelang, objek };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -397,19 +548,28 @@ function scoreRisalah(parsed: ParsedRisalah): {
   warnings: string[];
 } {
   const warnings: string[] = [];
+  const o = parsed.objek;
 
-  if (!parsed.nomor_risalah)  warnings.push("Nomor risalah tidak terdeteksi");
-  if (!parsed.pejabat_lelang) warnings.push("Pejabat lelang tidak terdeteksi");
-  if (!parsed.tanggal)        warnings.push("Tanggal lelang tidak terdeteksi");
-  if (!parsed.pukul)          warnings.push("Pukul lelang tidak terdeteksi");
-  if (!parsed.nip)            warnings.push("NIP tidak terdeteksi");
+  if (!parsed.nomor_risalah) warnings.push("Nomor risalah tidak terdeteksi");
+  if (!parsed.tanggal)       warnings.push("Tanggal lelang tidak terdeteksi");
+  if (!parsed.kantor_lelang) warnings.push("Kantor lelang (KPKNL) tidak terdeteksi");
+  if (!o.jenis_hak)          warnings.push("Jenis hak / nomor sertifikat tidak terdeteksi");
+  if (!o.luas)               warnings.push("Luas objek tidak terdeteksi");
+  if (!o.alamat_obyek)       warnings.push("Alamat objek (setelah \"terletak di\") tidak terdeteksi");
+  if (!o.kelurahan && !o.kecamatan && !o.kabupaten && !o.provinsi)
+    warnings.push("Rincian wilayah (kelurahan/kecamatan/kota/provinsi) tidak terdeteksi");
 
-  const fields    = [parsed.nomor_risalah, parsed.pejabat_lelang, parsed.tanggal, parsed.pukul, parsed.nip];
-  const filled    = fields.filter(Boolean).length;
-  const score     = Math.round((filled / fields.length) * 100);
+  // Bobot: fokus pada field yang benar-benar dipakai akta (bukan pukul/NIP)
+  const fields = [
+    parsed.nomor_risalah, parsed.tanggal, parsed.kantor_lelang,
+    o.jenis_hak, o.nomor_sertifikat, o.luas, o.alamat_obyek,
+    o.kelurahan, o.kecamatan, o.kabupaten, o.provinsi,
+  ];
+  const filled     = fields.filter(Boolean).length;
+  const score      = Math.round((filled / fields.length) * 100);
   const confidence = score / 100;
   const status: "valid" | "review" | "invalid" =
-    score >= 80 ? "valid" : score >= 50 ? "review" : "invalid";
+    score >= 75 ? "valid" : score >= 40 ? "review" : "invalid";
 
   return { score, confidence, status, warnings };
 }
@@ -471,13 +631,23 @@ export async function POST(req: Request) {
       status,
       warnings,
       parsed: {
-        nomor_risalah:  parsed.nomor_risalah,
+        nomor_risalah:   parsed.nomor_risalah,
         tanggal_risalah: parsed.tanggal,
-        pejabat_lelang: parsed.pejabat_lelang,
-        pukul:          parsed.pukul,
-        nip:            parsed.nip,
-        // Backward compat untuk modal yang pakai field ini
-        uraian: "",
+        pejabat_lelang:  parsed.pejabat_lelang,
+        pukul:           parsed.pukul,
+        nip:             parsed.nip,
+        kantor_lelang:   parsed.kantor_lelang,
+        // Objek lelang
+        jenis_hak:        parsed.objek.jenis_hak,
+        nomor_sertifikat: parsed.objek.nomor_sertifikat,
+        luas:             parsed.objek.luas,
+        alamat_obyek:     parsed.objek.alamat_obyek,
+        kelurahan:        parsed.objek.kelurahan,
+        kecamatan:        parsed.objek.kecamatan,
+        kabupaten:        parsed.objek.kabupaten,
+        provinsi:         parsed.objek.provinsi,
+        // Backward compat
+        uraian: parsed.objek.alamat_obyek,
       },
     });
   } catch (err) {
@@ -501,7 +671,9 @@ export async function POST(req: Request) {
 
 function emptyParsed() {
   return {
-    nomor_risalah: "", tanggal_risalah: "",
-    pejabat_lelang: "", pukul: "", nip: "", uraian: "",
+    nomor_risalah: "", tanggal_risalah: "", pejabat_lelang: "", pukul: "", nip: "",
+    kantor_lelang: "", jenis_hak: "", nomor_sertifikat: "", luas: "",
+    alamat_obyek: "", kelurahan: "", kecamatan: "", kabupaten: "", provinsi: "",
+    uraian: "",
   };
 }
