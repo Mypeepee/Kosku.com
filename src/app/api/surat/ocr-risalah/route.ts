@@ -1,16 +1,9 @@
 import { NextResponse } from "next/server";
 import { createSign } from "crypto";
 import { readFileSync } from "fs";
-import { writeFile, readFile, unlink } from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { tmpdir } from "os";
-import { join } from "path";
-
-const execFileAsync = promisify(execFile);
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Service Account JWT (shared with ocr-ktp)
@@ -58,31 +51,50 @@ async function getAccessToken(): Promise<string> {
 // Text extraction: PDF → pdf-parse, Image → Vision API
 // ════════════════════════════════════════════════════════════════════════════
 
-/** Convert satu halaman PDF ke PNG menggunakan Ghostscript */
-async function pdfPageToImage(buffer: Buffer): Promise<Buffer> {
-  const id     = `risalah_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const tmpPdf = join(tmpdir(), `${id}.pdf`);
-  const tmpPng = join(tmpdir(), `${id}.png`);
+/**
+ * OCR PDF hasil scan langsung lewat Google Vision `files:annotate` — tanpa
+ * Ghostscript / binari eksternal apa pun. Vision me-render tiap halaman secara
+ * internal lalu menjalankan DOCUMENT_TEXT_DETECTION (mesin OCR paling akurat
+ * untuk dokumen padat). `languageHints: ["id","en"]` menaikkan akurasi teks
+ * Indonesia. Batas sinkron files:annotate = 5 halaman/panggilan; teks tiap
+ * halaman digabung (konsisten dengan jalur pdf-parse yang juga multi-halaman).
+ */
+async function extractFromPdfScan(buffer: Buffer): Promise<string> {
+  const token  = await getAccessToken();
+  const base64 = buffer.toString("base64");
 
-  try {
-    await writeFile(tmpPdf, buffer);
+  const res = await fetch("https://vision.googleapis.com/v1/files:annotate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({
+      requests: [{
+        inputConfig: { mimeType: "application/pdf", content: base64 },
+        features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+        imageContext: { languageHints: ["id", "en"] },
+        pages: [1, 2, 3, 4, 5],
+      }],
+    }),
+  });
 
-    await execFileAsync("gs", [
-      "-dBATCH", "-dNOPAUSE", "-dSAFER",
-      "-sDEVICE=png16m",
-      "-r300",            // 300 DPI — teks uraian objek kecil, butuh resolusi tinggi
-      "-dFirstPage=1",    // halaman pertama saja
-      "-dLastPage=1",
-      "-dFIXEDMEDIA",
-      `-sOutputFile=${tmpPng}`,
-      tmpPdf,
-    ]);
-
-    return await readFile(tmpPng);
-  } finally {
-    await unlink(tmpPdf).catch(() => {});
-    await unlink(tmpPng).catch(() => {});
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { error?: { message?: string } })?.error?.message ?? res.statusText);
   }
+
+  const data = (await res.json()) as {
+    responses?: Array<{
+      responses?: Array<{ fullTextAnnotation?: { text?: string } }>;
+      error?: { message?: string };
+    }>;
+  };
+
+  const file = data?.responses?.[0];
+  if (file?.error?.message) throw new Error(file.error.message);
+
+  return (file?.responses ?? [])
+    .map(p => p.fullTextAnnotation?.text ?? "")
+    .join("\n")
+    .trim();
 }
 
 async function extractFromPDF(buffer: Buffer): Promise<string> {
@@ -97,12 +109,11 @@ async function extractFromPDF(buffer: Buffer): Promise<string> {
     // Kalau ada teks yang cukup, langsung pakai (PDF digital)
     if (text.length > 80) return text;
   } catch {
-    // Lanjut ke Ghostscript
+    // Lanjut ke OCR Vision
   }
 
-  // Fallback: PDF adalah scan (gambar) → convert ke PNG → Vision API
-  const imgBuffer = await pdfPageToImage(buffer);
-  return await extractFromImage(imgBuffer);
+  // Fallback: PDF hasil scan → OCR langsung via Vision files:annotate (tanpa Ghostscript)
+  return await extractFromPdfScan(buffer);
 }
 
 async function extractFromImage(buffer: Buffer): Promise<string> {
