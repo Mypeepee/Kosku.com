@@ -63,7 +63,7 @@ export async function PUT(
         id_project: true,
         id_listing: true,
         dibuat_oleh: true,
-        projectSelesai: { select: { id_project: true } },
+        projectSelesai: { select: { id_project_selesai: true }, take: 1 },
       },
     });
 
@@ -86,7 +86,7 @@ export async function PUT(
       );
     }
 
-    if (existing.projectSelesai) {
+    if (existing.projectSelesai.length > 0) {
       return NextResponse.json<UpdateProjectResponse>(
         {
           success: false,

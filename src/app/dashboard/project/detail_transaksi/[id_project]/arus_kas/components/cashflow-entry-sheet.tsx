@@ -10,6 +10,7 @@ type CashflowEntrySheetProps = {
   onClose: () => void;
   idProject: string;
   wallets: WalletSummary[];
+  sisaKas: number;
   defaultWallet?: WalletKey;
   editingTransaction?: DbCashflow | null;
   onSubmitted?: () => void;
@@ -21,6 +22,7 @@ export default function CashflowEntrySheet({
   onClose,
   idProject,
   wallets,
+  sisaKas,
   defaultWallet,
   editingTransaction = null,
   onSubmitted,
@@ -142,6 +144,7 @@ export default function CashflowEntrySheet({
               formId={formId}
               idProject={idProject}
               wallets={wallets}
+              sisaKas={sisaKas}
               defaultWallet={defaultWallet}
               editingTransaction={editingTransaction}
               onSubmitted={onSubmitted ?? onClose}

@@ -6,18 +6,18 @@ import { useSession } from "next-auth/react";
 import { Check, ChevronDown, Loader2, Sparkles, Users2 } from "lucide-react";
 
 import type { ProjectDetailViewModel } from "./types";
-import { formatIDR, getInitials, normalizeImage, toNumber } from "./utils";
+import { formatIDR, getInitials, normalizeImage } from "./utils";
 import { EmptyState, SectionCard } from "./shared";
+import {
+  buildOwnershipDisplayMap,
+  ownershipDenominator,
+  toCommitted,
+} from "@/lib/investor-ownership";
 
 type PaymentStatus = "menunggu_pembayaran" | "lunas";
 
 type InvestorItem = ProjectDetailViewModel["investors"][number] & {
   status: PaymentStatus | string;
-};
-
-type OwnershipDisplay = {
-  ratio: number | null;
-  percentText: string;
 };
 
 const STATUS_OPTIONS: PaymentStatus[] = ["menunggu_pembayaran", "lunas"];
@@ -59,95 +59,6 @@ function normalizeStatus(value: unknown): PaymentStatus {
   return String(value ?? "").toLowerCase() === "lunas"
     ? "lunas"
     : "menunggu_pembayaran";
-}
-
-function getCommittedValue(value: unknown) {
-  const numeric = toNumber(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
-  return numeric;
-}
-
-/**
- * Membuat persentase kepemilikan yang:
- * - dihitung dari committed / total committed
- * - ditampilkan 1 digit desimal
- * - jika dijumlahkan hasil tampilannya pasti = 100.0%
- *
- * Teknik: largest remainder method pada skala 0.1%
- */
-function buildOwnershipDisplayMap(items: InvestorItem[]) {
-  const result = new Map<string, OwnershipDisplay>();
-
-  const normalized = items.map((item, index) => {
-    const committed = getCommittedValue(item.committed);
-    return {
-      item,
-      key: String(item.id),
-      committed,
-      index,
-    };
-  });
-
-  const totalCommitted = normalized.reduce(
-    (sum, item) => sum + item.committed,
-    0
-  );
-
-  if (totalCommitted <= 0) {
-    normalized.forEach(({ key }) => {
-      result.set(key, {
-        ratio: null,
-        percentText: "—",
-      });
-    });
-    return result;
-  }
-
-  const SCALE = 10; // 1 digit desimal -> 0.1%
-  const TARGET_UNITS = 100 * SCALE; // 100.0% = 1000 unit
-
-  const calculated = normalized.map(({ key, committed, index }) => {
-    const ratio = committed / totalCommitted;
-    const exactPercent = ratio * 100;
-    const scaled = exactPercent * SCALE;
-
-    const floorUnits = Math.floor(scaled + 1e-9);
-    const remainder = scaled - floorUnits;
-
-    return {
-      key,
-      ratio,
-      committed,
-      index,
-      units: floorUnits,
-      remainder,
-    };
-  });
-
-  const usedUnits = calculated.reduce((sum, item) => sum + item.units, 0);
-  let remainingUnits = TARGET_UNITS - usedUnits;
-
-  if (remainingUnits > 0) {
-    const ranked = [...calculated].sort((a, b) => {
-      if (b.remainder !== a.remainder) return b.remainder - a.remainder;
-      if (b.committed !== a.committed) return b.committed - a.committed;
-      return a.index - b.index;
-    });
-
-    for (let i = 0; i < remainingUnits; i += 1) {
-      ranked[i % ranked.length].units += 1;
-    }
-  }
-
-  calculated.forEach((item) => {
-    const percentValue = item.units / SCALE;
-    result.set(item.key, {
-      ratio: item.ratio,
-      percentText: `${percentValue.toFixed(1)}%`,
-    });
-  });
-
-  return result;
 }
 
 function InvestorIdentity({
@@ -365,7 +276,7 @@ export default function InvestorBookCard({
     () =>
       ([...project.investors] as InvestorItem[])
         .sort(
-          (a, b) => getCommittedValue(b.committed) - getCommittedValue(a.committed)
+          (a, b) => toCommitted(b.committed) - toCommitted(a.committed)
         )
         .map((item) => ({
           ...item,
@@ -382,9 +293,24 @@ export default function InvestorBookCard({
     setInvestors(initialInvestors);
   }, [initialInvestors]);
 
+  const fundingTarget = toCommitted(project.fundingTarget);
+
   const ownershipDisplayMap = useMemo(() => {
-    return buildOwnershipDisplayMap(investors);
-  }, [investors]);
+    // Kepemilikan = modal DISETOR / max(target, Σsetor). Investor belum lunas
+    // (paid 0) = 0%; sisa "belum terisi". Talangan (Σ>target) mendilusi.
+    const totalPaid = investors.reduce(
+      (sum, inv) => sum + toCommitted(inv.paid),
+      0
+    );
+    const denom = ownershipDenominator(fundingTarget, totalPaid);
+    const paidItems = investors.map((inv) => ({
+      id: inv.id,
+      committed: inv.paid,
+    }));
+    return buildOwnershipDisplayMap(paidItems, denom, {
+      decimalSeparator: ".",
+    });
+  }, [investors, fundingTarget]);
 
   async function handleStatusChange(
     investorId: string | number,
@@ -475,10 +401,11 @@ export default function InvestorBookCard({
               {investors.map((item) => {
                 const status = normalizeStatus(item.status);
                 const isSaving = String(savingId) === String(item.id);
-                const committed = getCommittedValue(item.committed);
+                const committed = toCommitted(item.committed);
                 const ownershipDisplay =
                   ownershipDisplayMap.get(String(item.id)) ?? {
                     ratio: null,
+                    percent: null,
                     percentText: "—",
                   };
 

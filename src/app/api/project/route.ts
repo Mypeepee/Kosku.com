@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
+import { ownershipDenominator, ownershipPercent } from "@/lib/investor-ownership";
 
 type ProjectSelesaiItem = {
   id_project: string;
@@ -240,6 +241,7 @@ export async function GET() {
           select: {
             id_agent: true,
             nominal_komitmen: true,
+            nominal_terbayar: true,
             persentase_kepemilikan: true,
             status: true,
             diupdate_tanggal: true,
@@ -280,27 +282,34 @@ export async function GET() {
     let finishedMap = new Map<string, ProjectSelesaiItem>();
 
     if (projectIds.length > 0) {
+      // Satu project bisa punya BANYAK baris penjualan (jual per unit) —
+      // diagregasi jadi satu ringkasan; ROI = Σ profit / Σ biaya (tertimbang).
       const finishedRows = await prisma.$queryRaw<RawProjectSelesaiRow[]>(
         Prisma.sql`
           SELECT
             id_project,
-            id_listing,
-            tanggal_pembelian,
-            tanggal_terjual,
-            durasi_hari,
-            harga_jual,
-            total_biaya_akuisisi,
-            profit_kotor,
-            pph_percent,
-            ajb_percent,
-            agent_fee_percent,
-            total_biaya_transaksi,
-            profit_bersih,
-            roi_bersih,
-            dibuat_tanggal,
-            diupdate_tanggal
+            MAX(id_listing) AS id_listing,
+            MIN(tanggal_pembelian) AS tanggal_pembelian,
+            MAX(tanggal_terjual) AS tanggal_terjual,
+            MAX(durasi_hari) AS durasi_hari,
+            SUM(harga_jual) AS harga_jual,
+            SUM(total_biaya_akuisisi) AS total_biaya_akuisisi,
+            SUM(profit_kotor) AS profit_kotor,
+            MAX(pph_percent) AS pph_percent,
+            MAX(ajb_percent) AS ajb_percent,
+            MAX(agent_fee_percent) AS agent_fee_percent,
+            SUM(total_biaya_transaksi) AS total_biaya_transaksi,
+            SUM(profit_bersih) AS profit_bersih,
+            CASE
+              WHEN SUM(total_biaya_akuisisi) > 0
+              THEN ROUND(SUM(profit_bersih) / SUM(total_biaya_akuisisi) * 100, 2)
+              ELSE 0
+            END AS roi_bersih,
+            MIN(dibuat_tanggal) AS dibuat_tanggal,
+            MAX(diupdate_tanggal) AS diupdate_tanggal
           FROM public.project_selesai
           WHERE id_project IN (${Prisma.join(projectIds)})
+          GROUP BY id_project
         `
       );
 
@@ -322,7 +331,24 @@ export async function GET() {
         ? project.investorProject.find((item) => item.id_agent === agentId)
         : null;
 
-      const projectSelesai = finishedMap.get(project.id_project) ?? null;
+      // Kepemilikan = modal DISETOR / max(target, Σ setor). Porsi stabil saat
+      // underfunded; talangan (Σ>target) mendilusi proporsional. Dihitung live.
+      // Lihat src/lib/investor-ownership.ts.
+      const totalSetorProject = project.investorProject.reduce(
+        (sum, item) => sum + toNumber(item.nominal_terbayar),
+        0
+      );
+      const ownershipDenomProject = ownershipDenominator(
+        toNumber(project.target_pendanaan),
+        totalSetorProject
+      );
+
+      // Ringkasan penjualan hanya ditampilkan bila project SUDAH terjual
+      // penuh (status terjual). Terjual sebagian (unit) → tetap status asli.
+      const projectSelesai =
+        String(project.status) === "terjual"
+          ? finishedMap.get(project.id_project) ?? null
+          : null;
 
       const displayStatus = projectSelesai
         ? "Sudah Terjual"
@@ -355,10 +381,10 @@ export async function GET() {
         userInvestment: myInvestment
           ? {
               nominalKomitmen: toNumber(myInvestment.nominal_komitmen),
-              persentaseKepemilikan:
-                myInvestment.persentase_kepemilikan == null
-                  ? null
-                  : toNumber(myInvestment.persentase_kepemilikan),
+              persentaseKepemilikan: ownershipPercent(
+                myInvestment.nominal_terbayar,
+                ownershipDenomProject
+              ),
               status: String(myInvestment.status || "menunggu_pembayaran"),
               updatedAt: myInvestment.diupdate_tanggal
                 ? myInvestment.diupdate_tanggal.toISOString()

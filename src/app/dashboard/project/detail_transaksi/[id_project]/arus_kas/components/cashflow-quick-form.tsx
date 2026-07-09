@@ -32,6 +32,8 @@ type FormErrors = Partial<
 type CashflowQuickFormProps = {
   idProject: string;
   wallets: WalletSummary[];
+  /** Kas riil proyek (Σ modal disetor + pemasukan non-modal − pengeluaran). */
+  sisaKas: number;
   defaultWallet?: WalletKey;
   editingTransaction?: DbCashflow | null;
   onSubmitted?: () => void;
@@ -672,6 +674,7 @@ function ProjectInvestorCombobox({
 export default function CashflowQuickForm({
   idProject,
   wallets,
+  sisaKas,
   defaultWallet,
   editingTransaction,
   onSubmitted,
@@ -793,7 +796,9 @@ export default function CashflowQuickForm({
   const selectedWallet =
     wallets.find((item) => item.walletKey === walletKey) ?? wallets?.[0];
 
-  const currentBalance = safeNumber(selectedWallet?.balance);
+  // Defisit dihitung terhadap KAS RIIL proyek (bukan anggaran pos). Server
+  // menghitung ulang & menegakkan aturan ini; ini hanya UI hint.
+  const currentBalance = safeNumber(sisaKas);
 
   const balanceAfterTransaction = isExpense
     ? currentBalance - nominalValue
