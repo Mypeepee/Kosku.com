@@ -137,6 +137,7 @@ export default async function DetailTransaksiPage({
           id_project_investor: true,
           id_agent: true,
           nominal_komitmen: true,
+          nominal_terbayar: true,
           persentase_kepemilikan: true,
           status: true,
           agent: {
@@ -170,8 +171,15 @@ export default async function DetailTransaksiPage({
     )
   );
 
-  // Queries 2-4 dijalankan paralel — dari 5 round-trip serial menjadi 2
-  const [agentIdentityRows, listing, projectSelesaiRows] = await Promise.all([
+  // Queries 2-6 dijalankan paralel — dari 5 round-trip serial menjadi 2
+  const [
+    agentIdentityRows,
+    listing,
+    projectSelesaiRows,
+    realisasiRows,
+    unitCount,
+    soldUnitCount,
+  ] = await Promise.all([
     // Identitas semua agent (creator + investor) dalam satu query
     relatedAgentIds.length > 0
       ? prisma.$queryRaw<
@@ -202,7 +210,8 @@ export default async function DetailTransaksiPage({
         })
       : Promise.resolve(null),
 
-    // Data project selesai
+    // Data project selesai — AGREGAT: satu project bisa punya banyak baris
+    // penjualan (jual per unit); ROI = Σ profit / Σ biaya (tertimbang).
     prisma.$queryRaw<
       Array<{
         id_project: string;
@@ -225,26 +234,58 @@ export default async function DetailTransaksiPage({
     >(Prisma.sql`
       SELECT
         id_project,
-        id_listing,
-        tanggal_pembelian,
-        tanggal_terjual,
-        durasi_hari,
-        harga_jual,
-        total_biaya_akuisisi,
-        profit_kotor,
-        pph_percent,
-        ajb_percent,
-        agent_fee_percent,
-        total_biaya_transaksi,
-        profit_bersih,
-        roi_bersih,
-        dibuat_tanggal,
-        diupdate_tanggal
+        MAX(id_listing) AS id_listing,
+        MIN(tanggal_pembelian) AS tanggal_pembelian,
+        MAX(tanggal_terjual) AS tanggal_terjual,
+        MAX(durasi_hari) AS durasi_hari,
+        SUM(harga_jual) AS harga_jual,
+        SUM(total_biaya_akuisisi) AS total_biaya_akuisisi,
+        SUM(profit_kotor) AS profit_kotor,
+        MAX(pph_percent) AS pph_percent,
+        MAX(ajb_percent) AS ajb_percent,
+        MAX(agent_fee_percent) AS agent_fee_percent,
+        SUM(total_biaya_transaksi) AS total_biaya_transaksi,
+        SUM(profit_bersih) AS profit_bersih,
+        CASE
+          WHEN SUM(total_biaya_akuisisi) > 0
+          THEN ROUND(SUM(profit_bersih) / SUM(total_biaya_akuisisi) * 100, 2)
+          ELSE 0
+        END AS roi_bersih,
+        MIN(dibuat_tanggal) AS dibuat_tanggal,
+        MAX(diupdate_tanggal) AS diupdate_tanggal
       FROM public.project_selesai
       WHERE id_project = ${params.id_project}
-      LIMIT 1
+      GROUP BY id_project
     `),
+
+    // Realisasi pengeluaran per kategori (untuk Alokasi Dana: anggaran vs realisasi)
+    prisma.projectArusKas.groupBy({
+      by: ["kategori_transaksi"],
+      where: {
+        id_project: params.id_project,
+        jenis_transaksi: "pengeluaran",
+        status_transaksi: { not: "dibatalkan" },
+      },
+      _sum: { nominal: true },
+    }),
+
+    // Ringkasan unit jual (untuk tombol penjualan multi-unit di hero)
+    prisma.projectUnit.count({ where: { id_project: params.id_project } }),
+    prisma.projectSelesai.count({
+      where: {
+        id_project: params.id_project,
+        id_project_unit: { not: null },
+      },
+    }),
   ]);
+
+  // Peta realisasi per kategori → { pembelian_aset: 1025000000, ... }
+  const realisasiByKategori: Record<string, number> = {};
+  for (const row of realisasiRows) {
+    realisasiByKategori[row.kategori_transaksi] = toNumeric(
+      row._sum.nominal ?? 0
+    );
+  }
 
   const agentIdentityMap = new Map(
     agentIdentityRows.map((row) => [
@@ -327,6 +368,7 @@ export default async function DetailTransaksiPage({
         name: identity?.name || pickDisplayName(agent, item.id_agent),
         avatar: identity?.avatar || pickAvatar(agent),
         committed: toNumeric(item.nominal_komitmen),
+        paid: toNumeric(item.nominal_terbayar),
         ownership:
           item.persentase_kepemilikan != null
             ? toNumeric(item.persentase_kepemilikan)
@@ -343,6 +385,9 @@ export default async function DetailTransaksiPage({
       price: toNumeric(item.harga),
       note: item.catatan,
     })),
+
+    // Ringkasan unit jual — dipakai hero utk mode tombol penjualan.
+    unitSummary: { total: unitCount, sold: soldUnitCount },
 
     // flatten ke root biar BloombergHeroCard lama/baru sama-sama bisa baca
     tanggal_terjual: projectSelesai?.tanggal_terjual ?? null,
@@ -377,6 +422,7 @@ export default async function DetailTransaksiPage({
         }
       : null,
   } as unknown as ProjectDetailViewModel & {
+    unitSummary?: { total: number; sold: number };
     tanggal_terjual?: Date | string | null;
     harga_jual?: number;
     total_biaya_transaksi?: number;
@@ -420,7 +466,10 @@ export default async function DetailTransaksiPage({
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
           <div className="space-y-6 xl:col-span-8">
-            <CapitalDeploymentCard project={viewModel} />
+            <CapitalDeploymentCard
+              project={viewModel}
+              realisasiByKategori={realisasiByKategori}
+            />
             <CmaCard project={viewModel} />
             <InvestorBookCard project={viewModel} />
           </div>

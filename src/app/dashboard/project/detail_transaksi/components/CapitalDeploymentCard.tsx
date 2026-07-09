@@ -23,6 +23,8 @@ type BaseItem = {
   labelShort: string;
   value: number;
   description: string;
+  /** Kategori arus kas untuk mencocokkan realisasi pengeluaran. */
+  kategori: string;
 };
 
 type AllocationItem = BaseItem & {
@@ -30,6 +32,10 @@ type AllocationItem = BaseItem & {
   shareOfAllocated: number;
   displayRatio: number;
   tone: Tone;
+  /** Realisasi pengeluaran aktual pada komponen ini. */
+  realisasi: number;
+  /** Kelebihan realisasi di atas anggaran (0 bila belum lewat). */
+  overBy: number;
 };
 
 type HoveredState = { item: AllocationItem; x: number };
@@ -434,6 +440,40 @@ function AllocationRow({
             style={{ width: `${barWidthPct}%` }}
           />
         </div>
+
+        {/* Realisasi vs anggaran (req 2) — hanya jika sudah ada pengeluaran */}
+        {item.realisasi > 0 && (
+          <div
+            className={cn(
+              "mt-2.5 flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]",
+              item.overBy > 0
+                ? "border-amber-400/25 bg-amber-500/[0.07]"
+                : "border-white/[0.06] bg-white/[0.02]"
+            )}
+          >
+            <span className="text-slate-500">
+              Realisasi{" "}
+              <span
+                className={cn(
+                  "font-semibold",
+                  item.overBy > 0 ? "text-amber-300" : "text-slate-300"
+                )}
+              >
+                {compactMoney(item.realisasi)}
+              </span>{" "}
+              / anggaran {compactMoney(item.value)}
+            </span>
+            {item.overBy > 0 ? (
+              <span className="flex-shrink-0 font-bold text-amber-400">
+                +{compactMoney(item.overBy)} melebihi
+              </span>
+            ) : (
+              <span className="flex-shrink-0 text-emerald-400/80">
+                dalam anggaran
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -460,8 +500,10 @@ function Legend({ items }: { items: AllocationItem[] }) {
 
 export default function CapitalDeploymentCard({
   project,
+  realisasiByKategori = {},
 }: {
   project: ProjectDetailViewModel;
+  realisasiByKategori?: Record<string, number>;
 }) {
   const fundingTarget = toNumber(project.fundingTarget);
   const tooltipAnchorRef = useRef<HTMLDivElement>(null);
@@ -476,6 +518,7 @@ export default function CapitalDeploymentCard({
           labelShort: "Limit lelang",
           value: toNumber(project.auctionLimitValue),
           description: "Porsi utama untuk membeli aset di harga limit lelang yang ditetapkan.",
+          kategori: "pembelian_aset",
         },
         {
           id: "spare-bidding",
@@ -483,6 +526,7 @@ export default function CapitalDeploymentCard({
           labelShort: "Spare bid",
           value: toNumber(project.spareBidding),
           description: "Ruang taktis untuk mengantisipasi kenaikan harga saat proses bidding.",
+          kategori: "biaya_spare_bidding",
         },
         {
           id: "execution-cost",
@@ -490,6 +534,7 @@ export default function CapitalDeploymentCard({
           labelShort: "Eksekusi",
           value: toNumber(project.executionCost),
           description: "Biaya legal, administratif, dan operasional saat eksekusi transaksi.",
+          kategori: "biaya_eksekusi_pengosongan",
         },
         {
           id: "renovation-cost",
@@ -497,6 +542,7 @@ export default function CapitalDeploymentCard({
           labelShort: "Renovasi",
           value: toNumber(project.renovationCost),
           description: "Modal perbaikan aset agar siap dipasarkan kembali dengan harga lebih tinggi.",
+          kategori: "biaya_renovasi",
         },
         {
           id: "transfer-cost",
@@ -504,6 +550,7 @@ export default function CapitalDeploymentCard({
           labelShort: "Balik nama",
           value: toNumber(project.transferCost),
           description: "Biaya perpindahan hak kepemilikan dan kelengkapan dokumen aset.",
+          kategori: "biaya_dokumen_balik_nama",
         },
         {
           id: "reserve-fund",
@@ -511,6 +558,7 @@ export default function CapitalDeploymentCard({
           labelShort: "Cadangan",
           value: toNumber(project.reserveFund),
           description: "Buffer kas untuk kebutuhan tak terduga di luar komponen utama.",
+          kategori: "penggunaan_dana_cadangan",
         },
       ].filter((item) => item.value > 0),
     [
@@ -540,14 +588,19 @@ export default function CapitalDeploymentCard({
 
   const items = useMemo<AllocationItem[]>(
     () =>
-      baseItems.map((item, i) => ({
-        ...item,
-        ratioToTarget: safeDivide(item.value, ratioBase),
-        shareOfAllocated: safeDivide(item.value, Math.max(allocated, 1)),
-        displayRatio: safeDivide(item.value, displayBase),
-        tone: TONES[i % TONES.length],
-      })),
-    [baseItems, ratioBase, displayBase, allocated]
+      baseItems.map((item, i) => {
+        const realisasi = toNumber(realisasiByKategori[item.kategori]);
+        return {
+          ...item,
+          ratioToTarget: safeDivide(item.value, ratioBase),
+          shareOfAllocated: safeDivide(item.value, Math.max(allocated, 1)),
+          displayRatio: safeDivide(item.value, displayBase),
+          tone: TONES[i % TONES.length],
+          realisasi,
+          overBy: Math.max(0, realisasi - item.value),
+        };
+      }),
+    [baseItems, ratioBase, displayBase, allocated, realisasiByKategori]
   );
 
   /* Hover handlers */

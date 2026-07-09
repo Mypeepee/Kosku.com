@@ -261,6 +261,7 @@ export default function ManageFundScreen({
           onClose={handleCloseComposer}
           idProject={data.project.id_project}
           wallets={data.wallets}
+          sisaKas={data.sisaKas}
           defaultWallet={defaultWallet}
           editingTransaction={editingTransaction}
           onSubmitted={handleSubmitted}

@@ -1,10 +1,62 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { pusherServer } from "@/lib/pusher-server";
 
 const ALLOWED_STATUSES = new Set(["menunggu_pembayaran", "lunas"]);
+
+function toDecimal(value: unknown) {
+  if (value instanceof Prisma.Decimal) return value;
+  if (typeof value === "number" || typeof value === "string") {
+    return new Prisma.Decimal(value);
+  }
+  return new Prisma.Decimal(0);
+}
+
+/**
+ * Refresh cache persentase_kepemilikan = modal_disetor / max(target, Σsetor).
+ * Kepemilikan ditampilkan live, cache dijaga konsisten. Lihat
+ * src/lib/investor-ownership.ts.
+ */
+async function recalcOwnershipCache(
+  tx: Prisma.TransactionClient,
+  idProject: string,
+  targetPendanaan: Prisma.Decimal
+) {
+  const investors = await tx.projectInvestor.findMany({
+    where: { id_project: idProject },
+    select: { id_project_investor: true, nominal_terbayar: true },
+  });
+
+  const totalPaid = investors.reduce(
+    (sum, i) => sum.plus(toDecimal(i.nominal_terbayar)),
+    new Prisma.Decimal(0)
+  );
+  const denom = totalPaid.gt(targetPendanaan) ? totalPaid : targetPendanaan;
+
+  if (investors.length === 0) return;
+
+  if (denom.gt(0)) {
+    const cases = investors.map((i) => {
+      const percent = toDecimal(i.nominal_terbayar)
+        .div(denom)
+        .mul(100)
+        .toDecimalPlaces(6);
+      return Prisma.sql`WHEN id_project_investor = ${i.id_project_investor} THEN ${percent}::numeric`;
+    });
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE project_investor
+      SET persentase_kepemilikan = CASE ${Prisma.join(cases, " ")} ELSE persentase_kepemilikan END
+      WHERE id_project = ${idProject}
+    `);
+  } else {
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE project_investor SET persentase_kepemilikan = 0 WHERE id_project = ${idProject}
+    `);
+  }
+}
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -77,10 +129,12 @@ export async function PATCH(request: NextRequest) {
         id_project_investor: true,
         id_agent: true,
         status: true,
+        nominal_komitmen: true,
         project: {
           select: {
             id_project: true,
             dibuat_oleh: true,
+            target_pendanaan: true,
           },
         },
       },
@@ -107,18 +161,34 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
-    const updated = await prisma.projectInvestor.update({
-      where: {
-        id_project_investor: investorId,
-      },
-      data: {
-        status: nextStatus as "menunggu_pembayaran" | "lunas",
-      },
-      select: {
-        id_project_investor: true,
-        status: true,
-        diupdate_tanggal: true,
-      },
+    // Lunas → modal disetor = komitmen; kembali menunggu → disetor = 0.
+    // Ini yang menggerakkan kas riil & kepemilikan. Recompute cache atomik.
+    const nominalTerbayar =
+      nextStatus === "lunas"
+        ? toDecimal(investor.nominal_komitmen)
+        : new Prisma.Decimal(0);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.projectInvestor.update({
+        where: { id_project_investor: investorId },
+        data: {
+          status: nextStatus as "menunggu_pembayaran" | "lunas",
+          nominal_terbayar: nominalTerbayar,
+        },
+        select: {
+          id_project_investor: true,
+          status: true,
+          diupdate_tanggal: true,
+        },
+      });
+
+      await recalcOwnershipCache(
+        tx,
+        investor.project.id_project,
+        toDecimal(investor.project.target_pendanaan)
+      );
+
+      return row;
     });
 
     // Real-time: beri tahu investor langsung jika statusnya berubah ke lunas

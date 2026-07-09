@@ -73,6 +73,7 @@ type ModalProjectData = {
 
 type SubmitPayload = {
   id_project?: string;
+  id_project_unit?: string | null;
   tanggal_terjual: string | null;
   durasi_hari: number;
   durasi_bulan: number;
@@ -915,9 +916,11 @@ function FundingTerminal({
 
 function SaleFloatingButton({
   mode,
+  progressLabel,
   onClick,
 }: {
   mode: "input" | "view" | null;
+  progressLabel?: string | null;
   onClick: () => void;
 }) {
   if (!mode) return null;
@@ -934,7 +937,9 @@ function SaleFloatingButton({
             : "border-amber-300/18 bg-amber-400/10 text-amber-100"
         )}
       >
-        {isView ? "Data realisasi sudah tersimpan" : "Data penjualan belum diisi"}
+        {isView
+          ? "Data realisasi sudah tersimpan"
+          : progressLabel ?? "Data penjualan belum diisi"}
       </div>
 
       <button
@@ -973,7 +978,11 @@ function SaleFloatingButton({
             {isView ? "History" : "Exit"}
           </span>
           <span className="mt-0.5 text-sm font-semibold text-white">
-            {isView ? "Lihat Realisasi" : "Input Penjualan"}
+            {isView
+              ? "Lihat Realisasi"
+              : progressLabel
+              ? "Kelola Penjualan"
+              : "Input Penjualan"}
           </span>
         </span>
       </button>
@@ -1066,6 +1075,12 @@ export default function BloombergHeroCard({
         item?.committed ??
         item?.nominal_terbayar ??
         item?.nominalTerbayar ??
+        0,
+
+      nominal_terbayar:
+        item?.nominal_terbayar ??
+        item?.nominalTerbayar ??
+        item?.paid ??
         0,
 
       persentase_kepemilikan:
@@ -1230,11 +1245,34 @@ export default function BloombergHeroCard({
     };
   }, [projectId, rawProject, rawProjectSelesai, investors]);
 
+  const unitSummary = useMemo(() => {
+    const raw = (rawProject as any)?.unitSummary;
+    if (!raw || typeof raw !== "object") return null;
+    const total = toNumber(raw.total);
+    const sold = toNumber(raw.sold);
+    return total > 0 ? { total, sold } : null;
+  }, [rawProject]);
+
   const saleButtonMode = useMemo<"input" | "view" | null>(() => {
-    if (liveStatus !== "terjual") return null;
+    // Penjualan bisa dicatat sejak status "sedang_dijual" (jual per unit) —
+    // status project otomatis jadi "terjual" saat unit terakhir laku.
+    const sellable = liveStatus === "terjual" || liveStatus === "sedang_dijual";
+    if (!sellable) return null;
     if (!canManageSale) return null;
+
+    if (unitSummary) {
+      return unitSummary.sold < unitSummary.total ? "input" : "view";
+    }
+
     return hasSaleData ? "view" : "input";
-  }, [liveStatus, canManageSale, hasSaleData]);
+  }, [liveStatus, canManageSale, hasSaleData, unitSummary]);
+
+  const saleProgressLabel = useMemo(() => {
+    if (!unitSummary) return null;
+    if (unitSummary.sold <= 0) return null;
+    if (unitSummary.sold >= unitSummary.total) return null;
+    return `Terjual ${unitSummary.sold} dari ${unitSummary.total} unit`;
+  }, [unitSummary]);
 
   const isSaleModalReadOnly = saleButtonMode === "view";
 
@@ -1422,6 +1460,7 @@ export default function BloombergHeroCard({
 
       <SaleFloatingButton
         mode={!saleSubmitting ? saleButtonMode : null}
+        progressLabel={saleProgressLabel}
         onClick={() => setOpenModalTerjual(true)}
       />
 

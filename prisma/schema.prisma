@@ -198,7 +198,8 @@ model Project {
   arusKas                ProjectArusKas[]
   cmaEntries             ProjectCma[]
   investorProject        ProjectInvestor[]
-  projectSelesai         ProjectSelesai?
+  projectSelesai         ProjectSelesai[]
+  units                  ProjectUnit[]
 
   @@index([id_listing], map: "idx_project_listing")
   @@index([dibuat_oleh], map: "idx_project_dibuat_oleh")
@@ -213,12 +214,14 @@ model ProjectInvestor {
   id_project             String                         @db.VarChar(20)
   id_agent               String                         @db.VarChar(20)
   nominal_komitmen       Decimal                        @default(0) @db.Decimal(20, 2)
+  nominal_terbayar       Decimal                        @default(0) @db.Decimal(20, 2)
   persentase_kepemilikan Decimal?                       @db.Decimal(10, 6)
   status                 status_pembayaran_project_enum @default(menunggu_pembayaran)
   dibuat_tanggal         DateTime                       @default(now()) @db.Timestamptz(6)
   diupdate_tanggal       DateTime                       @updatedAt @db.Timestamptz(6)
   agent                  Agent                          @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "project_investor_agent_fk")
   project                Project                        @relation(fields: [id_project], references: [id_project], onDelete: Cascade, map: "project_investor_project_fk")
+  arusKas                ProjectArusKas[]
 
   @@unique([id_project, id_agent], map: "project_investor_unique")
   @@index([id_project], map: "idx_project_investor_project")
@@ -227,8 +230,33 @@ model ProjectInvestor {
   @@map("project_investor")
 }
 
+/// Unit jual dalam satu project (mis. 2 rumah jejer = 2 unit). bobot_persen =
+/// porsi biaya project yang dibebankan ke unit ini; Σ bobot per project = 100.
+/// "Terjual" TIDAK disimpan sebagai kolom — diturunkan dari keberadaan baris
+/// ProjectSelesai yang menunjuk unit ini (satu sumber kebenaran, anti-desync).
+model ProjectUnit {
+  id_project_unit  BigInt           @id @default(autoincrement())
+  id_project       String           @db.VarChar(20)
+  nama_unit        String           @db.VarChar(120)
+  bobot_persen     Decimal          @default(0) @db.Decimal(9, 6)
+  urutan           Int              @default(0)
+  dibuat_tanggal   DateTime         @default(now()) @db.Timestamptz(6)
+  diupdate_tanggal DateTime         @updatedAt @db.Timestamptz(6)
+  project          Project          @relation(fields: [id_project], references: [id_project], onDelete: Cascade, map: "project_unit_project_fk")
+  penjualan        ProjectSelesai[]
+
+  @@unique([id_project, nama_unit], map: "project_unit_nama_unique")
+  @@index([id_project], map: "idx_project_unit_project")
+  @@map("project_unit")
+}
+
+/// Satu baris = satu realisasi penjualan. id_project_unit NULL = penjualan
+/// project utuh (legacy / project 1 unit); terisi = penjualan per unit.
+/// Unique id_project_unit: satu unit hanya bisa terjual sekali.
 model ProjectSelesai {
-  id_project            String                   @id @db.VarChar(20)
+  id_project_selesai    BigInt                   @id @default(autoincrement())
+  id_project            String                   @db.VarChar(20)
+  id_project_unit       BigInt?
   id_listing            BigInt
   tanggal_pembelian     DateTime?                @db.Date
   tanggal_terjual       DateTime                 @db.Date
@@ -246,25 +274,30 @@ model ProjectSelesai {
   diupdate_tanggal      DateTime                 @updatedAt @db.Timestamptz(6)
   listing               Listing                  @relation(fields: [id_listing], references: [id_property], map: "project_selesai_listing_fk")
   project               Project                  @relation(fields: [id_project], references: [id_project], onDelete: Cascade, map: "project_selesai_project_fk")
+  unit                  ProjectUnit?             @relation(fields: [id_project_unit], references: [id_project_unit], onDelete: Restrict, map: "project_selesai_unit_fk")
   investorSelesai       ProjectSelesaiInvestor[]
 
+  @@unique([id_project_unit], map: "project_selesai_unit_unique")
+  @@index([id_project], map: "idx_project_selesai_project")
   @@index([id_listing], map: "idx_project_selesai_listing")
   @@index([tanggal_terjual], map: "idx_project_selesai_tanggal_terjual")
   @@map("project_selesai")
 }
 
 model ProjectSelesaiInvestor {
-  id_project     String         @db.VarChar(20)
-  id_agent       String         @db.VarChar(20)
-  modal          Decimal        @default(0) @db.Decimal(20, 2)
-  porsi_percent  Decimal        @default(0) @db.Decimal(10, 6)
-  profit         Decimal        @default(0) @db.Decimal(20, 2)
-  total_diterima Decimal        @default(0) @db.Decimal(20, 2)
-  agent          Agent          @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "project_selesai_investor_agent_fk")
-  projectSelesai ProjectSelesai @relation(fields: [id_project], references: [id_project], onDelete: Cascade, map: "project_selesai_investor_project_fk")
+  id_project_selesai BigInt
+  id_project         String         @db.VarChar(20)
+  id_agent           String         @db.VarChar(20)
+  modal              Decimal        @default(0) @db.Decimal(20, 2)
+  porsi_percent      Decimal        @default(0) @db.Decimal(10, 6)
+  profit             Decimal        @default(0) @db.Decimal(20, 2)
+  total_diterima     Decimal        @default(0) @db.Decimal(20, 2)
+  agent              Agent          @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "project_selesai_investor_agent_fk")
+  projectSelesai     ProjectSelesai @relation(fields: [id_project_selesai], references: [id_project_selesai], onDelete: Cascade, map: "project_selesai_investor_selesai_fk")
 
-  @@id([id_project, id_agent])
+  @@id([id_project_selesai, id_agent])
   @@index([id_agent], map: "idx_project_selesai_investor_agent")
+  @@index([id_project], map: "idx_project_selesai_investor_project")
   @@map("project_selesai_investor")
 }
 
@@ -296,9 +329,14 @@ model ProjectArusKas {
   dibuat_tanggal      DateTime               @default(now()) @db.Timestamptz(6)
   diupdate_tanggal    DateTime               @updatedAt @db.Timestamptz(6)
   wallet_key          wallet_key_enum
+  id_project_investor BigInt?
+  id_arus_kas_terkait BigInt?
   project             Project                @relation(fields: [id_project], references: [id_project], onDelete: Cascade, map: "project_arus_kas_project_fk")
+  investor            ProjectInvestor?       @relation(fields: [id_project_investor], references: [id_project_investor], onDelete: SetNull, map: "project_arus_kas_investor_fk")
 
   @@index([id_project], map: "idx_project_arus_kas_project")
+  @@index([id_project_investor], map: "idx_project_arus_kas_investor")
+  @@index([id_arus_kas_terkait], map: "idx_project_arus_kas_terkait")
   @@index([wallet_key], map: "idx_project_arus_kas_wallet")
   @@index([tanggal_transaksi], map: "idx_project_arus_kas_tanggal")
   @@index([jenis_transaksi], map: "idx_project_arus_kas_jenis")
@@ -1134,6 +1172,7 @@ enum jenis_arus_kas_enum {
 
 enum kategori_arus_kas_enum {
   setoran_modal
+  talangan_investor
   hasil_penjualan
   refund
   pemasukan_lain

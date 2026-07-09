@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { computeSisaKas, refreshOwnershipCache } from "./_lib/cash";
 
 const WALLET_KEYS = [
   "utama",
@@ -322,84 +323,6 @@ function serializeArusKasRecord(
   };
 }
 
-function buildProjectIncrementData(
-  walletKey: WalletKey,
-  deficitNominal: Prisma.Decimal
-): Prisma.ProjectUpdateInput {
-  switch (walletKey) {
-    case "dokumen":
-      return {
-        biaya_balik_nama: { increment: deficitNominal },
-        total_biaya_akuisisi: { increment: deficitNominal },
-      };
-    case "eksekusi":
-      return {
-        biaya_eksekusi: { increment: deficitNominal },
-        total_biaya_akuisisi: { increment: deficitNominal },
-      };
-    case "renovasi":
-      return {
-        biaya_renov: { increment: deficitNominal },
-        total_biaya_akuisisi: { increment: deficitNominal },
-      };
-    case "cadangan":
-      return {
-        dana_cadangan: { increment: deficitNominal },
-      };
-    case "utama":
-    default:
-      return {
-        total_biaya_akuisisi: { increment: deficitNominal },
-      };
-  }
-}
-
-async function recalculateInvestorOwnership(
-  tx: Prisma.TransactionClient,
-  idProject: string
-) {
-  const investors = await tx.projectInvestor.findMany({
-    where: { id_project: idProject },
-    select: {
-      id_project_investor: true,
-      nominal_komitmen: true,
-    },
-  });
-
-  const totalCommitment = investors.reduce(
-    (sum, item) => sum.plus(toDecimal(item.nominal_komitmen)),
-    new Prisma.Decimal(0)
-  );
-
-  if (investors.length > 0) {
-    if (totalCommitment.gt(0)) {
-      // Satu UPDATE dengan CASE WHEN — menggantikan N update serial (N+1 fix)
-      const cases = investors.map((investor) => {
-        const nominal = toDecimal(investor.nominal_komitmen);
-        const percent = nominal
-          .div(totalCommitment)
-          .mul(100)
-          .toDecimalPlaces(6);
-        return Prisma.sql`WHEN id_project_investor = ${investor.id_project_investor} THEN ${percent}::numeric`;
-      });
-
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE project_investor
-        SET persentase_kepemilikan = CASE ${Prisma.join(cases, " ")} ELSE persentase_kepemilikan END
-        WHERE id_project = ${idProject}
-      `);
-    } else {
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE project_investor
-        SET persentase_kepemilikan = 0
-        WHERE id_project = ${idProject}
-      `);
-    }
-  }
-
-  return totalCommitment;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -423,16 +346,16 @@ export async function POST(request: NextRequest) {
     const statusProjectTarget = body.status_project_target;
 
     const autoCoverDeficit = body.auto_cover_deficit === true;
-    const deficitNominal = autoCoverDeficit
-      ? parseNominal(body.deficit_nominal)
-      : null;
+    // deficit_nominal client hanya hint; besaran defisit dihitung ulang server.
+    const deficitNominal = parseNominal(body.deficit_nominal);
 
-    const investorPenanggungId = autoCoverDeficit
-      ? parseRouteBigInt(body?.investor_penanggung?.id_project_investor)
-      : null;
+    // Investor penanggung dibaca tanpa bergantung flag client — guard anti-minus
+    // di server yang menentukan wajib/tidaknya.
+    const investorPenanggungId = parseRouteBigInt(
+      body?.investor_penanggung?.id_project_investor
+    );
 
     const investorPenanggungNama =
-      autoCoverDeficit &&
       typeof body?.investor_penanggung?.nama === "string" &&
       body.investor_penanggung.nama.trim()
         ? body.investor_penanggung.nama.trim()
@@ -496,31 +419,19 @@ export async function POST(request: NextRequest) {
       body.kategori_transaksi
     );
 
-    if (autoCoverDeficit) {
-      if (jenisTransaksi !== "pengeluaran") {
-        return NextResponse.json(
-          {
-            message:
-              "Auto cover defisit hanya bisa dipakai untuk transaksi pengeluaran.",
-          },
-          { status: 400 }
-        );
-      }
-
-      if (!deficitNominal || deficitNominal.lte(0)) {
-        return NextResponse.json(
-          { message: "deficit_nominal harus lebih besar dari 0." },
-          { status: 400 }
-        );
-      }
-
-      if (!investorPenanggungId) {
-        return NextResponse.json(
-          { message: "Investor penanggung defisit wajib dipilih." },
-          { status: 400 }
-        );
-      }
+    if (autoCoverDeficit && jenisTransaksi !== "pengeluaran") {
+      return NextResponse.json(
+        {
+          message:
+            "Talangan investor hanya bisa dipakai untuk transaksi pengeluaran.",
+        },
+        { status: 400 }
+      );
     }
+    // Catatan: besaran defisit & apakah talangan dibutuhkan dihitung ULANG di
+    // server (dari kas riil), tidak mempercayai client. deficitNominal client
+    // hanya hint UI.
+    void deficitNominal;
 
     const result = await prisma.$transaction(async (tx) => {
       const project = await tx.project.findUnique({
@@ -529,6 +440,7 @@ export async function POST(request: NextRequest) {
           id_project: true,
           status: true,
           total_pendanaan: true,
+          target_pendanaan: true,
         },
       });
 
@@ -537,7 +449,31 @@ export async function POST(request: NextRequest) {
       }
 
       const currentStatus = normalizeProjectStatus(project.status);
+      const targetPendanaan = toDecimal(project.target_pendanaan);
 
+      // ── Kas riil SEBELUM transaksi ini (server-authoritative) ──────────────
+      const sisaKas = await computeSisaKas(tx, idProject);
+
+      // ── Defisit: hanya untuk pengeluaran yang benar-benar tercatat ─────────
+      const isRecordedExpense =
+        jenisTransaksi === "pengeluaran" && statusTransaksi === "tercatat";
+      const deficit =
+        isRecordedExpense && nominal.gt(sisaKas)
+          ? nominal.minus(sisaKas)
+          : new Prisma.Decimal(0);
+      const needsCover = deficit.gt(0);
+
+      if (needsCover && !investorPenanggungId) {
+        throw new HttpError(
+          "Saldo kas tidak cukup untuk pengeluaran ini. Pilih investor penanggung untuk menalangi kekurangan.",
+          400
+        );
+      }
+
+      let coverSummary: Record<string, unknown> | null = null;
+
+      // ── (1) Transaksi utama dulu — kita butuh id-nya untuk menautkan talangan
+      // (urutan dalam $transaction tidak observable; kas final tetap ≥ 0).
       const created = await tx.projectArusKas.create({
         data: {
           id_project: idProject,
@@ -566,18 +502,9 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      const nextStatus = resolveNextProjectStatus({
-        currentStatus,
-        statusTransaksi,
-        impactStatusProject,
-        requestedTarget: statusProjectTarget,
-      });
-
-      const statusUpdated = nextStatus !== currentStatus;
-
-      let coverSummary: Record<string, unknown> | null = null;
-
-      if (autoCoverDeficit && deficitNominal && investorPenanggungId) {
+      // ── (2) TALANGAN: tautkan ke pengeluaran (id_arus_kas_terkait) supaya
+      // bisa dibatalkan bersama saat pengeluaran dihapus.
+      if (needsCover && investorPenanggungId) {
         const investor = await tx.projectInvestor.findFirst({
           where: {
             id_project_investor: investorPenanggungId,
@@ -587,6 +514,7 @@ export async function POST(request: NextRequest) {
             id_project_investor: true,
             id_agent: true,
             nominal_komitmen: true,
+            nominal_terbayar: true,
             persentase_kepemilikan: true,
           },
         });
@@ -598,41 +526,63 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const nominalSebelum = toDecimal(investor.nominal_komitmen);
-        const nominalSesudah = nominalSebelum.plus(deficitNominal);
-
-        await tx.projectInvestor.update({
-          where: {
-            id_project_investor: investorPenanggungId,
-          },
+        // (a) baris pemasukan talangan, beratribut & tertaut ke pengeluaran
+        await tx.projectArusKas.create({
           data: {
-            nominal_komitmen: nominalSesudah,
+            id_project: idProject,
+            wallet_key: walletKey,
+            tanggal_transaksi: tanggalTransaksi,
+            jenis_transaksi: "pemasukan",
+            kategori_transaksi: "talangan_investor",
+            judul_transaksi: `Talangan ${
+              investorPenanggungNama ?? "investor"
+            } — ${judulTransaksi}`,
+            nominal: deficit,
+            status_transaksi: "tercatat",
+            catatan: `Menutup kekurangan kas untuk: ${judulTransaksi}`,
+            id_project_investor: investorPenanggungId,
+            id_arus_kas_terkait: created.id_project_arus_kas,
           },
         });
 
-        const totalCommitmentAfter = await recalculateInvestorOwnership(
-          tx,
-          idProject
-        );
-
-        const projectUpdateData: Prisma.ProjectUpdateInput = {
-          ...buildProjectIncrementData(walletKey, deficitNominal),
-          total_pendanaan: totalCommitmentAfter,
-          ...(statusUpdated ? { status: nextStatus } : {}),
-        };
-
-        await tx.project.update({
-          where: {
-            id_project: idProject,
+        // (b) modal disetor & komitmen penanggung bertambah
+        const terbayarSebelum = toDecimal(investor.nominal_terbayar);
+        const terbayarSesudah = terbayarSebelum.plus(deficit);
+        await tx.projectInvestor.update({
+          where: { id_project_investor: investorPenanggungId },
+          data: {
+            nominal_terbayar: terbayarSesudah,
+            nominal_komitmen: toDecimal(investor.nominal_komitmen).plus(deficit),
           },
-          data: projectUpdateData,
+        });
+
+        // (c) recompute kepemilikan (paid + D = max(target, Σsetor))
+        const totalPaidAfter = await refreshOwnershipCache(
+          tx,
+          idProject,
+          targetPendanaan
+        );
+        const denomAfter = totalPaidAfter.gt(targetPendanaan)
+          ? totalPaidAfter
+          : targetPendanaan;
+
+        // sinkron total_pendanaan (Σ komitmen)
+        const komitmenAgg = await tx.projectInvestor.aggregate({
+          where: { id_project: idProject },
+          _sum: { nominal_komitmen: true },
+        });
+        await tx.project.update({
+          where: { id_project: idProject },
+          data: {
+            total_pendanaan: toDecimal(komitmenAgg._sum.nominal_komitmen ?? 0),
+          },
         });
 
         const persenSebelum = toNumber(investor.persentase_kepemilikan);
-        const persenSesudah = totalCommitmentAfter.gt(0)
+        const persenSesudah = denomAfter.gt(0)
           ? Number(
-              nominalSesudah
-                .div(totalCommitmentAfter)
+              terbayarSesudah
+                .div(denomAfter)
                 .mul(100)
                 .toDecimalPlaces(6)
                 .toString()
@@ -643,20 +593,27 @@ export async function POST(request: NextRequest) {
           id_project_investor: investor.id_project_investor.toString(),
           id_agent: investor.id_agent,
           nama: investorPenanggungNama,
-          nominal_sebelum: Number(nominalSebelum.toString()),
-          nominal_tambahan: Number(deficitNominal.toString()),
-          nominal_sesudah: Number(nominalSesudah.toString()),
+          nominal_tambahan: Number(deficit.toString()),
+          terbayar_sebelum: Number(terbayarSebelum.toString()),
+          terbayar_sesudah: Number(terbayarSesudah.toString()),
           persentase_sebelum: persenSebelum,
           persentase_sesudah: persenSesudah,
-          total_pendanaan_sebelum: toNumber(project.total_pendanaan),
-          total_pendanaan_sesudah: Number(totalCommitmentAfter.toString()),
         };
-      } else if (statusUpdated) {
+      }
+
+      // ── (3) Update status project bila perlu ──────────────────────────────
+      const nextStatus = resolveNextProjectStatus({
+        currentStatus,
+        statusTransaksi,
+        impactStatusProject,
+        requestedTarget: statusProjectTarget,
+      });
+      const statusUpdated = nextStatus !== currentStatus;
+
+      if (statusUpdated) {
         await tx.project.update({
           where: { id_project: idProject },
-          data: {
-            status: nextStatus,
-          },
+          data: { status: nextStatus },
         });
       }
 

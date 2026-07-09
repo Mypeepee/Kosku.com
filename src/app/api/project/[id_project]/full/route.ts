@@ -87,7 +87,7 @@ export async function GET(
     const project = await prisma.project.findUnique({
       where: { id_project: idProject },
       include: {
-        projectSelesai: { select: { id_project: true } },
+        projectSelesai: { select: { id_project_selesai: true }, take: 1 },
         cmaEntries: {
           orderBy: { id_project_cma: "asc" },
           select: {
@@ -276,7 +276,7 @@ export async function GET(
         dana_cadangan: toNum(project.dana_cadangan),
 
         dibuat_oleh: project.dibuat_oleh,
-        is_sold: Boolean(project.projectSelesai),
+        is_sold: project.projectSelesai.length > 0,
 
         investor_allocations,
         cma_entries,

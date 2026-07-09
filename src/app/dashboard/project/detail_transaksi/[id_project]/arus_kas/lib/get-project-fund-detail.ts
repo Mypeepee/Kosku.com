@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { ownershipDenominator, ownershipPercent } from "@/lib/investor-ownership";
 import type {
   CurrentInvestorInfo,
   DbCashflow,
@@ -12,6 +13,7 @@ type ProjectFundSource = {
   id_project: string;
   nama_project: string;
   dibuat_oleh: string;
+  target_pendanaan: Prisma.Decimal | number | null;
   nilai_limit_lelang: Prisma.Decimal | number | null;
   spare_bidding: Prisma.Decimal | number | null;
   biaya_balik_nama: Prisma.Decimal | number | null;
@@ -19,6 +21,11 @@ type ProjectFundSource = {
   biaya_renov: Prisma.Decimal | number | null;
   dana_cadangan: Prisma.Decimal | number | null;
 };
+
+/** Kategori pemasukan yang merepresentasikan modal investor (setoran/talangan).
+ *  Dikecualikan dari danaMasuk berbasis-ledger karena SUDAH dihitung lewat
+ *  nominal_terbayar — mencegah dobel hitung. */
+const MODAL_INCOME_CATEGORIES = new Set(["setoran_modal", "talangan_investor"]);
 
 const WALLET_META: Array<{
   key: WalletKey;
@@ -78,13 +85,14 @@ export async function getProjectFundDetail(
   idProject: string,
   currentAgentId?: string | null
 ): Promise<ManageFundData | null> {
-  const [project, cashflowRows] = await Promise.all([
+  const [project, cashflowRows, investorRows] = await Promise.all([
     prisma.project.findUnique({
       where: { id_project: idProject },
       select: {
         id_project: true,
         nama_project: true,
         dibuat_oleh: true,
+        target_pendanaan: true,
         nilai_limit_lelang: true,
         spare_bidding: true,
         biaya_balik_nama: true,
@@ -115,6 +123,21 @@ export async function getProjectFundDetail(
         catatan: true,
         dibuat_tanggal: true,
         diupdate_tanggal: true,
+        id_project_investor: true,
+      },
+    }),
+    prisma.projectInvestor.findMany({
+      where: { id_project: idProject },
+      select: {
+        id_project_investor: true,
+        id_agent: true,
+        nominal_komitmen: true,
+        nominal_terbayar: true,
+        persentase_kepemilikan: true,
+        status: true,
+        agent: {
+          select: { pengguna: { select: { nama_lengkap: true } } },
+        },
       },
     }),
   ]);
@@ -123,50 +146,68 @@ export async function getProjectFundDetail(
     return null;
   }
 
+  // ── Modal disetor & denominator kepemilikan ──────────────────────────────
+  const totalSetor = investorRows.reduce(
+    (sum, inv) => sum + toNumber(inv.nominal_terbayar),
+    0
+  );
+  const targetPendanaan = toNumber(project.target_pendanaan);
+  const denominator = ownershipDenominator(targetPendanaan, totalSetor);
+
+  const investorNamaById = new Map<string, string | null>();
+  for (const inv of investorRows) {
+    investorNamaById.set(
+      inv.id_project_investor.toString(),
+      inv.agent?.pengguna?.nama_lengkap ?? null
+    );
+  }
+
   let currentInvestorInfo: CurrentInvestorInfo | null = null;
 
   if (currentAgentId && currentAgentId !== project.dibuat_oleh) {
-    const investorRow = await prisma.projectInvestor.findFirst({
-      where: { id_project: idProject, id_agent: currentAgentId },
-      select: {
-        nominal_komitmen: true,
-        persentase_kepemilikan: true,
-        status: true,
-        agent: {
-          select: {
-            pengguna: { select: { nama_lengkap: true } },
-          },
-        },
-      },
-    });
+    const investorRow = investorRows.find(
+      (inv) => inv.id_agent === currentAgentId
+    );
 
     if (investorRow) {
       currentInvestorInfo = {
         nama: investorRow.agent?.pengguna?.nama_lengkap ?? null,
         nominal_komitmen: toNumber(investorRow.nominal_komitmen),
-        persentase_kepemilikan:
-          investorRow.persentase_kepemilikan != null
-            ? toNumber(investorRow.persentase_kepemilikan)
-            : null,
+        nominal_terbayar: toNumber(investorRow.nominal_terbayar),
+        // Kepemilikan live = setor / max(target, Σsetor). Lihat investor-ownership.ts.
+        persentase_kepemilikan: ownershipPercent(
+          toNumber(investorRow.nominal_terbayar),
+          denominator
+        ),
         status: String(investorRow.status ?? ""),
       };
     }
   }
 
-  const transactions: DbCashflow[] = cashflowRows.map((row) => ({
-    id_project_arus_kas: row.id_project_arus_kas,
-    id_project: row.id_project,
-    wallet_key: normalizeWalletKey(row.wallet_key),
-    tanggal_transaksi: row.tanggal_transaksi,
-    jenis_transaksi: row.jenis_transaksi,
-    kategori_transaksi: row.kategori_transaksi,
-    judul_transaksi: row.judul_transaksi,
-    nominal: toNumber(row.nominal),
-    status_transaksi: row.status_transaksi,
-    catatan: row.catatan,
-    dibuat_tanggal: row.dibuat_tanggal,
-    diupdate_tanggal: row.diupdate_tanggal,
-  }));
+  const transactions: DbCashflow[] = cashflowRows.map((row) => {
+    const investorKey =
+      row.id_project_investor != null
+        ? row.id_project_investor.toString()
+        : null;
+    return {
+      id_project_arus_kas: row.id_project_arus_kas,
+      id_project: row.id_project,
+      wallet_key: normalizeWalletKey(row.wallet_key),
+      tanggal_transaksi: row.tanggal_transaksi,
+      jenis_transaksi: row.jenis_transaksi,
+      kategori_transaksi: row.kategori_transaksi,
+      judul_transaksi: row.judul_transaksi,
+      nominal: toNumber(row.nominal),
+      status_transaksi: row.status_transaksi,
+      catatan: row.catatan,
+      dibuat_tanggal: row.dibuat_tanggal,
+      diupdate_tanggal: row.diupdate_tanggal,
+      id_project_investor: investorKey,
+      investor_nama: investorKey
+        ? investorNamaById.get(investorKey) ?? null
+        : null,
+    };
+  });
 
   const summaryMap = new Map<
     WalletKey,
@@ -194,7 +235,10 @@ export async function getProjectFundDetail(
   const wallets: WalletSummary[] = WALLET_META.map((meta) => {
     const budget = meta.getBudget(project);
     const summary = summaryMap.get(meta.key) ?? { income: 0, expense: 0 };
-    const balance = budget + summary.income - summary.expense;
+    // Per pos = anggaran vs realisasi. sisaAnggaran boleh negatif (over-budget),
+    // itu penanda visual — BUKAN kas minus (kas riil dijaga di level total).
+    const terpakai = summary.expense;
+    const sisaAnggaran = budget - terpakai;
 
     return {
       walletKey: meta.key,
@@ -202,16 +246,40 @@ export async function getProjectFundDetail(
       budget,
       income: summary.income,
       expense: summary.expense,
-      usedBudget: summary.expense,
-      remainingBudget: balance,
-      balance,
+      terpakai,
+      sisaAnggaran,
+      overBudget: terpakai > budget,
+      usedBudget: terpakai,
+      remainingBudget: sisaAnggaran,
+      balance: sisaAnggaran,
       visible: true,
     };
   });
 
+  // ── Kas riil (uang yang benar-benar ada) ──────────────────────────────────
+  // danaMasuk = modal disetor (via nominal_terbayar) + pemasukan non-modal dari
+  // ledger. Kategori setoran/talangan dikecualikan agar tak dobel dengan setor.
+  const pemasukanNonModal = transactions.reduce((sum, row) => {
+    if (
+      row.jenis_transaksi === "pemasukan" &&
+      !MODAL_INCOME_CATEGORIES.has(row.kategori_transaksi)
+    ) {
+      return sum + Number(row.nominal);
+    }
+    return sum;
+  }, 0);
+
+  const danaKeluar = transactions.reduce(
+    (sum, row) =>
+      row.jenis_transaksi === "pengeluaran" ? sum + Number(row.nominal) : sum,
+    0
+  );
+
+  const danaMasuk = totalSetor + pemasukanNonModal;
+  const sisaKas = danaMasuk - danaKeluar;
+
   const totalIncome = wallets.reduce((sum, wallet) => sum + wallet.income, 0);
   const totalExpense = wallets.reduce((sum, wallet) => sum + wallet.expense, 0);
-  const totalBalance = wallets.reduce((sum, wallet) => sum + wallet.balance, 0);
   const totalRemainingBudget = wallets.reduce(
     (sum, wallet) => sum + wallet.remainingBudget,
     0
@@ -222,13 +290,19 @@ export async function getProjectFundDetail(
       id_project: project.id_project,
       nama_project: project.nama_project,
       dibuat_oleh: project.dibuat_oleh,
+      target_pendanaan: targetPendanaan,
     },
     wallets,
     transactions,
     totalIncome,
     totalExpense,
-    totalBalance,
+    totalBalance: sisaKas,
     totalRemainingBudget,
+    danaMasuk,
+    danaKeluar,
+    sisaKas,
+    totalSetor,
+    denominator,
     currentInvestorInfo,
   };
 }

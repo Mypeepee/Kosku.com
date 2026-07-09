@@ -13,6 +13,7 @@ import {
   Plus,
   ShieldCheck,
   Trash2,
+  UserRound,
   Wallet2,
 } from "lucide-react";
 import { formatCurrency } from "../lib/format-currency";
@@ -353,6 +354,12 @@ function SwipeableCashflowCard({
                       <Icon className="mr-1.5 h-3.5 w-3.5" />
                       {getWalletLabel(item.wallet_key)}
                     </span>
+
+                    {item.kategori_transaksi === "talangan_investor" ? (
+                      <span className="inline-flex items-center rounded-full border border-amber-300/25 bg-amber-400/10 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-amber-200">
+                        Talangan
+                      </span>
+                    ) : null}
                   </div>
 
                   {item.catatan ? (
@@ -376,6 +383,13 @@ function SwipeableCashflowCard({
                       <CircleDollarSign className="h-3.5 w-3.5" />
                       <span>{formatLabel(item.kategori_transaksi)}</span>
                     </div>
+
+                    {item.investor_nama ? (
+                      <div className="inline-flex items-center gap-1.5 text-amber-200/80">
+                        <UserRound className="h-3.5 w-3.5" />
+                        <span>oleh {item.investor_nama}</span>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="mt-3 text-[11px] text-white/30 sm:hidden">

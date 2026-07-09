@@ -1,6 +1,4 @@
 import {
-    ArrowDownRight,
-    ArrowUpRight,
     FileCheck2,
     Hammer,
     PiggyBank,
@@ -85,13 +83,6 @@ import {
     return Math.max(0, Math.min(100, value));
   }
   
-  function formatDeltaPercent(value: number) {
-    const abs = Math.abs(value);
-    const prefix = value > 0 ? "+" : value < 0 ? "-" : "";
-    const digits = abs >= 10 ? 0 : 1;
-    return `${prefix}${abs.toFixed(digits)}%`;
-  }
-  
   export default function WalletCard({
     wallet,
     active,
@@ -104,24 +95,22 @@ import {
     const theme = WALLET_THEME[wallet.walletKey] ?? WALLET_THEME.utama;
     const Icon = theme.icon;
   
+    // Per pos = ANGGARAN vs REALISASI (bukan kas). sisaAnggaran boleh negatif =
+    // over-budget → penanda amber. Kas riil dijaga di kartu Kas Proyek.
     const budget = Number(wallet.budget ?? 0);
-    const remaining = Number(wallet.remainingBudget ?? 0);
-  
-    const deltaAmount = remaining - budget;
-    const deltaPercent = budget > 0 ? (deltaAmount / budget) * 100 : 0;
-    const remainingPercent =
-      budget > 0 ? clampPercent((remaining / budget) * 100) : 0;
-  
-    const trendClass =
-      deltaAmount > 0
-        ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-200"
-        : deltaAmount < 0
-        ? "border-rose-300/20 bg-rose-400/10 text-rose-200"
-        : "border-white/10 bg-white/5 text-white/70";
-  
-    const TrendIcon =
-      deltaAmount > 0 ? ArrowUpRight : deltaAmount < 0 ? ArrowDownRight : Wallet2;
-  
+    const terpakai = Number(wallet.terpakai ?? wallet.expense ?? 0);
+    const sisaAnggaran = Number(wallet.sisaAnggaran ?? budget - terpakai);
+    const overBudget = wallet.overBudget ?? terpakai > budget;
+    const overAmount = overBudget ? terpakai - budget : 0;
+
+    // Progress = porsi anggaran yang sudah terpakai.
+    const usedPercent =
+      budget > 0
+        ? clampPercent((terpakai / budget) * 100)
+        : terpakai > 0
+        ? 100
+        : 0;
+
     return (
       <button
         type="button"
@@ -175,50 +164,56 @@ import {
   
           <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.24em] text-white/42">
-              Sisa uang
+              Sisa anggaran
             </div>
-  
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <div className="min-w-0 text-[clamp(1.8rem,4vw,2.5rem)] font-semibold leading-none tracking-tight text-white">
-                {formatCurrency(remaining)}
-              </div>
-  
+
+            <div className="mt-3">
               <div
                 className={[
-                  "inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium",
-                  trendClass,
+                  "min-w-0 text-[clamp(1.8rem,4vw,2.5rem)] font-semibold leading-none tracking-tight",
+                  overBudget ? "text-amber-300" : "text-white",
                 ].join(" ")}
               >
-                <TrendIcon className="h-3.5 w-3.5" />
-                <span>{formatDeltaPercent(deltaPercent)}</span>
+                {formatCurrency(sisaAnggaran)}
               </div>
             </div>
-  
+
             <div className="mt-2 text-sm text-white/42">
-              Dibanding alokasi awal dompet
+              {overBudget
+                ? "Realisasi melebihi anggaran pos"
+                : `Terpakai ${formatCurrency(terpakai)} dari ${formatCurrency(
+                    budget
+                  )}`}
             </div>
           </div>
-  
+
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div className="text-[11px] uppercase tracking-[0.22em] text-white/34">
-                Progress tersisa
+                Progress terpakai
               </div>
-  
+
               <div className="text-right">
-                <div className="text-lg font-semibold text-white/86">
-                  {remainingPercent.toFixed(0)}%
+                <div
+                  className={[
+                    "text-lg font-semibold",
+                    overBudget ? "text-amber-300" : "text-white/86",
+                  ].join(" ")}
+                >
+                  {usedPercent.toFixed(0)}%
                 </div>
               </div>
             </div>
-  
+
             <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
               <div
                 className={[
                   "h-full rounded-full bg-gradient-to-r transition-all duration-500",
-                  theme.progress,
+                  overBudget
+                    ? "from-amber-300 via-amber-400 to-orange-400"
+                    : theme.progress,
                 ].join(" ")}
-                style={{ width: `${remainingPercent}%` }}
+                style={{ width: `${usedPercent}%` }}
               />
             </div>
           </div>
