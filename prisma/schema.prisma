@@ -267,6 +267,11 @@ model ProjectSelesai {
   pph_percent           Decimal                  @default(0) @db.Decimal(5, 2)
   ajb_percent           Decimal                  @default(0) @db.Decimal(5, 2)
   agent_fee_percent     Decimal                  @default(0) @db.Decimal(5, 2)
+  /// Nominal fee EKSAK. Bisa manual (nilai akta ≠ harga riil utk PPh/AJB);
+  /// percent di atas hanya referensi turunan. Sumber kebenaran = nominal.
+  pph_nominal           Decimal                  @default(0) @db.Decimal(20, 2)
+  ajb_nominal           Decimal                  @default(0) @db.Decimal(20, 2)
+  agent_fee_nominal     Decimal                  @default(0) @db.Decimal(20, 2)
   total_biaya_transaksi Decimal                  @default(0) @db.Decimal(20, 2)
   profit_bersih         Decimal                  @default(0) @db.Decimal(20, 2)
   roi_bersih            Decimal                  @default(0) @db.Decimal(10, 2)

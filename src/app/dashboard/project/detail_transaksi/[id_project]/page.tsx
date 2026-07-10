@@ -365,6 +365,10 @@ export default async function DetailTransaksiPage({
 
       return {
         id: String(item.id_project_investor),
+        // id_agent WAJIB ikut — dipakai join distribusi penjualan tersimpan
+        // (project_selesai_investor) di ModalTerjual; tanpa ini nama/avatar
+        // investor hilang di detail unit terjual.
+        id_agent: item.id_agent,
         name: identity?.name || pickDisplayName(agent, item.id_agent),
         avatar: identity?.avatar || pickAvatar(agent),
         committed: toNumeric(item.nominal_komitmen),

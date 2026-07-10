@@ -84,6 +84,8 @@ type SubmitPayload = {
 
 type UnitDistribusi = {
   id_agent: string;
+  nama?: string | null;
+  avatar_url?: string | null;
   modal: number;
   porsi_percent: number;
   profit: number;
@@ -101,10 +103,15 @@ type UnitSale = {
   pph_percent: number;
   ajb_percent: number;
   agent_fee_percent: number;
+  pph_nominal?: number;
+  ajb_nominal?: number;
+  agent_fee_nominal?: number;
   total_biaya_transaksi: number;
   profit_bersih: number;
   roi_bersih: number;
 };
+
+type FeeMode = "percent" | "nominal";
 
 type UnitInfo = {
   id_project_unit: string;
@@ -118,6 +125,14 @@ type UnitInfo = {
   distribusi: UnitDistribusi[];
 };
 
+type ServerInvestor = {
+  id_agent: string;
+  nama: string | null;
+  avatar_url: string | null;
+  nominal_komitmen: number;
+  nominal_terbayar: number;
+};
+
 type UnitsData = {
   id_project: string;
   status: string;
@@ -129,6 +144,7 @@ type UnitsData = {
   locked: boolean;
   total_biaya_project: number;
   estimasi_harga_jual: number;
+  investors?: ServerInvestor[];
   units: UnitInfo[];
   legacy_sale: (UnitSale & { distribusi: UnitDistribusi[] }) | null;
   aggregate: {
@@ -214,6 +230,25 @@ function normalizePercent(raw: unknown): number {
 
 function getInvestorAvatar(inv: Investor) {
   return inv?.avatar ?? inv?.gambar ?? inv?.foto ?? inv?.image ?? null;
+}
+
+/** Normalisasi URL foto (dukung raw Google Drive id/url) → thumbnail. */
+function resolveAvatarUrl(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+
+  if (/^[A-Za-z0-9_-]{20,}$/.test(trimmed)) {
+    return `https://drive.google.com/thumbnail?id=${trimmed}&sz=w200`;
+  }
+
+  const match = trimmed.match(/(?:id=|\/d\/)([A-Za-z0-9_-]{20,})/);
+  if (match?.[1]) {
+    return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w200`;
+  }
+
+  if (/^(https?:\/\/|\/|data:)/.test(trimmed)) return trimmed;
+  return null;
 }
 
 function getInitials(name: string) {
@@ -575,6 +610,18 @@ export default function ModalTerjual({
   const [ajbInput, setAjbInput] = useState("0.5");
   const [agentFeeInput, setAgentFeeInput] = useState("2");
 
+  // Override nominal fee — dipakai bila dasar pajak (nilai akta) ≠ harga riil.
+  // mode "percent" → nominal mengikuti % × harga; "nominal" → angka manual.
+  const [pphMode, setPphMode] = useState<FeeMode>("percent");
+  const [ajbMode, setAjbMode] = useState<FeeMode>("percent");
+  const [agentFeeMode, setAgentFeeMode] = useState<FeeMode>("percent");
+  const [pphNominalInput, setPphNominalInput] = useState("");
+  const [ajbNominalInput, setAjbNominalInput] = useState("");
+  const [agentFeeNominalInput, setAgentFeeNominalInput] = useState("");
+
+  // Mode koreksi: penjualan tersimpan dibuka kembali untuk diedit.
+  const [isEditing, setIsEditing] = useState(false);
+
   const [isSaving, setIsSaving] = useState(false);
 
   // ── Wizard multi-unit ──
@@ -610,7 +657,51 @@ export default function ModalTerjual({
     setPphInput(String(toSafeNumber(project?.pph_percent || 2.5)));
     setAjbInput(String(toSafeNumber(project?.ajb_percent || 0.5)));
     setAgentFeeInput(String(toSafeNumber(project?.agent_fee_percent || 2)));
+
+    setPphMode("percent");
+    setAjbMode("percent");
+    setAgentFeeMode("percent");
+    setPphNominalInput("");
+    setAjbNominalInput("");
+    setAgentFeeNominalInput("");
   }, [project, readOnly]);
+
+  /** Prefill fee dari penjualan tersimpan. Nominal yang menyimpang dari
+   *  % × harga (> Rp 1) berarti dulu di-override manual → mode nominal. */
+  const applyFeeFromSale = useCallback((sale: UnitSale) => {
+    setPphInput(String(sale.pph_percent));
+    setAjbInput(String(sale.ajb_percent));
+    setAgentFeeInput(String(sale.agent_fee_percent));
+
+    const applyOne = (
+      nominal: number | undefined,
+      percent: number,
+      setMode: (mode: FeeMode) => void,
+      setNomInput: (value: string) => void
+    ) => {
+      const computed = (percent / 100) * sale.harga_jual;
+      if (
+        typeof nominal === "number" &&
+        nominal > 0 &&
+        Math.abs(nominal - computed) > 1
+      ) {
+        setMode("nominal");
+        setNomInput(toInputCurrency(Math.round(nominal)));
+      } else {
+        setMode("percent");
+        setNomInput("");
+      }
+    };
+
+    applyOne(sale.pph_nominal, sale.pph_percent, setPphMode, setPphNominalInput);
+    applyOne(sale.ajb_nominal, sale.ajb_percent, setAjbMode, setAjbNominalInput);
+    applyOne(
+      sale.agent_fee_nominal,
+      sale.agent_fee_percent,
+      setAgentFeeMode,
+      setAgentFeeNominalInput
+    );
+  }, []);
 
   const loadUnits = useCallback(async () => {
     const projectId = String(project?.id_project ?? "").trim();
@@ -639,6 +730,15 @@ export default function ModalTerjual({
         setPhase("units");
       } else if (data.legacy_sale || readOnly) {
         // Penjualan utuh sudah/akan dilihat — langsung form (perilaku lama).
+        // Prefill dari baris tersimpan agar nominal fee eksak (bisa manual).
+        if (data.legacy_sale) {
+          setHargaJualInput(toInputCurrency(data.legacy_sale.harga_jual));
+          setTotalBiayaAkuisisiInput(
+            toInputCurrency(data.legacy_sale.total_biaya_akuisisi)
+          );
+          setTanggalTerjual(normalizeDateInput(data.legacy_sale.tanggal_terjual));
+          applyFeeFromSale(data.legacy_sale);
+        }
         setPhase("form");
       } else {
         setPhase("decide");
@@ -650,7 +750,7 @@ export default function ModalTerjual({
       );
       setPhase("error");
     }
-  }, [project?.id_project, readOnly]);
+  }, [project?.id_project, readOnly, applyFeeFromSale]);
 
   useEffect(() => {
     if (!open) return;
@@ -658,6 +758,7 @@ export default function ModalTerjual({
     resetFormInputs();
     setIsSaving(false);
     setSelectedUnit(null);
+    setIsEditing(false);
     setSetupError("");
     setDraftUnits([
       { nama: "Unit 1", bobot: "50" },
@@ -687,45 +788,56 @@ export default function ModalTerjual({
     [unitsData?.mulai_tanggal, project?.mulai_tanggal]
   );
 
-  // Form terkunci: mode legacy read-only, ATAU unit yang sudah terjual.
-  const formReadOnly = selectedUnit ? selectedUnit.terjual : readOnly;
+  // Form terkunci: mode legacy read-only ATAU unit terjual — kecuali sedang
+  // dikoreksi (isEditing).
+  const formReadOnly =
+    (selectedUnit ? selectedUnit.terjual : readOnly) && !isEditing;
 
-  // Unit terakhir yang belum laku → biaya & modal kembali memakai SISA agar
-  // total genap (mengikuti aturan server di _lib/sale-units.ts).
-  const isFinalUnit = Boolean(
-    selectedUnit &&
-      !selectedUnit.terjual &&
-      unitsData &&
-      unitsData.unit_count - unitsData.sold_count === 1
-  );
+  // Unit "final" memakai SISA (biaya & modal kembali) agar total genap —
+  // mengikuti server. Saat MENGEDIT unit terjual, unit itu dianggap belum
+  // terjual dulu: final iff tidak ada unit lain yang masih tersedia.
+  const isFinalUnit = useMemo(() => {
+    if (!selectedUnit || !unitsData) return false;
+    const otherUnsold =
+      unitsData.unit_count -
+      unitsData.sold_count -
+      (selectedUnit.terjual ? 0 : 1);
+    return otherUnsold === 0;
+  }, [selectedUnit, unitsData]);
 
   // Σ modal yang sudah dikembalikan ke tiap investor pada unit terjual
-  // sebelumnya — untuk pratinjau modal kembali unit terakhir.
+  // LAIN — pratinjau modal kembali unit final. Unit yang sedang dikoreksi
+  // dikeluarkan (distribusinya akan ditulis ulang).
   const priorReturnedByAgent = useMemo(() => {
     const map = new Map<string, number>();
     if (!unitsData) return map;
     for (const unit of unitsData.units) {
       if (!unit.terjual) continue;
+      if (
+        selectedUnit &&
+        unit.id_project_unit === selectedUnit.id_project_unit
+      ) {
+        continue;
+      }
       for (const row of unit.distribusi) {
         map.set(row.id_agent, (map.get(row.id_agent) ?? 0) + toSafeNumber(row.modal));
       }
     }
     return map;
-  }, [unitsData]);
+  }, [unitsData, selectedUnit]);
 
   function pickUnit(unit: UnitInfo) {
     // Viewer read-only hanya boleh membuka unit yang SUDAH terjual (detail).
     if (!unit.terjual && readOnly) return;
 
     setSelectedUnit(unit);
+    setIsEditing(false);
 
     if (unit.sale) {
       setHargaJualInput(toInputCurrency(unit.sale.harga_jual));
       setTotalBiayaAkuisisiInput(toInputCurrency(unit.sale.total_biaya_akuisisi));
       setTanggalTerjual(normalizeDateInput(unit.sale.tanggal_terjual));
-      setPphInput(String(unit.sale.pph_percent));
-      setAjbInput(String(unit.sale.ajb_percent));
-      setAgentFeeInput(String(unit.sale.agent_fee_percent));
+      applyFeeFromSale(unit.sale);
     } else {
       setHargaJualInput(
         unit.estimasi_harga_unit > 0
@@ -737,6 +849,12 @@ export default function ModalTerjual({
       setPphInput(String(toSafeNumber(project?.pph_percent || 2.5)));
       setAjbInput(String(toSafeNumber(project?.ajb_percent || 0.5)));
       setAgentFeeInput(String(toSafeNumber(project?.agent_fee_percent || 2)));
+      setPphMode("percent");
+      setAjbMode("percent");
+      setAgentFeeMode("percent");
+      setPphNominalInput("");
+      setAjbNominalInput("");
+      setAgentFeeNominalInput("");
     }
 
     setPhase("form");
@@ -756,11 +874,29 @@ export default function ModalTerjual({
   const ajb = useMemo(() => toSafeNumber(ajbInput), [ajbInput]);
   const agentFee = useMemo(() => toSafeNumber(agentFeeInput), [agentFeeInput]);
 
-  const pphNominal = useMemo(() => hargaJual * (pph / 100), [hargaJual, pph]);
-  const ajbNominal = useMemo(() => hargaJual * (ajb / 100), [hargaJual, ajb]);
+  // Nominal efektif: mode "nominal" = angka manual (nilai akta bisa ≠ harga
+  // riil); mode "percent" = % × harga jual. Server memakai nominal ini sebagai
+  // sumber kebenaran dan menyimpan % turunannya sebagai referensi.
+  const pphNominal = useMemo(
+    () =>
+      pphMode === "nominal"
+        ? parseFormattedNumber(pphNominalInput)
+        : hargaJual * (pph / 100),
+    [pphMode, pphNominalInput, hargaJual, pph]
+  );
+  const ajbNominal = useMemo(
+    () =>
+      ajbMode === "nominal"
+        ? parseFormattedNumber(ajbNominalInput)
+        : hargaJual * (ajb / 100),
+    [ajbMode, ajbNominalInput, hargaJual, ajb]
+  );
   const agentFeeNominal = useMemo(
-    () => hargaJual * (agentFee / 100),
-    [hargaJual, agentFee]
+    () =>
+      agentFeeMode === "nominal"
+        ? parseFormattedNumber(agentFeeNominalInput)
+        : hargaJual * (agentFee / 100),
+    [agentFeeMode, agentFeeNominalInput, hargaJual, agentFee]
   );
 
   const totalBiayaTransaksi = pphNominal + ajbNominal + agentFeeNominal;
@@ -813,15 +949,16 @@ export default function ModalTerjual({
   }, [investors]);
 
   const distributions = useMemo(() => {
-    // Unit TERJUAL → tampilkan distribusi TERSIMPAN (snapshot server), bukan
-    // hitung ulang — data investor bisa berubah setelah penjualan.
-    if (selectedUnit?.terjual) {
+    // Unit TERJUAL (dan tidak sedang dikoreksi) → tampilkan distribusi
+    // TERSIMPAN (snapshot server), bukan hitung ulang — data investor bisa
+    // berubah setelah penjualan. Identitas: prop client → fallback server.
+    if (selectedUnit?.terjual && !isEditing) {
       return selectedUnit.distribusi.map((row) => {
         const identity = investorIdentityMap.get(row.id_agent);
         return {
           id_agent: row.id_agent,
-          nama: identity?.nama ?? row.id_agent,
-          avatar: identity?.avatar ?? null,
+          nama: identity?.nama ?? row.nama ?? row.id_agent,
+          avatar: identity?.avatar ?? resolveAvatarUrl(row.avatar_url),
           modal: toSafeNumber(row.modal),
           porsiPercent: toSafeNumber(row.porsi_percent),
           profit: toSafeNumber(row.profit),
@@ -830,27 +967,49 @@ export default function ModalTerjual({
       });
     }
 
-    if (!investors.length) return [];
+    // SUMBER KEBENARAN basis kalkulasi = daftar investor dari SERVER (GET
+    // units): id_agent, setoran, identitas dijamin cocok dengan distribusi
+    // tersimpan. Prop halaman hanya fallback (mis. legacy tanpa fetch) —
+    // id_agent prop yang tak cocok pernah bikin lookup "prior returned"
+    // gagal → modal kembali unit final tampil FULL, bukan sisa.
+    const serverInvestors = unitsData?.investors;
 
-    const investorBase = investors
-      .map((inv, index) => {
-        // Basis distribusi = modal DISETOR (nominal_terbayar). Fallback ke
-        // komitmen utk data lama. Saat terjual, Σsetor = pendanaan penuh.
-        const terbayar = toSafeNumber(inv?.nominal_terbayar);
-        const modal =
-          terbayar > 0 ? terbayar : toSafeNumber(inv?.nominal_komitmen);
-        const percentRaw = normalizePercent(inv?.persentase_kepemilikan);
-        const id_agent = String(inv?.id_agent ?? "").trim();
+    const investorBase = (
+      serverInvestors && serverInvestors.length
+        ? serverInvestors.map((inv) => {
+            const identity = investorIdentityMap.get(inv.id_agent);
+            const terbayar = toSafeNumber(inv.nominal_terbayar);
+            return {
+              id_agent: inv.id_agent,
+              nama: identity?.nama ?? inv.nama ?? inv.id_agent,
+              avatar: identity?.avatar ?? resolveAvatarUrl(inv.avatar_url),
+              modal:
+                terbayar > 0
+                  ? terbayar
+                  : toSafeNumber(inv.nominal_komitmen),
+              percentRaw: 0,
+            };
+          })
+        : investors
+            .map((inv, index) => {
+              // Basis distribusi = modal DISETOR (nominal_terbayar). Fallback
+              // ke komitmen utk data lama.
+              const terbayar = toSafeNumber(inv?.nominal_terbayar);
+              const modal =
+                terbayar > 0 ? terbayar : toSafeNumber(inv?.nominal_komitmen);
+              const percentRaw = normalizePercent(inv?.persentase_kepemilikan);
+              const id_agent = String(inv?.id_agent ?? "").trim();
 
-        return {
-          id_agent,
-          nama: inv?.nama ?? id_agent ?? `Investor ${index + 1}`,
-          avatar: getInvestorAvatar(inv),
-          modal,
-          percentRaw,
-        };
-      })
-      .filter((item) => item.id_agent.length > 0);
+              return {
+                id_agent,
+                nama: inv?.nama ?? id_agent ?? `Investor ${index + 1}`,
+                avatar: getInvestorAvatar(inv),
+                modal,
+                percentRaw,
+              };
+            })
+            .filter((item) => item.id_agent.length > 0)
+    );
 
     if (!investorBase.length) return [];
 
@@ -908,8 +1067,10 @@ export default function ModalTerjual({
     });
   }, [
     investors,
+    unitsData?.investors,
     profitBersih,
     selectedUnit,
+    isEditing,
     isFinalUnit,
     priorReturnedByAgent,
     investorIdentityMap,
@@ -1092,9 +1253,13 @@ export default function ModalTerjual({
       : selectedUnit
       ? formReadOnly
         ? `Detail Penjualan — ${selectedUnit.nama_unit}`
+        : isEditing
+        ? `Edit Penjualan — ${selectedUnit.nama_unit}`
         : `Input Penjualan — ${selectedUnit.nama_unit}`
       : formReadOnly
       ? "Detail Penjualan Properti"
+      : isEditing
+      ? "Edit Penjualan Properti"
       : "Input Penjualan Properti";
 
   const unitsRemaining = unitsData
@@ -1777,70 +1942,157 @@ export default function ModalTerjual({
                     <p className="mt-1 text-sm text-slate-400">
                       {formReadOnly
                         ? "Komponen biaya saat realisasi penjualan disimpan."
-                        : "Semua biaya dihitung langsung dari harga jual final."}
+                        : "Isi % untuk hitung otomatis dari harga jual — atau ketik nominal langsung bila dasar pajaknya (nilai akta) berbeda dari harga jual."}
                     </p>
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                    <div className="rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
-                      <div className="mb-3 flex items-center gap-2 text-sm text-slate-300">
-                        <Percent className="h-4 w-4 text-emerald-300" />
-                        PPh
-                      </div>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        disabled={formReadOnly}
-                        value={pphInput}
-                        onChange={(e) => setPphInput(e.target.value)}
-                        placeholder="0"
-                        className="mb-3 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-white outline-none transition placeholder:text-slate-500 focus:border-emerald-400/40 disabled:cursor-default disabled:opacity-90 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      />
-                      <div className="text-xs text-slate-400">Nominal</div>
-                      <div className="mt-1 text-lg font-semibold text-white">
-                        {formatIDR(pphNominal)}
-                      </div>
-                    </div>
+                    {(
+                      [
+                        {
+                          key: "pph",
+                          label: "PPh",
+                          icon: <Percent className="h-4 w-4 text-emerald-300" />,
+                          focus: "focus:border-emerald-400/40",
+                          pctValue: pphInput,
+                          setPct: setPphInput,
+                          nomValue: pphNominalInput,
+                          setNom: setPphNominalInput,
+                          mode: pphMode,
+                          setMode: setPphMode,
+                          nominal: pphNominal,
+                        },
+                        {
+                          key: "ajb",
+                          label: "AJB",
+                          icon: <Percent className="h-4 w-4 text-cyan-300" />,
+                          focus: "focus:border-cyan-400/40",
+                          pctValue: ajbInput,
+                          setPct: setAjbInput,
+                          nomValue: ajbNominalInput,
+                          setNom: setAjbNominalInput,
+                          mode: ajbMode,
+                          setMode: setAjbMode,
+                          nominal: ajbNominal,
+                        },
+                        {
+                          key: "agent_fee",
+                          label: "Agent Fee",
+                          icon: <Wallet className="h-4 w-4 text-violet-300" />,
+                          focus: "focus:border-violet-400/40",
+                          pctValue: agentFeeInput,
+                          setPct: setAgentFeeInput,
+                          nomValue: agentFeeNominalInput,
+                          setNom: setAgentFeeNominalInput,
+                          mode: agentFeeMode,
+                          setMode: setAgentFeeMode,
+                          nominal: agentFeeNominal,
+                        },
+                      ] as const
+                    ).map((fee) => {
+                      const isManual = fee.mode === "nominal";
+                      const derivedPercent =
+                        hargaJual > 0 ? (fee.nominal / hargaJual) * 100 : 0;
 
-                    <div className="rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
-                      <div className="mb-3 flex items-center gap-2 text-sm text-slate-300">
-                        <Percent className="h-4 w-4 text-cyan-300" />
-                        AJB
-                      </div>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        disabled={formReadOnly}
-                        value={ajbInput}
-                        onChange={(e) => setAjbInput(e.target.value)}
-                        placeholder="0"
-                        className="mb-3 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/40 disabled:cursor-default disabled:opacity-90 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      />
-                      <div className="text-xs text-slate-400">Nominal</div>
-                      <div className="mt-1 text-lg font-semibold text-white">
-                        {formatIDR(ajbNominal)}
-                      </div>
-                    </div>
+                      return (
+                        <div
+                          key={fee.key}
+                          className={`rounded-[22px] border p-4 transition ${
+                            isManual
+                              ? "border-amber-300/25 bg-amber-400/[0.06]"
+                              : "border-white/10 bg-slate-950/40"
+                          }`}
+                        >
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-sm text-slate-300">
+                              {fee.icon}
+                              {fee.label}
+                            </div>
+                            {isManual ? (
+                              <span className="rounded-full border border-amber-300/25 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
+                                Manual
+                              </span>
+                            ) : null}
+                          </div>
 
-                    <div className="rounded-[22px] border border-white/10 bg-slate-950/40 p-4">
-                      <div className="mb-3 flex items-center gap-2 text-sm text-slate-300">
-                        <Wallet className="h-4 w-4 text-violet-300" />
-                        Agent Fee
-                      </div>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        disabled={formReadOnly}
-                        value={agentFeeInput}
-                        onChange={(e) => setAgentFeeInput(e.target.value)}
-                        placeholder="0"
-                        className="mb-3 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-white outline-none transition placeholder:text-slate-500 focus:border-violet-400/40 disabled:cursor-default disabled:opacity-90 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      />
-                      <div className="text-xs text-slate-400">Nominal</div>
-                      <div className="mt-1 text-lg font-semibold text-white">
-                        {formatIDR(agentFeeNominal)}
-                      </div>
-                    </div>
+                          <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-slate-500">
+                            Persen (%)
+                          </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            disabled={formReadOnly}
+                            value={
+                              isManual
+                                ? derivedPercent.toLocaleString("id-ID", {
+                                    maximumFractionDigits: 3,
+                                  })
+                                : fee.pctValue
+                            }
+                            onChange={(e) => {
+                              // Mengetik % → kembali ke mode otomatis.
+                              fee.setMode("percent");
+                              fee.setNom("");
+                              fee.setPct(e.target.value);
+                            }}
+                            placeholder="0"
+                            className={`mb-3 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-white outline-none transition placeholder:text-slate-500 disabled:cursor-default disabled:opacity-90 ${fee.focus} ${
+                              isManual ? "opacity-70" : ""
+                            } [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`}
+                          />
+
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
+                              Nominal (Rp)
+                            </div>
+                            {isManual && !formReadOnly ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  fee.setMode("percent");
+                                  fee.setNom("");
+                                }}
+                                className="text-[10px] font-medium text-cyan-300 transition hover:text-cyan-200"
+                              >
+                                Ikuti % lagi
+                              </button>
+                            ) : null}
+                          </div>
+                          <input
+                            inputMode="numeric"
+                            disabled={formReadOnly}
+                            value={
+                              isManual
+                                ? fee.nomValue
+                                : toInputCurrency(Math.round(fee.nominal))
+                            }
+                            onChange={(e) => {
+                              // Mengetik nominal → override manual.
+                              fee.setMode("nominal");
+                              fee.setNom(
+                                toInputCurrency(
+                                  parseFormattedNumber(e.target.value)
+                                )
+                              );
+                            }}
+                            placeholder="0"
+                            className={`w-full rounded-xl border px-3 py-2.5 text-lg font-semibold text-white outline-none transition placeholder:text-slate-500 disabled:cursor-default disabled:opacity-90 ${
+                              isManual
+                                ? "border-amber-300/30 bg-amber-400/[0.08] focus:border-amber-300/50"
+                                : `border-white/10 bg-white/5 ${fee.focus}`
+                            }`}
+                          />
+
+                          <div className="mt-2 text-[11px] leading-4 text-slate-500">
+                            {isManual
+                              ? `≈ ${derivedPercent.toLocaleString("id-ID", {
+                                  maximumFractionDigits: 2,
+                                })}% dari harga jual`
+                              : "Otomatis: % × harga jual"}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </section>
 
@@ -1851,7 +2103,7 @@ export default function ModalTerjual({
                         Distribusi Investor
                       </h3>
                       <p className="mt-1 text-sm text-slate-400">
-                        {selectedUnit?.terjual
+                        {selectedUnit?.terjual && !isEditing
                           ? "Distribusi tersimpan saat unit ini terjual (snapshot)."
                           : selectedUnit
                           ? `Modal kembali ${
@@ -2076,6 +2328,7 @@ export default function ModalTerjual({
                     type="button"
                     onClick={() => {
                       setSelectedUnit(null);
+                      setIsEditing(false);
                       setPhase("units");
                     }}
                     disabled={isSaving}
@@ -2122,6 +2375,16 @@ export default function ModalTerjual({
                   </button>
                 ) : null}
 
+                {phase === "form" && formReadOnly ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="inline-flex min-w-[150px] items-center justify-center gap-2 rounded-2xl border border-amber-300/25 bg-amber-400/10 px-5 py-3 text-sm font-semibold text-amber-200 transition hover:bg-amber-400/20"
+                  >
+                    Edit Data Penjualan
+                  </button>
+                ) : null}
+
                 {phase === "form" && !formReadOnly ? (
                   <button
                     type="button"
@@ -2131,6 +2394,8 @@ export default function ModalTerjual({
                   >
                     {isSaving ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : isEditing ? (
+                      "Simpan Perubahan"
                     ) : selectedUnit ? (
                       `Simpan Penjualan ${selectedUnit.nama_unit}`
                     ) : (

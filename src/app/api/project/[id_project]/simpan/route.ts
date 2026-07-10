@@ -31,6 +31,11 @@ type SimpanPayload = {
   pph_percent: number;
   ajb_percent: number;
   agent_fee_percent: number;
+  // Nominal fee eksplisit (opsional) — dipakai bila nilai akta ≠ harga riil
+  // (mis. PPh/AJB dihitung dari nilai akta 700jt padahal laku 950jt).
+  pph_nominal?: number;
+  ajb_nominal?: number;
+  agent_fee_nominal?: number;
 };
 
 function isValidDateOnly(value: unknown): value is string {
@@ -54,6 +59,37 @@ function normalizeFeePercent(raw: unknown): number {
   if (!Number.isFinite(num) || num < 0) return 0;
   if (num > 100) return 100;
   return round6(num);
+}
+
+/**
+ * Nominal fee = SUMBER KEBENARAN. Jika client mengirim nominal eksplisit
+ * (nilai akta bisa ≠ harga riil), pakai itu; percent disimpan sebagai
+ * referensi turunan (nominal/harga, clamp ke kapasitas kolom 999.99).
+ * Tanpa nominal → hitung dari percent (perilaku lama).
+ */
+function resolveFee(
+  nominalRaw: unknown,
+  percentRaw: unknown,
+  hargaJual: number
+): { nominal: number; percent: number } {
+  const nominalNum = toNum(nominalRaw);
+  const hasNominal =
+    nominalRaw !== undefined &&
+    nominalRaw !== null &&
+    Number.isFinite(nominalNum) &&
+    nominalNum >= 0;
+
+  if (hasNominal) {
+    const nominal = round2(nominalNum);
+    const percent =
+      hargaJual > 0
+        ? Math.min(999.99, round6((nominal / hargaJual) * 100))
+        : 0;
+    return { nominal, percent };
+  }
+
+  const percent = normalizeFeePercent(percentRaw);
+  return { nominal: round2((percent / 100) * hargaJual), percent };
 }
 
 export async function POST(
@@ -89,9 +125,13 @@ export async function POST(
       );
     }
 
-    const pph_percent = normalizeFeePercent(body?.pph_percent);
-    const ajb_percent = normalizeFeePercent(body?.ajb_percent);
-    const agent_fee_percent = normalizeFeePercent(body?.agent_fee_percent);
+    const pphFee = resolveFee(body?.pph_nominal, body?.pph_percent, harga_jual);
+    const ajbFee = resolveFee(body?.ajb_nominal, body?.ajb_percent, harga_jual);
+    const agentFee = resolveFee(
+      body?.agent_fee_nominal,
+      body?.agent_fee_percent,
+      harga_jual
+    );
 
     const unitIdRaw = body?.id_project_unit;
     const unitId =
@@ -165,16 +205,26 @@ export async function POST(
             message: "Unit tidak ditemukan pada project ini.",
           };
         }
-        if (unit.sale) {
-          return {
-            status: 409 as const,
-            message: `Unit "${unit.nama_unit}" sudah tercatat terjual.`,
-          };
-        }
 
-        biayaAkuisisi = computeUnitCost(ctx, unitId);
+        // Unit sudah terjual → mode KOREKSI: baris lama di-update, distribusi
+        // ditulis ulang. Biaya dihitung seolah unit ini belum terjual (baris
+        // lamanya dikeluarkan dari himpunan "terjual").
+        if (unit.sale) {
+          replaceSaleId = unit.sale.id_project_selesai;
+        }
+        const ctxForCost = unit.sale
+          ? {
+              ...ctx,
+              units: ctx.units.map((u) =>
+                u.id_project_unit === unitId ? { ...u, sale: null } : u
+              ),
+            }
+          : ctx;
+
+        biayaAkuisisi = computeUnitCost(ctxForCost, unitId);
         bobotPersen = unit.bobot_persen;
-        isFinalSale = ctx.units.filter((u) => !u.sale).length === 1;
+        isFinalSale =
+          ctxForCost.units.filter((u) => !u.sale).length === 1;
         unitLabel = unit.nama_unit;
       } else {
         if (unitId !== null) {
@@ -198,12 +248,9 @@ export async function POST(
         replaceSaleId = ctx.legacySale?.id_project_selesai ?? null;
       }
 
-      // ── Hitung ulang finansial ──
-      const pphNominal = round2((pph_percent / 100) * harga_jual);
-      const ajbNominal = round2((ajb_percent / 100) * harga_jual);
-      const agentFeeNominal = round2((agent_fee_percent / 100) * harga_jual);
+      // ── Hitung ulang finansial (nominal fee = sumber kebenaran) ──
       const total_biaya_transaksi = round2(
-        pphNominal + ajbNominal + agentFeeNominal
+        pphFee.nominal + ajbFee.nominal + agentFee.nominal
       );
       const profit_kotor = round2(harga_jual - biayaAkuisisi);
       const profit_bersih = round2(profit_kotor - total_biaya_transaksi);
@@ -260,9 +307,12 @@ export async function POST(
         harga_jual: new Prisma.Decimal(harga_jual),
         total_biaya_akuisisi: new Prisma.Decimal(biayaAkuisisi),
         profit_kotor: new Prisma.Decimal(profit_kotor),
-        pph_percent: new Prisma.Decimal(pph_percent),
-        ajb_percent: new Prisma.Decimal(ajb_percent),
-        agent_fee_percent: new Prisma.Decimal(agent_fee_percent),
+        pph_percent: new Prisma.Decimal(pphFee.percent),
+        ajb_percent: new Prisma.Decimal(ajbFee.percent),
+        agent_fee_percent: new Prisma.Decimal(agentFee.percent),
+        pph_nominal: new Prisma.Decimal(pphFee.nominal),
+        ajb_nominal: new Prisma.Decimal(ajbFee.nominal),
+        agent_fee_nominal: new Prisma.Decimal(agentFee.nominal),
         total_biaya_transaksi: new Prisma.Decimal(total_biaya_transaksi),
         profit_bersih: new Prisma.Decimal(profit_bersih),
         roi_bersih: new Prisma.Decimal(roi_bersih),
@@ -313,6 +363,7 @@ export async function POST(
         data: {
           id_project_selesai: String(saleId),
           unit: unitLabel,
+          diperbarui: replaceSaleId !== null,
           semua_terjual: allSold,
           biaya_akuisisi: biayaAkuisisi,
           profit_kotor,
@@ -333,7 +384,9 @@ export async function POST(
     return NextResponse.json({
       success: true,
       message: result.data.unit
-        ? `Penjualan unit "${result.data.unit}" tersimpan.`
+        ? `Penjualan unit "${result.data.unit}" ${
+            result.data.diperbarui ? "diperbarui" : "tersimpan"
+          }.`
         : "Data project selesai dan distribusi investor berhasil disimpan.",
       data: result.data,
     });

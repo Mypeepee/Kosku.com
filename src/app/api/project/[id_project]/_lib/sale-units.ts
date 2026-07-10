@@ -57,6 +57,9 @@ export type SaleRecord = {
   pph_percent: number;
   ajb_percent: number;
   agent_fee_percent: number;
+  pph_nominal: number;
+  ajb_nominal: number;
+  agent_fee_nominal: number;
   total_biaya_transaksi: number;
   profit_bersih: number;
   roi_bersih: number;
@@ -100,6 +103,9 @@ function mapSaleRow(row: {
   pph_percent: Prisma.Decimal;
   ajb_percent: Prisma.Decimal;
   agent_fee_percent: Prisma.Decimal;
+  pph_nominal: Prisma.Decimal;
+  ajb_nominal: Prisma.Decimal;
+  agent_fee_nominal: Prisma.Decimal;
   total_biaya_transaksi: Prisma.Decimal;
   profit_bersih: Prisma.Decimal;
   roi_bersih: Prisma.Decimal;
@@ -116,6 +122,9 @@ function mapSaleRow(row: {
     pph_percent: toNum(row.pph_percent),
     ajb_percent: toNum(row.ajb_percent),
     agent_fee_percent: toNum(row.agent_fee_percent),
+    pph_nominal: toNum(row.pph_nominal),
+    ajb_nominal: toNum(row.ajb_nominal),
+    agent_fee_nominal: toNum(row.agent_fee_nominal),
     total_biaya_transaksi: toNum(row.total_biaya_transaksi),
     profit_bersih: toNum(row.profit_bersih),
     roi_bersih: toNum(row.roi_bersih),

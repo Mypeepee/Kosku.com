@@ -27,6 +27,9 @@ function serializeSale(sale: {
   pph_percent: number;
   ajb_percent: number;
   agent_fee_percent: number;
+  pph_nominal: number;
+  ajb_nominal: number;
+  agent_fee_nominal: number;
   total_biaya_transaksi: number;
   profit_bersih: number;
   roi_bersih: number;
@@ -44,6 +47,9 @@ function serializeSale(sale: {
     pph_percent: sale.pph_percent,
     ajb_percent: sale.ajb_percent,
     agent_fee_percent: sale.agent_fee_percent,
+    pph_nominal: sale.pph_nominal,
+    ajb_nominal: sale.ajb_nominal,
+    agent_fee_nominal: sale.agent_fee_nominal,
     total_biaya_transaksi: sale.total_biaya_transaksi,
     profit_bersih: sale.profit_bersih,
     roi_bersih: sale.roi_bersih,
@@ -65,6 +71,33 @@ export async function GET(
       );
     }
 
+    // Investor project dari SERVER — sumber kebenaran identitas & setoran
+    // untuk pratinjau distribusi di client (jangan bergantung prop halaman;
+    // id_agent yang tak cocok pernah bikin modal-kembali unit final salah).
+    const investorRows = await prisma.projectInvestor.findMany({
+      where: { id_project },
+      orderBy: { id_project_investor: "asc" },
+      select: {
+        id_agent: true,
+        nominal_komitmen: true,
+        nominal_terbayar: true,
+        agent: {
+          select: {
+            foto_profil_url: true,
+            pengguna: { select: { nama_lengkap: true } },
+          },
+        },
+      },
+    });
+
+    const investors = investorRows.map((row) => ({
+      id_agent: row.id_agent,
+      nama: row.agent?.pengguna?.nama_lengkap ?? null,
+      avatar_url: row.agent?.foto_profil_url ?? null,
+      nominal_komitmen: toNum(row.nominal_komitmen),
+      nominal_terbayar: toNum(row.nominal_terbayar),
+    }));
+
     // Distribusi tersimpan per penjualan (untuk tampilan riwayat/read-only).
     const saleIds = [
       ...ctx.units.filter((u) => u.sale).map((u) => u.sale!.id_project_selesai),
@@ -81,6 +114,14 @@ export async function GET(
             porsi_percent: true,
             profit: true,
             total_diterima: true,
+            // Identitas dari server — tampilan riwayat tidak bergantung pada
+            // bentuk prop investor di client (fix nama/avatar hilang).
+            agent: {
+              select: {
+                foto_profil_url: true,
+                pengguna: { select: { nama_lengkap: true } },
+              },
+            },
           },
         })
       : [];
@@ -91,6 +132,8 @@ export async function GET(
       const list = distribusiBySale.get(key) ?? [];
       list.push({
         id_agent: row.id_agent,
+        nama: row.agent?.pengguna?.nama_lengkap ?? null,
+        avatar_url: row.agent?.foto_profil_url ?? null,
         modal: toNum(row.modal),
         porsi_percent: toNum(row.porsi_percent),
         profit: toNum(row.profit),
@@ -164,6 +207,7 @@ export async function GET(
         locked: ctx.soldCount > 0 || Boolean(ctx.legacySale),
         total_biaya_project: ctx.totalBiaya,
         estimasi_harga_jual: estimasiJual,
+        investors,
         units,
         legacy_sale: ctx.legacySale
           ? {
