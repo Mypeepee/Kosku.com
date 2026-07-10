@@ -176,6 +176,9 @@ export default function ManageFundScreen({
           selectedWallet={selectedWallet}
           onSelectWallet={setSelectedWallet}
           onBack={() => router.back()}
+          danaMasuk={data.danaMasuk}
+          danaKeluar={data.danaKeluar}
+          sisaKas={data.sisaKas}
         />
 
         <section className="space-y-5 rounded-[30px] border border-white/10 bg-white/[0.03] p-5 sm:p-6">
