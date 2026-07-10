@@ -2,6 +2,8 @@
 const nextConfig = {
   reactStrictMode: false,
   swcMinify: true,
+  // Jangan kirim header "X-Powered-By: Next.js" (kecil, tapi gratis).
+  poweredByHeader: false,
   // Jangan gagalkan production build hanya karena error type/lint.
   // Kode tetap dikompilasi & berjalan (type dihapus saat build). Utang
   // type-strictness bisa dibereskan bertahap tanpa memblokir deploy.
@@ -15,6 +17,22 @@ const nextConfig = {
   // Exclude heavy Node-only packages from webpack bundling (runs only on server)
   experimental: {
     serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist", "pdf-lib", "docxtemplater", "pizzip", "puppeteer", "ffmpeg-static"],
+
+    // Tree-shake barrel imports dari library besar. Tanpa ini, `import { X }
+    // from "lucide-react"` ikut menyeret SELURUH paket ke bundle browser.
+    // Berdampak besar ke ukuran JS halaman (lucide 60 file, framer 127 file,
+    // iconify 228 file).
+    optimizePackageImports: [
+      "@iconify/react",
+      "lucide-react",
+      "framer-motion",
+      "date-fns",
+      "@radix-ui/react-dialog",
+      "@radix-ui/react-select",
+      "@radix-ui/react-label",
+      "react-hot-toast",
+      "sonner",
+    ],
   },
 
   webpack: (config, { isServer }) => {
@@ -34,6 +52,9 @@ const nextConfig = {
   },
 
   images: {
+    // Cache hasil optimasi gambar 30 hari, jadi tidak di-encode ulang tiap
+    // request. Krusial untuk server tunggal (encoding gambar = beban CPU).
+    minimumCacheTTL: 2592000,
     remotePatterns: [
       // Avatar Google (OAuth)
       {

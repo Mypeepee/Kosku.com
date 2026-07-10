@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { writeFile, readFile, unlink } from "fs/promises";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -16,15 +16,23 @@ const execFileAsync = promisify(execFile);
 function findSoffice(): string {
   const candidates = [
     process.env.SOFFICE_PATH,
+    // Windows (lokasi default installer) — pakai soffice.com dulu agar konversi
+    // headless berjalan sinkron (soffice.exe bisa detach & PDF belum siap).
+    "C:/Program Files/LibreOffice/program/soffice.com",
+    "C:/Program Files (x86)/LibreOffice/program/soffice.com",
+    "C:/Program Files/LibreOffice/program/soffice.exe",
+    "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
+    // macOS / Linux
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
     "/usr/bin/soffice",
     "/usr/local/bin/soffice",
+    "/opt/libreoffice/program/soffice",
   ].filter(Boolean) as string[];
 
   for (const p of candidates) {
-    try { readFileSync(p); return p; } catch { /* try next */ }
+    try { if (existsSync(p)) return p; } catch { /* try next */ }
   }
-  throw new Error("LibreOffice (soffice) tidak ditemukan. Set SOFFICE_PATH di .env");
+  throw new Error("LibreOffice (soffice) tidak ditemukan. Install LibreOffice atau set SOFFICE_PATH di .env");
 }
 
 // ── Format tanggal ────────────────────────────────────────────────────────────
@@ -173,7 +181,7 @@ export async function POST(req: Request) {
     const safeName = sanitizeFilename(namaPemohon);
     const filename = `Permohonan_AktaGrosse_${safeName}_${suffix}.pdf`;
 
-    return new NextResponse(finalPdf, {
+    return new NextResponse(finalPdf as unknown as BodyInit, {
       status: 200,
       headers: {
         "Content-Type":        "application/pdf",

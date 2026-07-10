@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { writeFile, readFile, unlink } from "fs/promises";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -8,6 +8,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import path from "path";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -85,19 +86,44 @@ function toInt(raw: string | undefined): number {
   return parseInt((raw ?? "").replace(/\D/g, "") || "0", 10);
 }
 
+const ROMAWI = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"];
+
+function pad2(n: number): string { return String(n).padStart(2, "0"); }
+
+/** "" / whitespace → null, selain itu string yang sudah di-trim. */
+function nn(v: string | undefined): string | null {
+  const t = (v ?? "").trim();
+  return t ? t : null;
+}
+
+/** "YYYY-MM-DD" → Date (UTC midnight, agar kolom DATE tidak bergeser TZ). */
+function toDateOnly(iso: string | undefined): Date | null {
+  const m = (iso ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
 // ── LibreOffice ──────────────────────────────────────────────────────────────
 
 function findSoffice(): string {
   const candidates = [
     process.env.SOFFICE_PATH,
+    // Windows (lokasi default installer) — pakai soffice.com dulu agar konversi
+    // headless berjalan sinkron (soffice.exe bisa detach & PDF belum siap).
+    "C:/Program Files/LibreOffice/program/soffice.com",
+    "C:/Program Files (x86)/LibreOffice/program/soffice.com",
+    "C:/Program Files/LibreOffice/program/soffice.exe",
+    "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
+    // macOS / Linux
     "/Applications/LibreOffice.app/Contents/MacOS/soffice",
     "/usr/bin/soffice",
     "/usr/local/bin/soffice",
+    "/opt/libreoffice/program/soffice",
   ].filter(Boolean) as string[];
   for (const p of candidates) {
-    try { readFileSync(p); return p; } catch { /* try next */ }
+    try { if (existsSync(p)) return p; } catch { /* try next */ }
   }
-  throw new Error("LibreOffice (soffice) tidak ditemukan. Set SOFFICE_PATH di .env");
+  throw new Error("LibreOffice (soffice) tidak ditemukan. Install LibreOffice atau set SOFFICE_PATH di .env");
 }
 
 async function fillDocxTemplate(templatePath: string, data: Record<string, string>): Promise<Buffer> {
@@ -164,8 +190,81 @@ export async function POST(req: Request) {
     const t1Date      = fromISO(body.tahap1_tanggal ?? "");
     const ttdDate     = fromISO(body.tanggal_ttd || tanggalAkta);
 
+    // ── Reservasi nomor akta (auto-urut server) + simpan ke DB ────────────────
+    // Nomor: NN/AKB/[romawi]/[tahun], urut reset per bulan+tahun. Insert baris
+    // dulu agar nomor terkunci secara atomik; kalau bentrok (P2002) coba lagi.
+    const aktaDateObj = parseISO(tanggalAkta) ?? new Date();
+    const bulan = aktaDateObj.getMonth() + 1;
+    const tahun = aktaDateObj.getFullYear();
+    const idAgent = (session.user as { agentId?: string | null }).agentId ?? null;
+
+    const dbBase = {
+      bulan, tahun,
+      tanggal_akta:         toDateOnly(tanggalAkta) ?? new Date(),
+      pukul:                body.pukul?.trim() || "10.00",
+      p1_nama:              body.p1_nama.trim(),
+      p1_nik:               nn(body.p1_nik),
+      p1_tempat_lahir:      nn(body.p1_tempat_lahir),
+      p1_tgl_lahir:         nn(body.p1_tgl_lahir),
+      p1_warga_negara:      body.p1_warga_negara?.trim() || "Indonesia",
+      p1_pekerjaan:         nn(body.p1_pekerjaan),
+      p1_alamat:            nn(body.p1_alamat),
+      p2_nama:              body.p2_nama.trim(),
+      p2_nik:               nn(body.p2_nik),
+      p2_tempat_lahir:      nn(body.p2_tempat_lahir),
+      p2_tgl_lahir:         nn(body.p2_tgl_lahir),
+      p2_warga_negara:      body.p2_warga_negara?.trim() || "Indonesia",
+      p2_pekerjaan:         nn(body.p2_pekerjaan),
+      p2_alamat:            nn(body.p2_alamat),
+      risalah_nomor:        nn(body.risalah_nomor),
+      risalah_tanggal:      nn(body.risalah_tanggal),
+      kantor_lelang:        nn(body.kantor_lelang),
+      jenis_hak:            nn(body.jenis_hak),
+      nib:                  nn(body.nib),
+      luas:                 nn(body.luas),
+      alamat_obyek:         nn(body.alamat_obyek),
+      alamat_obyek_lengkap: nn(body.alamat_obyek_lengkap) ?? nn(body.alamat_obyek),
+      obyek_provinsi:       nn(body.obyek_provinsi),
+      obyek_kabupaten:      nn(body.obyek_kabupaten),
+      obyek_kecamatan:      nn(body.obyek_kecamatan),
+      obyek_kelurahan:      nn(body.obyek_kelurahan),
+      kompensasi_total:     kompensasiTotal,
+      tahap1_jumlah:        tahap1Jumlah,
+      tahap2_jumlah:        tahap2Jumlah,
+      tahap1_tanggal:       toDateOnly(body.tahap1_tanggal),
+      batas_tanggal:        toDateOnly(body.batas_tanggal),
+      pengadilan:           nn(body.pengadilan),
+      kota_ttd:             body.kota_ttd?.trim() || "Surabaya",
+      tanggal_ttd:          toDateOnly(body.tanggal_ttd) ?? toDateOnly(tanggalAkta),
+      id_agent:             idAgent,
+    };
+
+    let nomor = "";
+    let recordId: bigint | null = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const last = await prisma.aktaKesepakatanBersama.findFirst({
+        where: { tahun, bulan },
+        orderBy: { nomor_urut: "desc" },
+        select: { nomor_urut: true },
+      });
+      const urut = (last?.nomor_urut ?? 0) + 1;
+      const candidate = `${pad2(urut)}/AKB/${ROMAWI[bulan - 1]}/${tahun}`;
+      try {
+        const rec = await prisma.aktaKesepakatanBersama.create({
+          data: { ...dbBase, nomor: candidate, nomor_urut: urut },
+          select: { id: true },
+        });
+        nomor = candidate;
+        recordId = rec.id;
+        break;
+      } catch (e) {
+        if ((e as { code?: string }).code === "P2002" && attempt < 5) continue;
+        throw e;
+      }
+    }
+
     const templateData: Record<string, string> = {
-      nomor:             body.nomor?.trim() || "",
+      nomor:             nomor,
       hari:              aktaDate.hari,
       tanggal:           aktaDate.tanggal,
       tanggal_terbilang: aktaDate.terbilang,
@@ -229,12 +328,22 @@ export async function POST(req: Request) {
       "src/app/dashboard/surat/components/templates/Akta_kesepakatan_bersama_TemplateSolusindo.docx",
     );
 
-    const filledDocx = await fillDocxTemplate(templatePath, templateData);
-    const pdf        = await docxToPdf(filledDocx);
+    let pdf: Buffer;
+    try {
+      const filledDocx = await fillDocxTemplate(templatePath, templateData);
+      pdf = await docxToPdf(filledDocx);
+    } catch (genErr) {
+      // PDF gagal setelah baris DB dibuat → batalkan supaya nomor tidak "hangus".
+      if (recordId != null) {
+        await prisma.aktaKesepakatanBersama.delete({ where: { id: recordId } }).catch(() => {});
+      }
+      throw genErr;
+    }
 
     const safeName = (body.p2_nama?.trim() || "Pihak2")
       .replace(/[^a-zA-Z0-9 _-]/g, "").replace(/\s+/g, "_").slice(0, 40);
-    const filename = `AktaKesepakatan_${safeName}.pdf`;
+    const safeNomor = nomor.replace(/\//g, "-");
+    const filename = `AktaKesepakatan_${safeNomor}_${safeName}.pdf`;
 
     return new NextResponse(pdf as unknown as BodyInit, {
       status: 200,
@@ -242,6 +351,7 @@ export async function POST(req: Request) {
         "Content-Type":        "application/pdf",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Content-Length":      String(pdf.length),
+        "X-Akta-Nomor":        nomor,
       },
     });
   } catch (err) {

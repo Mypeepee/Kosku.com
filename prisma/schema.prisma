@@ -1364,3 +1364,71 @@ enum prioritas_tugas_enum {
   SEDANG
   RENDAH
 }
+
+// ── Akta Kesepakatan Bersama: register akta + arsip seluruh input generate ─────
+//    Nomor akta auto-urut server (reset per bulan+tahun): NN/AKB/[romawi]/[tahun].
+//    Menyimpan snapshot data pihak (OCR KTP), risalah lelang, objek, dan nominal
+//    eksekusi/kompensasi persis seperti yang dipakai saat men-generate PDF.
+model AktaKesepakatanBersama {
+  id         BigInt @id @default(autoincrement())
+  nomor      String @unique @db.VarChar(60)
+  nomor_urut Int
+  bulan      Int
+  tahun      Int
+
+  tanggal_akta DateTime @db.Date
+  pukul        String?  @db.VarChar(10)
+
+  // ── Pihak Pertama (pemenang lelang) — dari OCR KTP ──
+  p1_nama         String  @db.VarChar(200)
+  p1_nik          String? @db.VarChar(20)
+  p1_tempat_lahir String? @db.VarChar(100)
+  p1_tgl_lahir    String? @db.VarChar(30)
+  p1_warga_negara String? @db.VarChar(50)
+  p1_pekerjaan    String? @db.VarChar(100)
+  p1_alamat       String?
+
+  // ── Pihak Kedua (debitur/penghuni) — dari OCR KTP ──
+  p2_nama         String  @db.VarChar(200)
+  p2_nik          String? @db.VarChar(20)
+  p2_tempat_lahir String? @db.VarChar(100)
+  p2_tgl_lahir    String? @db.VarChar(30)
+  p2_warga_negara String? @db.VarChar(50)
+  p2_pekerjaan    String? @db.VarChar(100)
+  p2_alamat       String?
+
+  // ── Risalah lelang & objek ──
+  risalah_nomor        String? @db.VarChar(100)
+  risalah_tanggal      String? @db.VarChar(30)
+  kantor_lelang        String? @db.VarChar(200)
+  jenis_hak            String? @db.VarChar(100)
+  nib                  String? @db.VarChar(100)
+  luas                 String? @db.VarChar(50)
+  alamat_obyek         String?
+  alamat_obyek_lengkap String?
+  obyek_provinsi       String? @db.VarChar(100)
+  obyek_kabupaten      String? @db.VarChar(100)
+  obyek_kecamatan      String? @db.VarChar(100)
+  obyek_kelurahan      String? @db.VarChar(100)
+
+  // ── Nominal eksekusi / kompensasi ──
+  kompensasi_total Decimal   @default(0) @db.Decimal(20, 2)
+  tahap1_jumlah    Decimal   @default(0) @db.Decimal(20, 2)
+  tahap2_jumlah    Decimal   @default(0) @db.Decimal(20, 2)
+  tahap1_tanggal   DateTime? @db.Date
+  batas_tanggal    DateTime? @db.Date
+
+  // ── Meta penandatanganan ──
+  pengadilan  String?   @db.VarChar(200)
+  kota_ttd    String?   @db.VarChar(100)
+  tanggal_ttd DateTime? @db.Date
+  id_agent    String?   @db.VarChar(20)
+
+  dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
+  diperbarui_pada DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@unique([tahun, bulan, nomor_urut], map: "akb_periode_urut_unique")
+  @@index([tahun, bulan], map: "idx_akb_periode")
+  @@index([p2_nama], map: "idx_akb_p2_nama")
+  @@map("akta_kesepakatan_bersama")
+}
