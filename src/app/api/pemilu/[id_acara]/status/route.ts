@@ -1,8 +1,8 @@
 // src/app/api/pemilu/[id_acara]/status/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient, status_peserta_enum } from "@prisma/client";
+import { status_peserta_enum } from "@prisma/client";
+import prisma from "@/lib/prisma";
 
-const prisma = new PrismaClient();
 
 interface RouteContext {
   params: { id_acara: string };

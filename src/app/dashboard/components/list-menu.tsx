@@ -6,42 +6,50 @@ export interface MenuItem {
     href?: string;
   }
   
+  /* URUTAN MENU — satu tulang punggung untuk semua jabatan:
+     Dashboard → Tugas → Client → Listings → Transaksi → Project.
+     Urutannya mengikuti alur kerja harian agent, bukan abjad atau kebetulan:
+     buka dashboard, lihat tugas hari ini, urus klien, baru cari/urus aset,
+     lalu transaksi yang berjalan, dan project di belakang karena bukan
+     pekerjaan harian. Item khusus jabatan (Agents, Surat, Survei, Berita)
+     menempel di belakang tulang punggung ini supaya posisi enam menu utama
+     tidak pernah bergeser saat agent naik jabatan. */
   export const homepageMenu: MenuItem[] = [
     { label: "Dashboard", icon: "solar:widget-5-linear", href: "/dashboard" },
-    {
-      label: "Listings",
-      icon: "solar:buildings-3-linear",
-      href: "/dashboard/listings",
-    },
-    {
-      label: "Agents", 
-      icon: "solar:user-id-linear", 
-      href: "/dashboard/human-resource-management",
-    },
-    {
-      label: "Transaksi",
-      icon: "solar:hand-money-linear",
-      href: "/dashboard/transaksi",
-    },
-    { 
-      label: "Project", 
-      icon: "solar:presentation-graph-linear", 
-      href: "/dashboard/project" 
-    },
-    {
-      label: "Surat",
-      icon: "solar:document-text-linear",
-      href: "/dashboard/surat",
-    },
     {
       label: "Tugas",
       icon: "solar:clipboard-check-linear",
       href: "/dashboard/tugas",
     },
     {
-      label: "CRM",
+      label: "Client",
       icon: "solar:users-group-rounded-linear",
       href: "/dashboard/crm",
+    },
+    {
+      label: "Listings",
+      icon: "solar:buildings-3-linear",
+      href: "/dashboard/listings",
+    },
+    {
+      label: "Transaksi",
+      icon: "solar:hand-money-linear",
+      href: "/dashboard/transaksi",
+    },
+    {
+      label: "Project",
+      icon: "solar:presentation-graph-linear",
+      href: "/dashboard/project"
+    },
+    {
+      label: "Agents",
+      icon: "solar:user-id-linear",
+      href: "/dashboard/human-resource-management",
+    },
+    {
+      label: "Surat",
+      icon: "solar:document-text-linear",
+      href: "/dashboard/surat",
     },
     {
       label: "Jadwal Survei",
@@ -58,7 +66,7 @@ export interface MenuItem {
     listings: { label: "Listings", icon: "solar:buildings-3-linear", href: "/dashboard/listings" },
     agents: { label: "Agents", icon: "solar:user-id-linear", href: "/dashboard/human-resource-management" },
     transaksi: { label: "Transaksi", icon: "solar:hand-money-linear", href: "/dashboard/transaksi" },
-    crm: { label: "CRM", icon: "solar:users-group-rounded-linear", href: "/dashboard/crm" },
+    crm: { label: "Client", icon: "solar:users-group-rounded-linear", href: "/dashboard/crm" },
     project: { label: "Project", icon: "solar:presentation-graph-linear", href: "/dashboard/project" },
     berita: { label: "Berita", icon: "solar:notebook-linear", href: "/dashboard/berita" },
   };
@@ -91,11 +99,11 @@ export interface MenuItem {
         homepage: [
           MENU.dashboard,
           MENU.tugas,
-          MENU.listings,
-          MENU.agents,
-          MENU.transaksi,
           MENU.crm,
+          MENU.listings,
+          MENU.transaksi,
           MENU.project,
+          MENU.agents,
           ...(canBerita ? [MENU.berita] : []),
         ],
         apps: [],
@@ -107,9 +115,9 @@ export interface MenuItem {
       homepage: [
         MENU.dashboard,
         MENU.tugas,
+        MENU.crm,
         MENU.listings,
         MENU.transaksi,
-        MENU.crm,
         MENU.project,
         ...(canBerita ? [MENU.berita] : []),
       ],

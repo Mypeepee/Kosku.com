@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
+import { kunciProspek } from "@/lib/prospek";
 import { syncFollowUpAcara } from "../_syncFollowUp";
 
 export const runtime = "nodejs";
@@ -130,6 +131,39 @@ export async function DELETE(_req: Request, { params }: Ctx) {
     where: { id_klien: params.id, id_agent: agentId },
   });
   if (!existing) return NextResponse.json({ ok: false }, { status: 404 });
+
+  /* NISAN dulu, baru hapus.
+     Sinkron prospek membandingkan sumber (Lead, Titip Jual, Penawaran, Site
+     Visit) dengan klien yang SEDANG ADA. Menghapus kartu klien tidak menghapus
+     sumbernya, jadi tanpa nisan ini putaran sinkron berikutnya — yang berjalan
+     otomatis beberapa detik kemudian — akan mengimpornya kembali, dan
+     penghapusannya terlihat membatalkan dirinya sendiri.
+
+     Urutannya sengaja: nisan lebih dulu. Kalau penghapusan gagal, yang tersisa
+     cuma nisan tak terpakai yang tidak merugikan siapa pun; kalau terbalik dan
+     nisannya yang gagal, kliennya hilang lalu hidup lagi — persis bug yang
+     sedang diperbaiki. */
+  const kunci = kunciProspek(existing);
+  if (kunci.length) {
+    await prisma.prospekDiabaikan.createMany({
+      data: kunci.map(k => ({
+        id_agent: agentId,
+        kunci: k,
+        nama_terakhir: existing.nama,
+        diabaikan_pada: new Date(),
+      })),
+      skipDuplicates: true,
+    });
+    /* Prospek yang dihapus DUA KALI (masuk lagi lewat aktivitas baru, dibuang
+       lagi) harus memakai waktu pembuangan TERAKHIR. skipDuplicates di atas
+       diam saja pada baris yang sudah ada, jadi stempelnya disegarkan di sini —
+       kalau tidak, nisan lama tetap lebih tua dari lead barunya dan orang itu
+       akan terus kembali. */
+    await prisma.prospekDiabaikan.updateMany({
+      where: { id_agent: agentId, kunci: { in: kunci } },
+      data: { diabaikan_pada: new Date(), nama_terakhir: existing.nama },
+    });
+  }
 
   await prisma.klien.delete({ where: { id_klien: params.id } });
   return NextResponse.json({ ok: true });

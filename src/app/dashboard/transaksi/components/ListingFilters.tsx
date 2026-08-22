@@ -68,7 +68,7 @@ const KATEGORI_OPTIONS: Array<{
   label: string;
   icon: string;
 }> = [
-  { value: "ALL", label: "Semua Tipe", icon: "solar:apps-bold-duotone" },
+  { value: "ALL", label: "Semua Tipe", icon: "solar:widget-3-bold-duotone" },
   { value: "RUMAH", label: "Rumah", icon: "solar:home-2-bold-duotone" },
   { value: "APARTEMEN", label: "Apartemen", icon: "solar:buildings-2-bold-duotone" },
   { value: "GUDANG", label: "Gudang", icon: "solar:box-minimalistic-bold-duotone" },
@@ -83,7 +83,7 @@ function kategoriLabel(v: ListingFilterState["kategori"]) {
   return KATEGORI_OPTIONS.find((x) => x.value === v)?.label ?? "Semua Tipe";
 }
 function kategoriIcon(v: ListingFilterState["kategori"]) {
-  return KATEGORI_OPTIONS.find((x) => x.value === v)?.icon ?? "solar:apps-bold-duotone";
+  return KATEGORI_OPTIONS.find((x) => x.value === v)?.icon ?? "solar:widget-3-bold-duotone";
 }
 
 type OpenKey = null | "location" | "type";

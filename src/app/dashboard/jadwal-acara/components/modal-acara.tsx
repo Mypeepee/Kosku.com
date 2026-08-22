@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { PesertaPicker, type PesertaOption } from "./PesertaPicker";
 import { DateInput } from "./DateInput";
 import { TimeInput } from "./TimeInput";
+import type { EventData } from "../lib/acara-types";
 
 interface UndanganApi {
   id_undangan?: string;
@@ -20,22 +21,6 @@ interface UndanganApi {
   };
 }
 
-interface EventData {
-  id_acara: string;
-  judul_acara: string;
-  deskripsi?: string;
-  tanggal_mulai: string;
-  tanggal_selesai: string;
-  tipe_acara: string;
-  lokasi?: string;
-  status_acara: string;
-  id_property?: string;
-  durasi_pilih?: number;
-  /** Daftar undangan dari API GET — di-hydrate ke PesertaPicker kalau edit/view. */
-  undangan?: UndanganApi[];
-  /** Hint dari API untuk gate edit/delete. */
-  _isOwner?: boolean;
-}
 
 // 🔥 tambah type mode
 type ModalMode = "create" | "edit" | "view";

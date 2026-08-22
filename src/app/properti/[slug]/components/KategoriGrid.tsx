@@ -1,9 +1,13 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
-import PropertyCard from "./PropertyCard";
+import {
+  PropertyCard,
+  getPropertyUrl,
+} from "@/components/property/PropertyCard";
 import KategoriPagination from "./KategoriPagination";
 import type { PropertyItem, PaginationData } from "../types";
 
@@ -32,8 +36,10 @@ export default function KategoriGrid({
 
   return (
     <div>
-      {/* Result info */}
-      <p className="text-white/25 text-xs mb-6">
+      {/* Jumlah hasil. Disembunyikan mulai xl karena di lebar itu bar filter
+          sudah memuat angka yang sama tepat di sebelah tombol Filter — dua
+          angka identik di satu layar terbaca seperti dua ukuran yang berbeda. */}
+      <p className="text-white/25 text-xs mb-6 xl:hidden">
         Menampilkan{" "}
         <span className="text-white/50 font-semibold">
           {pagination.totalItems.toLocaleString("id-ID")}
@@ -72,7 +78,12 @@ export default function KategoriGrid({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.3 }}
-            className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6"
+            // items-stretch + h-full berantai sampai ke kartunya: PropertyCard
+            // memakai `flex flex-col h-full` supaya footer agent menempel di
+            // dasar. Tanpa rantai tinggi ini tiap kartu setinggi isinya sendiri
+            // dan judul dua baris membuat satu kartu lebih jangkung dari
+            // tetangganya — persis ketidakrapian yang diminta hilang.
+            className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-2 xl:grid-cols-3"
           >
             {items.map((item, idx) => (
               <motion.div
@@ -80,8 +91,11 @@ export default function KategoriGrid({
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.04, duration: 0.3 }}
+                className="h-full"
               >
-                <PropertyCard item={item} idBadge={item.id_property} />
+                <Link href={getPropertyUrl(item)} className="block h-full">
+                  <PropertyCard item={item} />
+                </Link>
               </motion.div>
             ))}
           </motion.div>

@@ -1,102 +1,54 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
-import { buildAssetMatchWhere } from "@/lib/auctionMatch";
+import { getAuctionHistory } from "@/lib/auctionHistory";
 
+export const dynamic = "force-dynamic";
+
+/**
+ * Riwayat lelang satu aset. Logika pencocokan aset ada di
+ * @/lib/auctionHistory (dipakai bersama halaman detail & modul closing).
+ *
+ * Kontrak penting: endpoint ini TIDAK PERNAH memakai array kosong sebagai cara
+ * melaporkan kegagalan. Versi lama mengembalikan `{ riwayat: [] }` saat error,
+ * sehingga blok riwayat di halaman detail hilang diam-diam dan terlihat
+ * "kadang muncul kadang tidak". Sekarang kegagalan dibalas status 5xx + `ok:
+ * false` supaya klien bisa retry dan menampilkan status yang jujur.
+ */
 export async function GET(
   _req: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const id = BigInt(params.id);
+    const hasil = await getAuctionHistory(params.id);
 
-    const current = await prisma.listing.findUnique({
-      where: { id_property: id },
-      select: {
-        id_property: true,
-        judul: true,
-        harga: true,
-        nilai_limit_lelang: true,
-        tanggal_lelang: true,
-        gambar: true,
-        status_tayang: true,
-        kelurahan: true,
-        kecamatan: true,
-        kota: true,
-        legalitas: true,
-        nomor_legalitas: true,
-        slug: true,
-      },
-    });
-
-    if (!current) {
-      return NextResponse.json({ riwayat: [] });
+    if (!hasil) {
+      return NextResponse.json(
+        { ok: false, error: "LISTING_TIDAK_DITEMUKAN", riwayat: [] },
+        { status: 404 }
+      );
     }
 
-    const serializeItem = (r: NonNullable<typeof current>) => {
-      const gambarArr = r.gambar?.trim()
-        ? r.gambar.split(",").map((s) => s.trim()).filter(Boolean)
-        : [];
-      return {
-        id_property: r.id_property.toString(),
-        judul: r.judul,
-        harga: Number(r.harga),
-        nilai_limit_lelang: r.nilai_limit_lelang ? Number(r.nilai_limit_lelang) : null,
-        tanggal_lelang: r.tanggal_lelang?.toISOString() ?? null,
-        gambar_utama: gambarArr[0] ?? null,
-        status_tayang: r.status_tayang,
-        kelurahan: r.kelurahan,
-        kecamatan: r.kecamatan,
-        kota: r.kota,
-        legalitas: r.legalitas,
-        nomor_legalitas: r.nomor_legalitas,
-        slug: r.slug,
-      };
-    };
-
-    // Aset unik dideteksi via jenis + nomor sertifikat + wilayah administratif.
-    // Nomor sertifikat hanya unik per kelurahan, jadi kelurahan WAJIB dicocokkan
-    // (turun ke kecamatan lalu kota bila kelurahan tidak tersedia). Lihat
-    // buildAssetMatchWhere di @/lib/auctionMatch.
-    const matchWhere = buildAssetMatchWhere(current);
-
-    if (!matchWhere) {
-      return NextResponse.json({ riwayat: [serializeItem(current)] });
-    }
-
-    const others = await prisma.listing.findMany({
-      where: {
-        ...matchWhere,
-        id_property: { not: id },
-        jenis_transaksi: "LELANG",
+    return NextResponse.json(
+      {
+        ok: true,
+        riwayat: hasil.items,
+        total: hasil.total,
+        total_lain: hasil.total_lain,
+        total_sebidang: hasil.total_sebidang,
+        total_lot_terkait: hasil.total_lot_terkait,
+        match: hasil.match,
+        alasan_tanpa_riwayat: hasil.alasan_tanpa_riwayat,
       },
-      select: {
-        id_property: true,
-        judul: true,
-        harga: true,
-        nilai_limit_lelang: true,
-        tanggal_lelang: true,
-        gambar: true,
-        status_tayang: true,
-        kelurahan: true,
-        kecamatan: true,
-        kota: true,
-        legalitas: true,
-        nomor_legalitas: true,
-        slug: true,
-      },
-    });
-
-    const merged = [current, ...others]
-      .map(serializeItem)
-      .sort((a, b) => {
-        const da = a.tanggal_lelang ? new Date(a.tanggal_lelang).getTime() : 0;
-        const db = b.tanggal_lelang ? new Date(b.tanggal_lelang).getTime() : 0;
-        return da - db;
-      });
-
-    return NextResponse.json({ riwayat: merged });
+      {
+        headers: {
+          "Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
+        },
+      }
+    );
   } catch (error) {
-    console.error("❌ Error fetching riwayat lelang:", error);
-    return NextResponse.json({ riwayat: [] }, { status: 500 });
+    console.error("❌ Gagal mengambil riwayat lelang:", error);
+    return NextResponse.json(
+      { ok: false, error: "GAGAL_MEMUAT_RIWAYAT", riwayat: [] },
+      { status: 500 }
+    );
   }
 }

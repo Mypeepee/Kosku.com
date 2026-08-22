@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/authOptions';
+import { bersihkanTipeKamar, type KamarTipe } from '@/lib/kosRoomTypes';
+import {
+  kalimatDurasiDiizinkan,
+  pesanDurasiTidakSah,
+} from '@/lib/sewaKapabilitas';
+import {
+  buildSewaDetailData,
+  normalisasiSewaTulis,
+  toKamarTipeRow,
+} from './_lib/sewa-write';
+import { semaiBlokAwal } from './_lib/sewa-availability-write';
+import { buatSlugListing, buatSlugUnik } from '@/lib/listingSlug';
 
 // Helper: konversi BigInt ke string
 const serializeBigInt = (obj: any): any =>
@@ -78,7 +90,38 @@ export async function POST(request: NextRequest) {
       | 'GUDANG'
       | 'HOTEL_DAN_VILLA'
       | 'TOKO'
-      | 'PABRIK';
+      | 'PABRIK'
+      | 'KOS';
+
+    // Tipe kamar kos. Daftar dari klien dibersihkan dulu (baris tanpa nama /
+    // tanpa harga dibuang, sisa kamar di-clamp) karena semua angka agregat di
+    // bawah dihitung ULANG dari daftar ini — angka kiriman klien tidak dipakai.
+    const kamarTipe: KamarTipe[] =
+      kategori === 'KOS' ? bersihkanTipeKamar(body.kamar_tipe) : [];
+    const pakaiTipeKamar = kamarTipe.length > 0;
+    // Durasi & harga sewa dinormalkan terhadap kategori: durasi yang tidak sah
+    // untuk kategori ini dibuang, dan durasi utama dipilih ulang dari yang
+    // tersisa. Satu fungsi yang sama dipakai buildSewaDetailData di bawah, jadi
+    // `Listing.harga` dan `listing_sewa_detail` mustahil menunjuk durasi yang
+    // berbeda. Durasi utama juga boleh tidak dikirim klien saat pakai tipe
+    // kamar — ia disimpulkan dari harga tiap tipe.
+    const sewa =
+      jenis_transaksi === 'SEWA'
+        ? normalisasiSewaTulis(body, kategori, kamarTipe)
+        : null;
+    const durasiSewa: string | null = sewa?.durasiUtama ?? null;
+
+    // Kategori KOS hanya sah untuk transaksi SEWA. Seluruh detail kos
+    // (tipe kamar, sisa kamar, gender, harga per durasi) disimpan di
+    // listing_sewa_detail, dan baris itu hanya dibuat untuk SEWA — kombinasi
+    // lain akan tersimpan sebagai listing kos tanpa satupun detail kosnya.
+    // Form sudah menyembunyikan pilihannya; ini penjaga untuk kiriman langsung.
+    if (kategori === 'KOS' && jenis_transaksi !== 'SEWA') {
+      return NextResponse.json(
+        { error: 'Kategori KOS hanya berlaku untuk transaksi SEWA' },
+        { status: 400 }
+      );
+    }
 
     // Conditional validation
     if (jenis_transaksi === 'LELANG') {
@@ -101,7 +144,12 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      if (body.harga == null || Number(body.harga) <= 0) {
+      // SEWA: harga listing SELALU turunan dari harga per durasi yang lolos
+      // aturan kategori — bukan `body.harga`, yang bisa saja masih memegang
+      // angka dari durasi yang barusan dibuang. Kos bertipe kamar: angkanya
+      // harga termurah antar tipe.
+      const hargaEfektif = sewa ? sewa.hargaUtama : body.harga;
+      if (hargaEfektif == null || Number(hargaEfektif) <= 0) {
         return NextResponse.json(
           { error: 'Harga wajib diisi untuk tipe non-LELANG' },
           { status: 400 }
@@ -109,11 +157,37 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Set harga
+    if (jenis_transaksi === 'SEWA' && sewa) {
+      // Harga yang dihitung SETELAH penyaringan kategori. Gudang yang hanya
+      // mengirim harga harian sampai di sini tanpa satu pun durasi tersisa —
+      // dan pesannya menyebut durasi mana yang sebenarnya boleh, bukan sekadar
+      // "harga wajib diisi".
+      if (!durasiSewa) {
+        return NextResponse.json(
+          {
+            error:
+              sewa.dibuang.length > 0
+                ? `${pesanDurasiTidakSah(kategori)} Isi harga ${kalimatDurasiDiizinkan(kategori)}.`
+                : `Isi minimal 1 harga sewa berdasarkan durasi (${kalimatDurasiDiizinkan(kategori)})`,
+          },
+          { status: 400 }
+        );
+      }
+      if (kategori === 'KOS' && !body.kos_gender) {
+        return NextResponse.json(
+          { error: 'Gender kos wajib diisi untuk kategori Kos' },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Set harga. Kos bertipe kamar → harga termurah pada durasi utama, supaya
+    // sort & filter harga generik tetap menemukan kos yang tipe termurahnya
+    // masuk anggaran pencari.
     const harga =
       jenis_transaksi === 'LELANG'
         ? Number(body.nilai_limit_lelang)
-        : Number(body.harga);
+        : Number(sewa ? sewa.hargaUtama ?? 0 : body.harga);
 
     // Auto vendor
     const vendor =
@@ -139,21 +213,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Ensure slug is unique — auto-append suffix if collision exists
-    let uniqueSlug = (body.slug || body.judul)
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .trim()
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .substring(0, 80);
-
-    const slugInUse = await prisma.listing.findUnique({ where: { slug: uniqueSlug } });
-    if (slugInUse) {
-      const suffix = Math.random().toString(36).substring(2, 7);
-      uniqueSlug = `${uniqueSlug.substring(0, 74)}-${suffix}`;
-    }
+    // Slug SEO — DISUSUN dari kategori + judul + lokasi, bukan disalin mentah
+    // dari judul. Lihat alasan lengkapnya di @/lib/listingSlug.
+    //
+    // `body.slug` kiriman klien sengaja DIABAIKAN. Slug adalah alamat publik
+    // yang menentukan bagaimana listing ini ditemukan di Google; membiarkannya
+    // ditentukan ketikan bebas adalah persis yang menghasilkan URL seperti
+    // /Sewa/nnfrscdsvsvgs-mij10k-iactg-122317. Judulnya sendiri tetap milik
+    // agent sepenuhnya — yang diambil alih hanya alamatnya.
+    const uniqueSlug = await buatSlugUnik(
+      buatSlugListing({
+        judul: body.judul,
+        kategori,
+        kecamatan: body.kecamatan,
+        kota: body.kota,
+        alamat: body.alamat_lengkap,
+      }),
+      async (kandidat) =>
+        (await prisma.listing.count({ where: { slug: kandidat } })) > 0,
+    );
 
     // Create listing
     const listing = await prisma.listing.create({
@@ -182,6 +260,10 @@ export async function POST(request: NextRequest) {
         kelurahan: body.kelurahan || null,
         latitude: body.latitude != null ? Number(body.latitude) : null,
         longitude: body.longitude != null ? Number(body.longitude) : null,
+        akses_terdekat:
+          Array.isArray(body.akses_terdekat) && body.akses_terdekat.length > 0
+            ? body.akses_terdekat
+            : undefined,
         luas_tanah:
           body.luas_tanah != null ? Number(body.luas_tanah) : null,
         luas_bangunan:
@@ -198,10 +280,34 @@ export async function POST(request: NextRequest) {
         gambar: body.gambar || null,
         lampiran: body.lampiran || null,
         is_hot_deal: body.is_hot_deal || false,
+        ...(jenis_transaksi === 'SEWA' && {
+          sewaDetail: { create: buildSewaDetailData(body, kategori, kamarTipe) },
+        }),
+        ...(pakaiTipeKamar && {
+          kamarTipe: { create: kamarTipe.map(toKamarTipeRow) },
+        }),
       },
+      include: { sewaDetail: true, kamarTipe: { orderBy: { urutan: 'asc' } } },
     });
 
     console.log('✅ Listing created:', listing.id_property.toString());
+
+    // Terjemahkan "kamar kosong sekarang" dari wizard jadi blok awal di
+    // kalender ketersediaan. Tanpa ini kolom cache berkata "sisa 3" sementara
+    // halaman detail — yang menghitung dari blok — menyatakan semua kosong.
+    // Dibungkus try sendiri: listingnya sudah tersimpan, dan menggagalkan
+    // seluruh permintaan karena penyemaian kalender berarti agent kehilangan
+    // pekerjaan yang sebetulnya sudah berhasil.
+    if (jenis_transaksi === 'SEWA') {
+      try {
+        await semaiBlokAwal(prisma, listing.id_property, agent.id_agent);
+      } catch (e) {
+        console.error(
+          `⚠️ Gagal menyemai ketersediaan awal listing #${listing.id_property}:`,
+          e,
+        );
+      }
+    }
 
     // Tambah poin secara atomic (cegah race condition jika ada request bersamaan)
     const updatedAgent = await prisma.agent.update({
@@ -217,7 +323,10 @@ export async function POST(request: NextRequest) {
         deskripsi: `Menambahkan listing: ${body.judul}`,
         poin: 10,
         tipe_transaksi: 'DAPAT',
-        id_referensi: listing.id_property.toString(),
+        // BigInt langsung, bukan .toString(): kolomnya memang `BigInt?`.
+        // Prisma kebetulan menerima string juga, jadi tidak ada data yang
+        // hilang selama ini — yang hilang cuma jaminan tipenya.
+        id_referensi: listing.id_property,
         tabel_referensi: 'listing',
         saldo_sebelum: updatedAgent.poin - 10,
         saldo_sesudah: updatedAgent.poin,

@@ -1,24 +1,69 @@
 "use client";
-import React, { useState } from "react";
-import { Icon } from "@iconify/react";
-import dynamic from "next/dynamic";
-import RiwayatLelang from "./RiwayatLelang";
 
-const Maps = dynamic(
-  () => import("../../../../../components/Maps/GoogleMapView"),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="w-full h-full bg-[#151515] animate-pulse flex flex-col items-center justify-center text-gray-500 gap-2">
-        <Icon
-          icon="solar:map-point-bold-duotone"
-          className="text-3xl animate-bounce"
-        />
-        <span className="text-xs font-bold">Memuat Peta...</span>
-      </div>
-    ),
-  }
-);
+/**
+ * Kolom kiri halaman detail aset lelang — urutannya mengikuti pertanyaan
+ * penawar, bukan urutan kolom di database:
+ *
+ *   1. "Aset apa ini, di mana?"          → kepala halaman
+ *   2. (internal) "Siapa PIC-nya?"       → panel stok, hanya tim dalam
+ *   3. "Kapan lelangnya, jaminannya?"    → ringkasan satu baris
+ *   4. "Ceritakan asetnya"               → deskripsi
+ *   5. "Sertifikatnya apa?"              → legalitas & status
+ *   6. "Dekat apa?"                      → lokasi & sekitar
+ *   7. "Sudah pernah dilelang?"          → riwayat lelang
+ *   8. "Kenapa harus lelang?"            → edukasi
+ *
+ * PERUBAHAN BESAR DARI VERSI LAMA.
+ *
+ * a. Ringkasan lelang dulu empat kartu tinggi berisi satu nilai masing-masing;
+ *    sekarang satu baris ringkas (StatStrip) yang tetap sebaris di ponsel.
+ *
+ * b. Blok "Alamat Lengkap" berupa kisi lima kotak DIHAPUS — isinya persis
+ *    sama dengan alamat di kepala halaman, hanya dipecah. Wilayahnya jadi chip
+ *    di atas peta.
+ *
+ * c. Bagian lokasi kini menjawab "dekat apa?" (SekitarLokasi). Ini penting
+ *    justru untuk lelang: aset lelang hampir selalu dilihat orang yang tidak
+ *    kenal daerahnya, dan judul hasil scrape sering hanya menyebut nomor SHM.
+ *
+ * d. Bagian edukasi lelang dipadatkan. Sebelumnya sepertiga halaman berisi
+ *    teks promosi umum yang sama untuk SEMUA aset — didorong ke bawah dan
+ *    dibuat ringkas supaya tidak mengalahkan data aset yang sedang dilihat.
+ *
+ * Warna mengikuti src/lib/detailTheme.ts. Panel "Info Stok Internal" tetap
+ * emas mencolok: itu satu-satunya blok yang memang harus terlihat berbeda —
+ * isinya tidak boleh dibacakan ke klien.
+ */
+
+import React, { useMemo, useState } from "react";
+import { Icon } from "@iconify/react";
+
+import RiwayatLelang from "./RiwayatLelang";
+import type { AuctionHistoryResult } from "@/lib/auctionHistory";
+import { daftarBidang } from "@/lib/nomorLegalitas";
+import DaftarSertifikatSheet from "@/components/property/detail/DaftarSertifikatSheet";
+import {
+  AKSEN,
+  AKSEN_SECTION_ASET,
+  LINE,
+  SURFACE,
+  type Aksen,
+} from "@/lib/detailTheme";
+import type { AksesTerdekat } from "@/lib/kosDetail";
+import SekitarLokasi from "@/components/property/detail/SekitarLokasi";
+import type { SekitarAwal } from "@/components/property/detail/useSekitar";
+import {
+  Bagian,
+  BarisFakta,
+  Chip,
+  Deskripsi,
+  Judul,
+  Kartu,
+  SpandukTerjual,
+  StatStrip,
+  TombolBagikan,
+  type ItemStat,
+} from "@/components/property/detail/parts";
 
 interface AgentInfo {
   nama: string;
@@ -59,6 +104,9 @@ interface PropertyData {
   provinsi: string | null;
   latitude: number | null;
   longitude: number | null;
+  akses_terdekat?: AksesTerdekat[] | null;
+  /** Hasil pemindaian sekitar yang sudah tersimpan (dibaca di server). */
+  sekitar?: SekitarAwal | null;
 
   harga: number;
   harga_promo: number | null;
@@ -85,6 +133,11 @@ interface PropertyData {
   nomor_legalitas?: string | null;
   vendor?: string | null;
   lampiran?: string | null;
+  /**
+   * Tautan pengumuman lelang di sumber aslinya (lelang.go.id / situs vendor).
+   * Hanya ditampilkan ke agent — lihat `canSeeLinkSumber`.
+   */
+  link?: string | null;
 
   deskripsi: string | null;
 
@@ -101,11 +154,15 @@ interface PropertyData {
 
 interface DetailInfoProps {
   data: PropertyData;
-  selectedRoom: any;
-  setSelectedRoom: (room: any) => void;
+  selectedRoom?: any;
+  setSelectedRoom?: (room: any) => void;
   currentAgentId?: string | null;
   currentRole?: string | null;
   currentJabatan?: string | null;
+  /** Riwayat lelang hasil hitungan server — lihat @/lib/auctionHistory. */
+  riwayatLelang?: AuctionHistoryResult | null;
+  /** Status login dari server, supaya blok riwayat tidak salah render dulu. */
+  isLoggedIn?: boolean;
 }
 
 const formatRupiah = (val: number | null | undefined) => {
@@ -117,45 +174,57 @@ const formatRupiah = (val: number | null | undefined) => {
   }).format(val);
 };
 
-const getTransactionBadge = (jenis: string) => {
-  if (jenis === "JUAL" || jenis === "SECONDARY")
-    return {
-      color: "border-emerald-500 text-emerald-400 bg-emerald-500/10",
-      label: "Dijual",
-      icon: "solar:tag-price-bold",
-    };
-  if (jenis === "SEWA")
-    return {
-      color: "border-blue-500 text-blue-400 bg-blue-500/10",
-      label: "Disewa",
-      icon: "solar:key-bold",
-    };
-  if (jenis === "LELANG")
-    return {
-      color: "border-orange-500 text-orange-400 bg-orange-500/10",
-      label: "Lelang",
-      icon: "solar:gavel-bold",
-    };
-  return {
-    color: "border-purple-500 text-purple-400 bg-purple-500/10",
-    label: jenis,
-    icon: "solar:home-bold",
-  };
+/**
+ * "Rp 1,2 M" — dipakai di ringkasan satu baris.
+ *
+ * Uang jaminan lelang bernilai ratusan juta; ditulis penuh, ia memaksa satu sel
+ * ringkasan jadi tiga baris dan merusak barisnya. Nominal penuhnya tetap ada di
+ * panel harga sebelah kanan.
+ */
+const formatRupiahSingkat = (n: number | null | undefined): string => {
+  if (n == null || isNaN(n) || n <= 0) return "-";
+  if (n >= 1_000_000_000) {
+    const v = n / 1_000_000_000;
+    return `Rp ${v % 1 === 0 ? v : v.toFixed(1).replace(".", ",")} M`;
+  }
+  if (n >= 1_000_000) {
+    const v = n / 1_000_000;
+    return `Rp ${v % 1 === 0 ? v : v.toFixed(1).replace(".", ",")} jt`;
+  }
+  if (n >= 1_000) return `Rp ${Math.round(n / 1_000)} rb`;
+  return formatRupiah(n);
 };
 
-const getCategoryLabel = (kategori: string) => {
-  const labels: Record<string, string> = {
-    RUMAH: "Rumah",
-    APARTEMEN: "Apartemen",
-    RUKO: "Ruko",
-    TANAH: "Tanah",
-    GUDANG: "Gudang",
-    VILLA: "Villa",
-    GEDUNG: "Gedung",
-    KANTOR: "Kantor",
-  };
-  return labels[kategori] || kategori;
+const BADGE_TRANSAKSI: Record<string, { label: string; icon: string; aksen: Aksen }> = {
+  JUAL: { label: "Dijual", icon: "solar:tag-price-bold", aksen: AKSEN.mint },
+  SECONDARY: { label: "Secondary", icon: "solar:tag-price-bold", aksen: AKSEN.mint },
+  SEWA: { label: "Disewa", icon: "solar:key-bold", aksen: AKSEN.sky },
+  LELANG: { label: "Lelang", icon: "mdi:gavel", aksen: AKSEN.amber },
 };
+
+const badgeTransaksi = (jenis: string) =>
+  BADGE_TRANSAKSI[jenis?.toUpperCase()] || {
+    label: jenis || "Properti",
+    icon: "solar:home-bold",
+    aksen: AKSEN.violet,
+  };
+
+const KATEGORI: Record<string, { label: string; icon: string }> = {
+  RUMAH: { label: "Rumah", icon: "solar:home-2-bold-duotone" },
+  APARTEMEN: { label: "Apartemen", icon: "solar:buildings-3-bold-duotone" },
+  RUKO: { label: "Ruko", icon: "solar:shop-2-bold-duotone" },
+  TANAH: { label: "Tanah", icon: "solar:map-bold-duotone" },
+  GUDANG: { label: "Gudang", icon: "solar:box-bold-duotone" },
+  VILLA: { label: "Villa", icon: "solar:home-wifi-bold-duotone" },
+  GEDUNG: { label: "Gedung", icon: "solar:buildings-2-bold-duotone" },
+  KANTOR: { label: "Kantor", icon: "solar:case-bold-duotone" },
+};
+
+const kategoriMeta = (kategori: string) =>
+  KATEGORI[kategori?.toUpperCase()] || {
+    label: kategori || "Properti",
+    icon: "solar:home-bold-duotone",
+  };
 
 const formatTanggalLelang = (val?: string | null) => {
   if (!val) return "-";
@@ -166,6 +235,24 @@ const formatTanggalLelang = (val?: string | null) => {
     month: "short",
     year: "numeric",
   });
+};
+
+/**
+ * Sisa hari menuju lelang.
+ *
+ * Tanggal saja tidak menjawab pertanyaan yang sebenarnya ("masih sempat
+ * tidak?"), apalagi untuk aset hasil scrape yang tanggalnya bisa sudah lewat
+ * berbulan-bulan. Dihitung di client dengan sengaja: nilainya berubah tiap
+ * hari, sedangkan halaman ini di-ISR dan bisa tersaji dari cache lama.
+ */
+const hitungSisaHari = (val?: string | null): number | null => {
+  if (!val) return null;
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return null;
+  const hariIni = new Date();
+  const a = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const b = Date.UTC(hariIni.getFullYear(), hariIni.getMonth(), hariIni.getDate());
+  return Math.round((a - b) / 86_400_000);
 };
 
 // Template soft selling
@@ -213,16 +300,117 @@ const buildShareMessage = (data: PropertyData) => {
   );
 };
 
+/** Tiga alasan beli lelang — dipakai di bagian edukasi. */
+const ALASAN_LELANG: { ikon: string; judul: string; isi: string; aksen: Aksen }[] = [
+  {
+    ikon: "solar:wallet-money-bold-duotone",
+    judul: "Harga di bawah pasar",
+    isi: "Aset lelang umumnya 20–40% lebih murah karena harus cepat terjual.",
+    aksen: AKSEN.mint,
+  },
+  {
+    ikon: "solar:shield-check-bold-duotone",
+    judul: "Legal terjamin",
+    isi: "Diawasi lembaga resmi; sertifikat & dokumen terverifikasi sebelum lelang.",
+    aksen: AKSEN.emerald,
+  },
+  {
+    ikon: "solar:clock-circle-bold-duotone",
+    judul: "Proses cepat",
+    isi: "Tanpa negosiasi berlarut. Menang lelang, langsung proses akad.",
+    aksen: AKSEN.violet,
+  },
+];
+
 export default function DetailInfo({
   data,
-  selectedRoom,
-  setSelectedRoom,
   currentAgentId: _currentAgentId,
   currentRole,
   currentJabatan,
+  riwayatLelang = null,
+  isLoggedIn,
 }: DetailInfoProps) {
+  // Nomor sertifikat hanya untuk orang dalam. `currentRole` isinya `peran_enum`
+  // (USER|AGENT), jadi cabang keduanya memakai `currentJabatan` — sebelumnya
+  // ditulis `currentRole === "OWNER"`, perbandingan yang tidak pernah benar.
+  // Praktisnya owner tetap lolos lewat cabang pertama (peran-nya AGENT); cabang
+  // jabatan ada sebagai jaring kalau ada akun owner yang perannya belum AGENT.
   const canSeeNomorLegalitas =
-    currentRole === "AGENT" || currentRole === "OWNER";
+    currentRole === "AGENT" || currentJabatan === "OWNER";
+
+  // Satu lot lelang bisa memuat beberapa bidang; nomornya ditumpuk dalam satu
+  // kolom ("123,456,789"). Kalau lebih dari satu, deretan itu tidak muat di
+  // baris ringkasan dan dipindah ke panel tersendiri — lihat
+  // DaftarSertifikatSheet. Aset satu bidang TIDAK bisa diketuk: nomornya sudah
+  // tampil utuh, jadi tidak ada isi yang bisa dibuka.
+  const bidangSertifikat = useMemo(
+    () => (canSeeNomorLegalitas ? daftarBidang(data?.nomor_legalitas) : []),
+    [canSeeNomorLegalitas, data?.nomor_legalitas],
+  );
+  const multiBidang = bidangSertifikat.length > 1;
+  const [sertifikatTerbuka, setSertifikatTerbuka] = useState(false);
+
+  const bukaSertifikat = multiBidang ? () => setSertifikatTerbuka(true) : undefined;
+  const petunjukSertifikat = multiBidang
+    ? `Lihat ${bidangSertifikat.length} nomor sertifikat`
+    : undefined;
+  // Nomor lengkapnya hanya dicetak di baris ringkasan saat cuma ada satu bidang.
+  const catatanSertifikat = !canSeeNomorLegalitas
+    ? undefined
+    : multiBidang
+      ? `${bidangSertifikat.length} bidang`
+      : bidangSertifikat.length === 1
+        ? `No. ${bidangSertifikat[0].teks}`
+        : // Kolomnya terisi tapi tidak mengandung angka sama sekali (mis. "menyusul
+          // dari vendor"). Tetap ditampilkan apa adanya — itu tetap informasi.
+          data?.nomor_legalitas
+          ? `No. ${data.nomor_legalitas}`
+          : undefined;
+
+  /**
+   * Tautan pengumuman lelang di sumbernya — alat kerja agent, bukan informasi
+   * publik.
+   *
+   * Aturannya sengaja disamakan dengan nomor sertifikat (`canSeeNomorLegalitas`)
+   * dan bukan aturan baru: keduanya menjawab pertanyaan yang sama, "apakah
+   * pembaca ini orang dalam?". Dua aturan terpisah untuk satu pertanyaan adalah
+   * cara paling pasti membuat keduanya perlahan berbeda.
+   *
+   * Kenapa tidak untuk pengunjung umum: tautan ini menuju pengumuman aslinya,
+   * dan menaruhnya di halaman publik berarti mengantar calon pembeli keluar dari
+   * platform — tepat sebelum titik yang membuat agent dibayar. Untuk agent
+   * sendiri ia justru wajib ada: itu sumber yang dia pakai memverifikasi jadwal,
+   * nilai limit, dan uang jaminan sebelum menjawab pertanyaan klien.
+   *
+   * CATATAN: `product` dikirim utuh ke browser, jadi penyaringan ini hanya
+   * menyembunyikan dari LAYAR — nilainya tetap ada di payload halaman dan
+   * terbaca lewat "view source". Sama persis dengan nomor sertifikat & lampiran
+   * hari ini. Kalau tautannya memang rahasia, yang harus diubah adalah
+   * page.tsx-nya (jangan pernah kirim kolomnya untuk non-agent), bukan baris ini.
+   */
+  const canSeeLinkSumber = canSeeNomorLegalitas;
+
+  /**
+   * Tautan yang sudah dipastikan aman dibuka.
+   *
+   * Kolom `link` diisi scraper dan agent, jadi isinya tidak pernah bisa
+   * dipercaya mentah-mentah: `javascript:…` di dalam `href` adalah XSS yang
+   * dijalankan oleh klik korbannya sendiri. Hanya http & https yang lolos;
+   * selain itu barisnya tidak dirender sama sekali — lebih baik tidak ada
+   * tombol daripada ada tombol yang tidak jelas membawa ke mana.
+   */
+  const linkSumber = useMemo<string | null>(() => {
+    if (!canSeeLinkSumber) return null;
+    const mentah = (data?.link || "").trim();
+    if (!mentah) return null;
+    try {
+      const url = new URL(mentah);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }, [canSeeLinkSumber, data?.link]);
 
   // ✅ Section PIC/Vendor & Lampiran hanya untuk tim internal (Stoker & manajemen)
   const canSeePicInfo =
@@ -236,7 +424,9 @@ export default function DetailInfo({
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
-  const transactionBadge = getTransactionBadge(data?.jenis_transaksi || "JUAL");
+  const badge = badgeTransaksi(data?.jenis_transaksi || "LELANG");
+  const kategori = kategoriMeta(data?.kategori || "RUMAH");
+  const isSold = data?.status_tayang?.toString().toUpperCase() === "TERJUAL";
 
   const [shared, setShared] = useState(false);
   const [vendorCopied, setVendorCopied] = useState(false);
@@ -260,9 +450,7 @@ export default function DetailInfo({
       }
     } else if (navigator.clipboard) {
       try {
-        await navigator.clipboard.writeText(
-          `${text}\n\n🔗 Info lengkap: ${url}`
-        );
+        await navigator.clipboard.writeText(`${text}\n\n🔗 Info lengkap: ${url}`);
         setShared(true);
         setTimeout(() => setShared(false), 2000);
       } catch {
@@ -271,171 +459,185 @@ export default function DetailInfo({
     }
   };
 
+  const sisaHari = hitungSisaHari(data?.tanggal_lelang);
+  // Merah bila tinggal seminggu, netral bila sudah lewat: tanggal yang sudah
+  // berlalu bukan hal mendesak, hanya arsip.
+  const aksenJadwal =
+    sisaHari == null
+      ? AKSEN.netral
+      : sisaHari < 0
+        ? AKSEN.netral
+        : sisaHari <= 7
+          ? AKSEN.rose
+          : AKSEN.amber;
+
+  const alamatKepala =
+    data?.alamat_lengkap ||
+    [data?.kelurahan, data?.kecamatan, data?.kota, data?.provinsi]
+      .filter(Boolean)
+      .join(", ") ||
+    "Lokasi tidak tersedia";
+
+  const aksesTerdekat: AksesTerdekat[] = Array.isArray(data?.akses_terdekat)
+    ? (data.akses_terdekat as AksesTerdekat[]).filter((a) => a?.nama)
+    : [];
+
+  const ringkasan: ItemStat[] = [
+    data?.luas_tanah && {
+      ikon: "solar:ruler-angular-bold-duotone",
+      label: "Luas tanah",
+      nilai: `${data.luas_tanah} m²`,
+      aksen: AKSEN.amber,
+    },
+    data?.luas_bangunan && {
+      ikon: "solar:home-2-bold-duotone",
+      label: "Luas bangunan",
+      nilai: `${data.luas_bangunan} m²`,
+      aksen: AKSEN.sky,
+    },
+    {
+      ikon: "solar:shield-check-bold-duotone",
+      label: "Legalitas",
+      nilai: data?.legalitas || "-",
+      aksen: data?.legalitas ? AKSEN.emerald : undefined,
+      catatan: catatanSertifikat,
+      onKlik: bukaSertifikat,
+      petunjuk: petunjukSertifikat,
+    },
+    {
+      ikon: "solar:calendar-date-bold-duotone",
+      label: "Tanggal lelang",
+      nilai: formatTanggalLelang(data?.tanggal_lelang),
+      aksen: data?.tanggal_lelang ? aksenJadwal : undefined,
+      catatan:
+        sisaHari == null
+          ? undefined
+          : sisaHari > 0
+            ? `${sisaHari} hari lagi`
+            : sisaHari === 0
+              ? "Hari ini"
+              : "Sudah lewat",
+    },
+    {
+      ikon: "solar:wallet-money-bold-duotone",
+      label: "Uang jaminan",
+      nilai: formatRupiahSingkat(data?.uang_jaminan),
+      aksen: data?.uang_jaminan ? AKSEN.mint : undefined,
+    },
+  ].filter(Boolean) as ItemStat[];
+
   return (
-    <div className="w-full lg:w-2/3 space-y-6 pb-10">
-      {/* 1. HEADER */}
-      <div className="border-b border-white/5 pb-4">
-        <div className="flex justify-between items-start gap-3 mb-3">
-          <div className="flex-1">
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <span
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase border ${transactionBadge.color} flex items-center gap-1.5`}
-              >
-                <Icon icon={transactionBadge.icon} className="text-sm" />{" "}
-                {transactionBadge.label}
-              </span>
-              <span className="px-3 py-1.5 bg-slate-700/30 text-slate-300 border border-slate-600/30 rounded-lg text-xs font-bold uppercase">
-                {getCategoryLabel(data?.kategori || "RUMAH")}
-              </span>
+    <div className="w-full min-w-0 space-y-7 pb-10 lg:w-2/3">
+      {isSold && <SpandukTerjual label="terjual" />}
 
-              {data?.is_hot_deal && (
-                <span className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.16em] text-white">
-                  <span className="absolute inset-0 rounded-full bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 opacity-70 blur-[3px]" />
-                  <span className="absolute inset-0 rounded-full bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 animate-pulse opacity-80" />
-                  <span className="relative inline-flex items-center gap-1.5 px-1.5">
-                    <Icon
-                      icon="solar:fire-bold-duotone"
-                      className="text-sm text-yellow-100"
-                    />
-                    HOT DEAL
-                  </span>
-                </span>
-              )}
-            </div>
+      {/* ══ 1. KEPALA HALAMAN ══ */}
+      <Bagian>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Chip ikon={badge.icon} aksen={badge.aksen}>
+            {badge.label}
+          </Chip>
+          <Chip ikon={kategori.icon}>{kategori.label}</Chip>
+          {data?.is_hot_deal && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-orange-400/30 bg-gradient-to-r from-orange-500/20 to-rose-500/20 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.1em] text-orange-200"
+              title="Hot Deal"
+            >
+              <Icon icon="solar:fire-bold" className="text-sm" />
+              <span className="hidden sm:inline">Hot deal</span>
+            </span>
+          )}
+          {sisaHari != null && sisaHari >= 0 && sisaHari <= 7 && (
+            <Chip ikon="solar:alarm-bold-duotone" aksen={AKSEN.rose}>
+              {sisaHari === 0 ? "Lelang hari ini" : `${sisaHari} hari lagi`}
+            </Chip>
+          )}
+        </div>
 
-            <h1 className="text-2xl md:text-3xl font-black text-white leading-tight mb-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-black leading-tight tracking-tight text-white md:text-[32px]">
               {data?.judul || "Properti Tanpa Judul"}
             </h1>
 
-            <div className="flex items-start gap-2 mb-3">
+            <div className="mt-3 flex items-start gap-2">
               <Icon
                 icon="solar:map-point-bold"
-                className="text-emerald-400 text-xl flex-shrink-0 mt-0.5"
+                className={`mt-0.5 shrink-0 text-lg ${AKSEN.sky.ikon}`}
               />
-              <div className="flex-1">
-                <p className="text-base text-white font-medium leading-snug">
-                  {data?.alamat_lengkap ||
-                    [
-                      data?.kelurahan,
-                      data?.kecamatan,
-                      data?.kota,
-                      data?.provinsi,
-                    ]
-                      .filter(Boolean)
-                      .join(", ") ||
-                    "Lokasi tidak tersedia"}
-                </p>
-                {(data?.kelurahan ||
-                  data?.kecamatan ||
-                  data?.kota ||
-                  data?.provinsi) && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    {[
-                      data?.kelurahan,
-                      data?.kecamatan,
-                      data?.kota,
-                      data?.provinsi,
-                    ]
-                      .filter(Boolean)
-                      .join(", ") || "-"}
-                  </p>
-                )}
-              </div>
+              <p className="text-[15px] font-medium leading-snug text-white/85">
+                {alamatKepala}
+              </p>
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <span className="flex items-center gap-1">
-                <Icon icon="solar:eye-bold" /> {data?.dilihat ?? 0}
+            <div className="mt-3.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] font-semibold text-white/40">
+              <span className="inline-flex items-center gap-1.5">
+                <Icon icon="solar:eye-bold" /> {data?.dilihat ?? 0} dilihat
               </span>
-              <span>•</span>
-              <span>ID: {data?.id_property || "-"}</span>
-              <span>•</span>
-              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded text-[10px] border border-emerald-500/20 font-medium">
+              <span className="inline-flex items-center gap-1.5">
+                <Icon icon="solar:hashtag-bold" /> ID {data?.id_property || "-"}
+              </span>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${
+                  isSold ? AKSEN.rose.chip : AKSEN.emerald.chip
+                }`}
+              >
+                <Icon
+                  icon={isSold ? "solar:lock-keyhole-bold" : "solar:check-circle-bold"}
+                  className="text-xs"
+                />
                 {data?.status_tayang || "TERSEDIA"}
               </span>
             </div>
           </div>
 
-          {/* Share button — glowing */}
-          <div className="relative flex-shrink-0 group">
-            {/* Outer ping ring — always animating */}
-            <span className="absolute inset-0 rounded-xl bg-emerald-400/25 animate-ping" style={{ animationDuration: "1.8s" }} />
-            {/* Soft blur glow behind button */}
-            <span className="absolute inset-0 rounded-xl bg-emerald-500/30 blur-md transition-all duration-500 group-hover:blur-lg group-hover:bg-emerald-400/40" />
-            {/* Button */}
-            <button
-              onClick={handleShare}
-              title="Bagikan properti ini"
-              className={`
-                relative w-10 h-10 flex items-center justify-center rounded-xl
-                border transition-all duration-300 active:scale-95
-                ${shared
-                  ? "border-emerald-300/60 bg-emerald-500/30 shadow-[0_0_20px_rgba(52,211,153,0.6)]"
-                  : "border-emerald-400/40 bg-emerald-500/15 shadow-[0_0_14px_rgba(52,211,153,0.35)] hover:shadow-[0_0_22px_rgba(52,211,153,0.55)] hover:bg-emerald-500/25 hover:border-emerald-300/60"
-                }
-              `}
-            >
-              <Icon
-                icon={shared ? "solar:check-circle-bold-duotone" : "solar:share-bold"}
-                className={`text-lg transition-all duration-300 ${shared ? "text-emerald-200 scale-110" : "text-emerald-300"}`}
-              />
-            </button>
-          </div>
+          <TombolBagikan onClick={handleShare} tersalin={shared} />
         </div>
-      </div>
+      </Bagian>
 
-      {/* 1.5. PIC / VENDOR & LAMPIRAN — KHUSUS STOKER & MANAJEMEN */}
+      {/* ══ 1.5. PIC / VENDOR & LAMPIRAN — KHUSUS STOKER & MANAJEMEN ══
+          Sengaja tetap emas & mencolok: satu-satunya blok di halaman ini yang
+          isinya TIDAK boleh dibacakan ke klien, jadi perbedaannya harus
+          terlihat dari sudut mata. */}
       {canSeePicInfo && (
-        <div className="relative rounded-2xl p-px bg-gradient-to-br from-amber-300/60 via-amber-500/20 to-white/5 shadow-[0_20px_60px_-15px_rgba(245,158,11,0.25)]">
-          {/* Animated shimmer sweep along the border */}
-          <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
-            <div className="absolute -inset-y-10 -left-1/3 w-1/3 bg-gradient-to-r from-transparent via-amber-200/50 to-transparent rotate-12 animate-shimmer" />
-          </div>
+        <div className="relative rounded-[1.5rem] bg-gradient-to-br from-amber-300/50 via-amber-500/15 to-white/[0.04] p-px shadow-[0_20px_60px_-15px_rgba(245,158,11,0.25)]">
+          <div
+            className="relative overflow-hidden rounded-[1.5rem] p-5 ring-1 ring-inset ring-white/[0.04] sm:p-6"
+            style={{ background: SURFACE.panel }}
+          >
+            <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-amber-400/[0.08] blur-[80px]" />
 
-          <div className="relative overflow-hidden rounded-2xl bg-[#080706] p-5 sm:p-6 ring-1 ring-inset ring-white/[0.04]">
-            {/* Ambient glow */}
-            <div className="pointer-events-none absolute -top-24 -right-20 w-64 h-64 bg-amber-400/[0.08] rounded-full blur-[80px]" />
-            <div className="pointer-events-none absolute -bottom-24 -left-20 w-56 h-56 bg-yellow-500/[0.05] rounded-full blur-[80px]" />
-            {/* Fine diagonal texture */}
-            <div
-              className="pointer-events-none absolute inset-0 opacity-[0.03] mix-blend-screen"
-              style={{
-                backgroundImage:
-                  "repeating-linear-gradient(135deg, rgba(245,158,11,0.6) 0px, rgba(245,158,11,0.6) 1px, transparent 1px, transparent 14px)",
-              }}
-            />
-
-            {/* Header */}
-            <div className="relative flex items-center justify-between mb-5">
+            <div className="relative mb-5 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">
-                <div className="relative flex items-center justify-center w-7 h-7 rounded-lg bg-gradient-to-br from-amber-300 to-yellow-600 shadow-[0_0_16px_rgba(245,158,11,0.4)]">
-                  <Icon icon="solar:shield-keyhole-bold" className="text-[#1a1206] text-sm" />
-                </div>
-                <span className="text-[11px] sm:text-xs font-extrabold uppercase tracking-[0.28em] bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-300 bg-clip-text text-transparent">
-                  Info Stok Internal
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-amber-300 to-yellow-600 shadow-[0_0_16px_rgba(245,158,11,0.4)]">
+                  <Icon
+                    icon="solar:shield-keyhole-bold"
+                    className="text-sm text-[#1a1206]"
+                  />
+                </span>
+                <span className="bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-300 bg-clip-text text-[11px] font-extrabold uppercase tracking-[0.24em] text-transparent sm:text-xs">
+                  Info stok internal
                 </span>
               </div>
-              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-200/90 bg-white/[0.03] border border-amber-400/25 rounded-full px-3 py-1.5 backdrop-blur-sm">
-                <Icon icon="solar:lock-keyhole-bold" className="text-amber-400 text-xs" />
-                Akses Stoker
+              <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-amber-400/25 bg-white/[0.03] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-200/90">
+                <Icon icon="solar:lock-keyhole-bold" className="text-xs text-amber-400" />
+                Akses stoker
               </span>
             </div>
 
-            <div className="relative space-y-px rounded-xl overflow-hidden border border-amber-400/15 bg-white/[0.015]">
-              {/* PIC / VENDOR — full width, nama tidak terpotong */}
-              <div className="relative p-4 sm:p-5 flex items-start gap-4 hover:bg-amber-400/[0.04] transition-colors">
-                <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-amber-300/20 to-amber-600/10 border border-amber-400/30 flex items-center justify-center flex-shrink-0">
-                  <div className="absolute inset-0 rounded-xl bg-amber-400/10 blur-md" />
+            <div className="relative space-y-px overflow-hidden rounded-2xl border border-amber-400/15 bg-white/[0.015]">
+              {/* PIC / VENDOR */}
+              <div className="flex items-start gap-4 p-4 transition-colors hover:bg-amber-400/[0.04] sm:p-5">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-300/20 to-amber-600/10">
                   <Icon
                     icon="solar:user-id-bold-duotone"
-                    className="relative text-amber-300 text-2xl"
+                    className="text-2xl text-amber-300"
                   />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300/60 mb-1.5">
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300/60">
                     PIC / Vendor
                   </p>
-                  <p className="text-base sm:text-lg font-extrabold text-white leading-snug break-words tracking-tight">
+                  <p className="break-words text-base font-extrabold leading-snug tracking-tight text-white sm:text-lg">
                     {data?.vendor || "Belum diisi"}
                   </p>
                 </div>
@@ -447,13 +649,11 @@ export default function DetailInfo({
                       setTimeout(() => setVendorCopied(false), 1500);
                     }}
                     title="Salin nama vendor"
-                    className="flex-shrink-0 w-9 h-9 rounded-lg bg-white/[0.03] border border-amber-400/20 flex items-center justify-center text-amber-300/80 hover:bg-amber-400/10 hover:border-amber-300/50 hover:text-amber-200 transition-all active:scale-95"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-amber-400/20 bg-white/[0.03] text-amber-300/80 transition-all hover:border-amber-300/50 hover:bg-amber-400/10 hover:text-amber-200 active:scale-95"
                   >
                     <Icon
                       icon={
-                        vendorCopied
-                          ? "solar:check-circle-bold"
-                          : "solar:copy-bold"
+                        vendorCopied ? "solar:check-circle-bold" : "solar:copy-bold"
                       }
                       className="text-sm"
                     />
@@ -461,61 +661,62 @@ export default function DetailInfo({
                 )}
               </div>
 
-              {/* Divider */}
               <div className="h-px bg-gradient-to-r from-transparent via-amber-400/20 to-transparent" />
 
-              {/* LAMPIRAN — hingga 3 dokumen */}
-              <div className="relative p-4 sm:p-5">
-                <div className="flex items-center gap-4 mb-3.5">
-                  <div className="relative w-12 h-12 rounded-xl bg-gradient-to-br from-amber-300/20 to-amber-600/10 border border-amber-400/30 flex items-center justify-center flex-shrink-0">
-                    <div className="absolute inset-0 rounded-xl bg-amber-400/10 blur-md" />
+              {/* LAMPIRAN */}
+              <div className="p-4 sm:p-5">
+                <div className="mb-3.5 flex items-center gap-4">
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-300/20 to-amber-600/10">
                     <Icon
                       icon="solar:folder-with-files-bold-duotone"
-                      className="relative text-amber-300 text-2xl"
+                      className="text-2xl text-amber-300"
                     />
-                  </div>
+                  </span>
                   <div className="min-w-0">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300/60 mb-1.5">
-                      Lampiran Dokumen
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300/60">
+                      Lampiran dokumen
                     </p>
                     <p className="text-sm font-extrabold text-white">
                       {lampiranList.length > 0
-                        ? `${lampiranList.length} Dokumen Tersedia`
+                        ? `${lampiranList.length} dokumen tersedia`
                         : "Belum ada lampiran"}
                     </p>
                   </div>
                 </div>
 
                 {lampiranList.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                     {lampiranList.slice(0, 3).map((url, i) => (
                       <a
                         key={i}
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="group relative flex items-center gap-3 px-3.5 py-3 rounded-xl bg-gradient-to-br from-amber-400/[0.07] to-transparent border border-amber-400/20 text-amber-50 hover:border-amber-300/50 hover:from-amber-400/[0.14] transition-all active:scale-[0.98] overflow-hidden"
+                        className="group relative flex items-center gap-3 overflow-hidden rounded-xl border border-amber-400/20 bg-gradient-to-br from-amber-400/[0.07] to-transparent px-3.5 py-3 text-amber-50 transition-all hover:border-amber-300/50 hover:from-amber-400/[0.14] active:scale-[0.98]"
                       >
-                        <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-300/25 to-amber-600/10 border border-amber-400/30 flex items-center justify-center flex-shrink-0">
-                          <Icon icon="solar:paperclip-bold" className="text-amber-300 text-sm" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <span className="block text-xs font-bold truncate">
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-amber-400/30 bg-gradient-to-br from-amber-300/25 to-amber-600/10">
+                          <Icon
+                            icon="solar:paperclip-bold"
+                            className="text-sm text-amber-300"
+                          />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-bold">
                             Dokumen {i + 1}
                           </span>
-                          <span className="block text-[10px] text-amber-200/50 truncate">
+                          <span className="block truncate text-[10px] text-amber-200/50">
                             Buka lampiran
                           </span>
                         </div>
                         <Icon
                           icon="solar:arrow-right-up-linear"
-                          className="text-sm opacity-40 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all flex-shrink-0"
+                          className="shrink-0 text-sm opacity-40 transition-all group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:opacity-100"
                         />
                       </a>
                     ))}
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2 px-3.5 py-3 rounded-xl bg-white/[0.02] border border-white/5 text-slate-500 text-xs">
+                  <div className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-3.5 py-3 text-xs text-white/35">
                     <Icon icon="solar:file-corrupted-linear" className="text-base" />
                     Tidak ada dokumen yang diunggah untuk listing ini.
                   </div>
@@ -526,421 +727,245 @@ export default function DetailInfo({
         </div>
       )}
 
-      {/* 2. RINGKASAN LELANG */}
-      <div>
-        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-          <Icon
-            icon="solar:home-2-bold-duotone"
-            className="text-emerald-400"
-          />
-          Ringkasan Lelang
-        </h3>
+      {/* ══ 2. RINGKASAN LELANG — SATU BARIS ══ */}
+      <Bagian>
+        <Judul ikon="mdi:gavel" aksen={AKSEN_SECTION_ASET.jadwal}>
+          Ringkasan lelang
+        </Judul>
+        <StatStrip items={ringkasan} />
+      </Bagian>
 
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Luas Tanah */}
-          <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-4 hover:border-emerald-400/40 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group">
-            <div className="flex flex-col items-center text-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                <Icon
-                  icon="solar:ruler-angular-bold-duotone"
-                  className="text-amber-400 text-2xl"
-                />
-              </div>
-              <div>
-                <p className="text-2xl font-black text-white">
-                  {data?.luas_tanah ?? "-"}
-                </p>
-                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wide">
-                  Luas Tanah (m²)
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Legalitas */}
-          <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-4 hover:border-emerald-400/40 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group">
-            <div className="flex flex-col items-center text-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                <Icon
-                  icon="solar:shield-check-bold-duotone"
-                  className="text-emerald-400 text-2xl"
-                />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-emerald-400">
-                  {data?.legalitas || "-"}
-                </p>
-                {canSeeNomorLegalitas && data?.nomor_legalitas && (
-                  <p className="text-xs text-gray-300 font-semibold mt-0.5">
-                    No. {data.nomor_legalitas}
-                  </p>
-                )}
-                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wide">
-                  Legalitas
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Tanggal Lelang */}
-          <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-4 hover:border-emerald-400/40 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group">
-            <div className="flex flex-col items-center text-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-                <Icon
-                  icon="solar:calendar-date-bold-duotone"
-                  className="text-red-400 text-2xl"
-                />
-              </div>
-              <div>
-                <p className="text-sm font-black text-white">
-                  {formatTanggalLelang(data?.tanggal_lelang)}
-                </p>
-                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wide">
-                  Tanggal Lelang
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Uang Jaminan */}
-          <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-4 hover:border-emerald-400/40 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group">
-            <div className="flex flex-col items-center text-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center">
-                <Icon
-                  icon="solar:wallet-money-bold-duotone"
-                  className="text-yellow-400 text-2xl"
-                />
-              </div>
-              <div>
-                <p className="text-sm font-black text-white break-words">
-                  {formatRupiah(data?.uang_jaminan)}
-                </p>
-                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wide">
-                  Uang Jaminan
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. DESKRIPSI */}
+      {/* ══ 3. DESKRIPSI ══ */}
       {data?.deskripsi && (
-        <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5">
-          <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-              <Icon
-                icon="solar:document-text-bold-duotone"
-                className="text-blue-400"
-              />
-            </div>
-            Deskripsi Properti
-          </h3>
-          <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-line">
-            {data.deskripsi}
-          </p>
-        </div>
+        <Bagian>
+          <Judul
+            ikon="solar:document-text-bold-duotone"
+            aksen={AKSEN_SECTION_ASET.deskripsi}
+          >
+            Tentang aset ini
+          </Judul>
+          <Deskripsi teks={data.deskripsi} />
+        </Bagian>
       )}
 
-      {/* 4. LEGAL & SERTIFIKAT */}
-      <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5">
-        <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-            <Icon
-              icon="solar:shield-check-bold-duotone"
-              className="text-emerald-400"
+      {/* ══ 4. LEGALITAS & STATUS ══ */}
+      <Bagian>
+        <Judul ikon="solar:shield-check-bold-duotone" aksen={AKSEN_SECTION_ASET.legal}>
+          Legalitas &amp; status
+        </Judul>
+        <Kartu padat>
+          <div className="px-5 py-2">
+            <BarisFakta
+              ikon="solar:document-add-bold-duotone"
+              label="Jenis sertifikat"
+              catatan={
+                multiBidang ? (
+                  <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                    <span className={`font-bold ${AKSEN.emerald.teks}`}>
+                      {bidangSertifikat.length} bidang
+                    </span>
+                    <span className="text-white/20">·</span>
+                    <span className="text-white/45">ketuk untuk lihat semua nomor</span>
+                  </span>
+                ) : (
+                  catatanSertifikat
+                )
+              }
+              onKlik={bukaSertifikat}
+              petunjuk={petunjukSertifikat}
+              nilai={
+                data?.legalitas ? (
+                  <span className={AKSEN.emerald.teks}>{data.legalitas}</span>
+                ) : (
+                  <span className="text-white/40">Tanya agent</span>
+                )
+              }
+              aksen={data?.legalitas ? AKSEN.emerald : undefined}
             />
-          </div>
-          Legal & Sertifikat
-        </h4>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
-            <span className="text-xs text-gray-400 block mb-1">
-              Jenis Sertifikat
-            </span>
-            <span className="text-sm text-emerald-400 font-bold">
-              {data?.legalitas || "-"}
-            </span>
-            {canSeeNomorLegalitas && data?.nomor_legalitas && (
-              <span className="text-xs text-gray-300 font-semibold block mt-0.5">
-                No. {data.nomor_legalitas}
-              </span>
+            <BarisFakta
+              ikon="solar:tag-horizontal-bold-duotone"
+              label="Status properti"
+              nilai={
+                <span className={isSold ? "text-rose-300" : "text-emerald-300"}>
+                  {data?.status_tayang || "TERSEDIA"}
+                </span>
+              }
+              aksen={isSold ? AKSEN.rose : AKSEN.emerald}
+            />
+            <BarisFakta
+              ikon="solar:calendar-date-bold-duotone"
+              label="Tanggal lelang"
+              catatan={
+                sisaHari != null && sisaHari > 0 ? `${sisaHari} hari lagi` : undefined
+              }
+              nilai={formatTanggalLelang(data?.tanggal_lelang)}
+              aksen={data?.tanggal_lelang ? aksenJadwal : undefined}
+            />
+            <BarisFakta
+              ikon="solar:wallet-money-bold-duotone"
+              label="Uang jaminan"
+              catatan="Disetor sebelum ikut lelang"
+              nilai={
+                data?.uang_jaminan ? (
+                  <span className={AKSEN.mint.teks}>
+                    {formatRupiah(data.uang_jaminan)}
+                  </span>
+                ) : (
+                  <span className="text-white/40">Tanya agent</span>
+                )
+              }
+              aksen={data?.uang_jaminan ? AKSEN.mint : undefined}
+            />
+
+            {/* Tautan sumber — baris paling bawah, dan hanya untuk agent.
+                Ditaruh terakhir karena ia satu-satunya baris yang MEMBAWA
+                PEMBACA KELUAR dari halaman: menempatkannya di tengah membuat
+                mata berhenti di sana sebelum sempat membaca jadwal & jaminan
+                di bawahnya.
+
+                `onKlik` sengaja tidak dipakai walau baris ini bisa ditekan:
+                BarisFakta akan membungkus seluruh barisnya jadi <button>, dan
+                <a> di dalam <button> adalah HTML yang tidak sah — di sebagian
+                browser tautannya jadi tidak bisa dibuka di tab baru. Jadi yang
+                interaktif hanya tombolnya sendiri. */}
+            {linkSumber && (
+              <BarisFakta
+                ikon="solar:link-circle-bold-duotone"
+                label="Link properti"
+                nilai={
+                  <a
+                    href={linkSumber}
+                    target="_blank"
+                    // noopener wajib bersama target="_blank": tanpanya halaman
+                    // tujuan bisa menyetir tab ini lewat window.opener.
+                    rel="noopener noreferrer"
+                    // Alamat lengkapnya pindah ke tooltip: barisnya kini cuma
+                    // label + tombol, tapi agent yang ragu tetap bisa memastikan
+                    // tujuannya tanpa harus menekan lebih dulu.
+                    title={linkSumber}
+                    // Sengaja seukuran teks nilai di baris-baris lain (bukan
+                    // tombol setinggi 32px): begitu tingginya melebihi label di
+                    // sebelah kiri, baris ini jadi lebih tinggi daripada Status
+                    // & Uang jaminan, dan deretan yang tadinya rata terlihat
+                    // seperti salah render. `leading-none` + py-1 menahan
+                    // tingginya persis di sekitar tinggi satu baris teks.
+                    className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold uppercase leading-none tracking-wider transition-all duration-200 hover:bg-white/[0.06] active:scale-[0.97] ${AKSEN.sky.chip}`}
+                  >
+                    <Icon
+                      icon="solar:square-arrow-right-up-bold"
+                      className="text-[11px]"
+                    />
+                    Buka link
+                  </a>
+                }
+                aksen={AKSEN.sky}
+              />
             )}
           </div>
-          <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
-            <span className="text-xs text-gray-400 block mb-1">
-              Status Properti
-            </span>
-            <span className="text-sm text-emerald-400 font-semibold">
-              {data?.status_tayang || "TERSEDIA"}
-            </span>
-          </div>
-        </div>
-      </div>
+        </Kartu>
+      </Bagian>
 
-      {/* 5. ALAMAT */}
-      <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5">
-        <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-            <Icon
-              icon="solar:map-point-wave-bold-duotone"
-              className="text-emerald-400"
-            />
-          </div>
-          Alamat Lengkap
-        </h4>
-        <div className="space-y-3">
-          <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
-            <span className="text-xs text-gray-400 block mb-1">Alamat</span>
-            <span className="text-sm text-white font-medium">
-              {data?.alamat_lengkap || "-"}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
-              <span className="text-xs text-gray-400 block mb-1">
-                Kelurahan
-              </span>
-              <span className="text-sm text-white font-semibold">
-                {data?.kelurahan ?? "-"}
-              </span>
-            </div>
-            <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
-              <span className="text-xs text-gray-400 block mb-1">
-                Kecamatan
-              </span>
-              <span className="text-sm text-white font-semibold">
-                {data?.kecamatan ?? "-"}
-              </span>
-            </div>
-            <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
-              <span className="text-xs text-gray-400 block mb-1">
-                Kota/Kabupaten
-              </span>
-              <span className="text-sm text-white font-semibold">
-                {data?.kota ?? "-"}
-              </span>
-            </div>
-            <div className="py-2 px-3 bg-slate-900/30 rounded-lg">
-              <span className="text-xs text-gray-400 block mb-1">
-                Provinsi
-              </span>
-              <span className="text-sm text-white font-semibold">
-                {data?.provinsi ?? "-"}
-              </span>
-            </div>
-          </div>
-          {data?.area_lokasi && (
-            <div className="py-2 px-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg">
-              <span className="text-xs text-emerald-400 block mb-1">Area</span>
-              <span className="text-sm text-white font-semibold">
-                {data.area_lokasi}
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 6. MAP */}
-      <div className="bg-gradient-to-br from-slate-800/40 to-slate-900/40 border border-slate-700/30 rounded-xl p-5 backdrop-blur-sm">
-        <div className="flex justify-between items-end mb-4">
-          <h3 className="text-sm font-bold flex items-center gap-2 text-white">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-500/20 to-orange-500/20 border border-red-500/30 flex items-center justify-center">
-              <Icon
-                icon="solar:map-bold-duotone"
-                className="text-red-400 text-xl"
-              />
-            </div>
-            Peta Lokasi & Fasilitas Sekitar
-          </h3>
-
-          {(data?.latitude != null && data?.longitude != null) ||
-          data?.alamat_lengkap ? (
-            <a
-              href={
-                data?.latitude != null && data?.longitude != null
-                  ? `https://www.google.com/maps/search/?api=1&query=${data.latitude},${data.longitude}`
-                  : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                      data?.alamat_lengkap || ""
-                    )}`
-              }
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all flex items-center gap-1 group"
-            >
-              Buka di Google Maps
-              <Icon
-                icon="solar:arrow-right-up-linear"
-                className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"
-              />
-            </a>
-          ) : null}
-        </div>
-
-        {data?.latitude != null && data?.longitude != null ? (
-          <div className="relative w-full h-[550px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl ring-1 ring-white/5">
-            <Maps
-              lat={data.latitude}
-              lng={data.longitude}
-              address={data.alamat_lengkap}
-            />
-          </div>
-        ) : data?.alamat_lengkap ? (
-          <div className="relative w-full h-[550px] bg-slate-900 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl ring-1 ring-white/5">
-            <Maps address={data.alamat_lengkap} />
-          </div>
-        ) : (
-          <div className="bg-slate-900/30 border border-slate-700/30 rounded-xl p-8 flex flex-col items-center justify-center text-center min-h-[400px]">
-            <Icon
-              icon="solar:map-point-bold-duotone"
-              className="text-6xl text-slate-700 mb-3"
-            />
-            <h4 className="text-white font-bold mb-2">
-              Lokasi Belum Tersedia
-            </h4>
-            <p className="text-sm text-gray-400 max-w-md">
-              Koordinat dan alamat belum diinput. Hubungi agent untuk informasi
-              lokasi.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* 7. RIWAYAT LELANG */}
-      <RiwayatLelang
+      {/* ══ 5. LOKASI & SEKITAR ══ */}
+      <SekitarLokasi
         idProperty={data?.id_property}
-        currentIdProperty={data?.id_property}
+        awal={data?.sekitar ?? null}
+        latitude={data?.latitude}
+        longitude={data?.longitude}
+        alamatLengkap={data?.alamat_lengkap}
+        wilayah={[data?.kelurahan, data?.kecamatan, data?.kota, data?.provinsi]}
+        areaLokasi={data?.area_lokasi}
+        aksesTerdekat={aksesTerdekat}
       />
 
-      {/* 8. EDUKASI LELANG */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800/90 to-slate-900 border border-emerald-500/20 rounded-2xl p-6 md:p-8 shadow-2xl">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 mb-4 shadow-lg shadow-emerald-500/30">
-            <Icon
-              icon="solar:verified-check-bold"
-              className="text-3xl text-white"
-            />
-          </div>
-          <h3 className="text-2xl md:text-3xl font-black text-white mb-2">
-            Kenapa Beli Rumah Lelang?
-          </h3>
-          <p className="text-sm text-gray-400 max-w-2xl mx-auto">
-            Dapatkan properti impian dengan harga di bawah pasar. Kami bantu
-            sampai serah terima kunci.
-          </p>
+      {/* ══ 6. RIWAYAT LELANG ══ */}
+      <RiwayatLelang
+        idProperty={data?.id_property}
+        initialData={riwayatLelang}
+        isLoggedIn={isLoggedIn}
+      />
+
+      {/* ══ 7. EDUKASI LELANG ══
+          Isinya sama untuk semua aset, jadi tempatnya paling bawah dan
+          bentuknya ringkas — pembaca yang sudah paham lelang tidak perlu
+          menggulung tiga layar untuk melewatinya. */}
+      <Bagian akhir>
+        <Judul
+          ikon="solar:lightbulb-bolt-bold-duotone"
+          aksen={AKSEN.violet}
+          keterangan="Berlaku umum untuk pembelian lewat lelang, bukan khusus aset ini."
+        >
+          Kenapa beli lewat lelang?
+        </Judul>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          {ALASAN_LELANG.map((a) => (
+            <div
+              key={a.judul}
+              className={`rounded-2xl border p-4 ${LINE.card} ${a.aksen.wash}`}
+            >
+              <span
+                className={`mb-3 grid h-10 w-10 place-items-center rounded-xl border ${a.aksen.kotak}`}
+              >
+                <Icon icon={a.ikon} className="text-xl" />
+              </span>
+              <h4 className="text-sm font-extrabold text-white">{a.judul}</h4>
+              <p className="mt-1 text-xs leading-relaxed text-white/45">{a.isi}</p>
+            </div>
+          ))}
         </div>
 
-        <div className="grid md:grid-cols-3 gap-4 mb-8">
-          <div className="bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 rounded-xl p-5 hover:border-emerald-400/50 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group">
-            <div className="flex items-start gap-3 mb-3">
-              <div className="w-12 h-12 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                <Icon
-                  icon="solar:wallet-money-bold-duotone"
-                  className="text-2xl text-emerald-400"
-                />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-base font-bold text-white mb-1">
-                  Harga Lebih Murah
-                </h4>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Properti lelang umumnya 20-40% lebih murah dari harga pasar
-                  karena harus cepat terjual.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-blue-500/10 to-transparent border border-blue-500/20 rounded-xl p-5 hover:border-blue-400/50 hover:shadow-lg hover:shadow-blue-500/10 transition-all group">
-            <div className="flex items-start gap-3 mb-3">
-              <div className="w-12 h-12 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                <Icon
-                  icon="solar:shield-check-bold-duotone"
-                  className="text-2xl text-blue-400"
-                />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-base font-bold text-white mb-1">
-                  Legal Terjamin
-                </h4>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Diawasi bank/lembaga resmi, sertifikat dan dokumen sudah
-                  terverifikasi sebelum lelang.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gradient-to-br from-purple-500/10 to-transparent border border-purple-500/20 rounded-xl p-5 hover:border-purple-400/50 hover:shadow-lg hover:shadow-purple-500/10 transition-all group">
-            <div className="flex items-start gap-3 mb-3">
-              <div className="w-12 h-12 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                <Icon
-                  icon="solar:clock-circle-bold-duotone"
-                  className="text-2xl text-purple-400"
-                />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-base font-bold text-white mb-1">
-                  Proses Cepat
-                </h4>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Tanpa proses negosiasi berlarut-larut. Menang lelang langsung
-                  proses akad.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-r from-emerald-500/10 via-blue-500/10 to-purple-500/10 border border-white/10 rounded-xl p-6">
-          <div className="flex flex-col md:flex-row items-center gap-6">
-            <div className="flex-shrink-0">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-blue-500 flex items-center justify-center shadow-lg">
-                <Icon
-                  icon="solar:key-bold-duotone"
-                  className="text-4xl text-white"
-                />
-              </div>
-            </div>
-            <div className="flex-1 text-center md:text-left">
-              <h4 className="text-lg md:text-xl font-black text-white mb-2">
-                Kami Dampingi Sampai Serah Terima Kunci
+        <Kartu className="mt-3">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <span
+              className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border ${AKSEN.mint.kotak}`}
+            >
+              <Icon icon="solar:key-bold-duotone" className="text-2xl" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h4 className="text-base font-extrabold text-white">
+                Kami dampingi sampai serah terima kunci
               </h4>
-              <p className="text-sm text-gray-300 leading-relaxed mb-4">
-                Tidak perlu khawatir soal rumah masih ditempati atau dokumen
-                bermasalah. Tim kami akan memastikan properti siap serah terima
-                dengan kondisi sesuai kesepakatan lelang.
+              <p className="mt-1 text-xs leading-relaxed text-white/45">
+                Rumah masih ditempati atau dokumen bermasalah bukan urusan Anda
+                sendiri — tim kami memastikan aset siap serah terima sesuai
+                kesepakatan lelang.
               </p>
-              <div className="flex flex-wrap gap-3 justify-center md:justify-start">
-                <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold">
-                  <Icon icon="solar:check-circle-bold" className="text-base" />
-                  Pendampingan Legal
-                </div>
-                <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold">
-                  <Icon icon="solar:check-circle-bold" className="text-base" />
-                  Bantu Eksekusi
-                </div>
-                <div className="flex items-center gap-2 text-xs text-emerald-400 font-semibold">
-                  <Icon icon="solar:check-circle-bold" className="text-base" />
-                  Garansi Serah Terima
-                </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {["Pendampingan legal", "Bantu eksekusi", "Garansi serah terima"].map(
+                  (t) => (
+                    <Chip key={t} ikon="solar:check-circle-bold" aksen={AKSEN.mint}>
+                      {t}
+                    </Chip>
+                  ),
+                )}
               </div>
             </div>
           </div>
-        </div>
+        </Kartu>
 
-        <div className="mt-6 flex items-start gap-2 p-3 bg-slate-900/50 rounded-lg border border-slate-700/50">
-          <Icon
-            icon="solar:info-circle-bold"
-            className="text-gray-500 text-base flex-shrink-0 mt-0.5"
-          />
-          <p className="text-[11px] text-gray-500 leading-relaxed">
-            Informasi di atas bersifat umum. Untuk detail spesifik properti
-            ini, konsultasi dengan agent kami melalui tombol WhatsApp di
-            sidebar.
-          </p>
-        </div>
-      </div>
+        <p className="mt-4 flex items-start gap-2 text-[11px] leading-relaxed text-white/25">
+          <Icon icon="solar:info-circle-linear" className="mt-0.5 shrink-0 text-sm" />
+          Untuk detail spesifik aset ini, konsultasikan dengan agent kami lewat tombol
+          WhatsApp di panel sebelah.
+        </p>
+      </Bagian>
+
+      {/* Daftar nomor sertifikat — dirender lewat portal, jadi posisinya di
+          pohon JSX tidak berpengaruh pada tata letak halaman. */}
+      {multiBidang && (
+        <DaftarSertifikatSheet
+          open={sertifikatTerbuka}
+          onClose={() => setSertifikatTerbuka(false)}
+          nomorLegalitas={data?.nomor_legalitas}
+          jenis={data?.legalitas}
+          luasTotal={data?.luas_tanah}
+          kodeAset={
+            data?.kode_properti && data.kode_properti !== "-"
+              ? data.kode_properti
+              : data?.id_property
+          }
+        />
+      )}
     </div>
   );
 }

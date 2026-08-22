@@ -489,11 +489,19 @@ function normalizeAuctionRows(raw: any): AuctionHistoryRow[] {
     : Array.isArray(raw)
     ? raw
     : [];
-  return source.map((item: any) => ({
-    id_property: item?.id_property ?? null,
-    agent_nama: item?.agent_nama ?? item?.nama ?? item?.agent ?? null,
-    id_agent: String(item?.id_agent ?? "").trim() || null,
-  }));
+  return (
+    source
+      // Riwayat bisa memuat lot lain yang bidangnya cuma BERIRISAN dengan aset
+      // ini (paket yang memuatnya, atau pecahannya). Agent yang menayangkan lot
+      // seperti itu tidak pernah menawarkan aset ini, jadi tidak boleh ikut jadi
+      // kandidat pembagian komisi. `cakupan` absen (respons lama) dianggap sama.
+      .filter((item: any) => (item?.cakupan ?? "SAMA") === "SAMA")
+      .map((item: any) => ({
+        id_property: item?.id_property ?? null,
+        agent_nama: item?.agent_nama ?? item?.nama ?? item?.agent ?? null,
+        id_agent: String(item?.id_agent ?? "").trim() || null,
+      }))
+  );
 }
 
 function buildCopicDefinitions(

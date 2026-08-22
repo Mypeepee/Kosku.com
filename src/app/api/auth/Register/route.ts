@@ -1,22 +1,11 @@
 import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import { attributeReferral } from "@/lib/referral";
 import { notifyNewUserRegistration } from "@/lib/notifications";
+import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/**
- * Prisma singleton
- */
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-  });
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 type LoginMode = "email" | "phone";
 

@@ -1,9 +1,8 @@
 // src/app/api/pemilu/[id_acara]/pilih/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import prisma from "@/lib/prisma";
 import Pusher from "pusher";
 
-const prisma = new PrismaClient();
 
 const pusher = new Pusher({
   appId: process.env.PUSHER_APP_ID!,

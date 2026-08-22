@@ -1,9 +1,24 @@
 "use client";
 
 import React, { useRef } from "react";
+import Link from "next/link";
 import { Icon } from "@iconify/react";
-import PropertyCard from "@/app/properti/[slug]/components/PropertyCard";
+import {
+  PropertyCard,
+  getPropertyUrl,
+} from "@/components/property/PropertyCard";
 import type { PropertyItem } from "@/app/properti/[slug]/types";
+
+/**
+ * Blok "Properti Serupa" di halaman detail Jual — dan Lelang, yang me-re-export
+ * komponen ini (lihat SimilarPropertiesLelang.tsx).
+ *
+ * Kartunya kartu BERSAMA, sama dengan /Jual, /Lelang, halaman "Semua" dan
+ * beranda. Sebelumnya blok ini memakai kartu lama milik halaman kategori, jadi
+ * listing lelang di sini tampil tanpa hitung mundur maupun penanda turun harga
+ * — persis listing yang sama, tampil berbeda hanya karena pengunjung sampai ke
+ * situ lewat halaman detail.
+ */
 
 interface SimilarPropertiesProps {
   items?: PropertyItem[];
@@ -57,16 +72,22 @@ export default function SimilarProperties({ items = [] }: SimilarPropertiesProps
       </div>
 
       {/* SCROLLABLE CARDS */}
+      {/* items-stretch + rantai h-full sampai ke kartunya: PropertyCard memakai
+          `flex flex-col h-full` supaya footer agent menempel di dasar. Tanpa
+          rantai itu tiap kartu setinggi isinya sendiri, dan judul dua baris
+          membuat satu kartu lebih jangkung dari tetangganya. */}
       <div
         ref={scrollRef}
-        className="flex snap-x snap-mandatory gap-3 overflow-x-auto scrollbar-hide pb-3 px-0.5 scroll-pl-0.5"
+        className="flex snap-x snap-mandatory items-stretch gap-3 overflow-x-auto scrollbar-hide pb-3 px-0.5 scroll-pl-0.5"
       >
         {items.map((item) => (
           <div
             key={item.id_property}
             className="w-[270px] shrink-0 snap-start sm:w-[300px]"
           >
-            <PropertyCard item={item} compact idBadge={item.id_property} />
+            <Link href={getPropertyUrl(item)} className="block h-full">
+              <PropertyCard item={item} />
+            </Link>
           </div>
         ))}
       </div>

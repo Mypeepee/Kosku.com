@@ -2,23 +2,10 @@
 import { type AuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
-import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import { cookies } from "next/headers";
 import { attributeReferral } from "@/lib/referral";
-
-/**
- * ✅ Prisma singleton (dev-safe)
- */
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-
-const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-  });
-
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+import prisma from "@/lib/prisma";
 
 function toPublicPhotoUrl(raw: string | null | undefined): string | null {
   if (!raw) return null;

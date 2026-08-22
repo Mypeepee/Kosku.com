@@ -5,20 +5,25 @@ import type { ListingHeaderStats } from "../lib/property-stats";
 import { MetricCard } from "./metric-card";
 import { AddListingCard } from "./AddListingCard";
 import ListingCardGrid from "./ListingCardGrid";
-import type { Listing } from "./listings-table";
-import type { ListingFilterState } from "@/app/dashboard/transaksi/components/ListingFilters";
+import type { DashboardListing } from "../lib/listing-item";
+import type { ListingFilters } from "../lib/filters";
 
 type ListingsPageProps = {
   headerStats: ListingHeaderStats & {
     totalPriority?: number;
   };
-  listings: Listing[];
-  currentAgentId: string;
+  listings: DashboardListing[];
+  currentAgentId?: string;
   userRole?: string;
+  /** jabatan_agent_enum — penentu wewenang OWNER/STOKER (bukan `userRole`). */
+  currentJabatan?: string;
   currentPage: number;
   totalItems: number;
   pageSize: number;
-  initialFilters: ListingFilterState;
+  initialFilters: ListingFilters;
+  /** Jumlah hasil per jenis transaksi & per tipe aset untuk angka di dropdown. */
+  jenisCounts?: Record<string, number>;
+  kategoriCounts?: Record<string, number>;
 };
 
 export default function ListingsPage({
@@ -26,10 +31,13 @@ export default function ListingsPage({
   listings,
   currentAgentId,
   userRole,
+  currentJabatan,
   currentPage,
   totalItems,
   pageSize,
   initialFilters,
+  jenisCounts,
+  kategoriCounts,
 }: ListingsPageProps) {
   const { total, totalHotDeal, totalViewed, totalPriority } = headerStats;
 
@@ -89,10 +97,13 @@ export default function ListingsPage({
           listings={listings}
           currentAgentId={currentAgentId}
           userRole={userRole}
+          currentJabatan={currentJabatan}
           currentPage={currentPage}
           totalItems={totalItems}
           pageSize={pageSize}
           initialFilters={initialFilters}
+          jenisCounts={jenisCounts}
+          kategoriCounts={kategoriCounts}
         />
       </div>
     </div>

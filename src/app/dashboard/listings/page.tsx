@@ -5,59 +5,36 @@ import ListingsPage from "./components/listings-page";
 import { fetchListingHeaderStats } from "./lib/property-stats";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
+import { listingScopeWhere } from "@/lib/listingStatusPermission";
+import { ambilLimitLelangSebelumnya } from "@/lib/auctionDiscount";
+import {
+  buildListingWhere,
+  orderByDasbor,
+  parseListingFilters,
+  JENIS_OPTIONS,
+  KATEGORI_OPTIONS,
+} from "./lib/filters";
+import {
+  DASHBOARD_LISTING_INCLUDE,
+  toDashboardListing,
+  type DashboardListing,
+} from "./lib/listing-item";
 
 const PAGE_SIZE = 27;
 
-const VALID_JENIS = ["PRIMARY", "SECONDARY", "LELANG", "SEWA"] as const;
-const VALID_KATEGORI = [
-  "RUMAH",
-  "APARTEMEN",
-  "RUKO",
-  "TANAH",
-  "GUDANG",
-  "HOTEL_DAN_VILLA",
-  "TOKO",
-  "PABRIK",
-] as const;
-
-function isValidImageUrl(s: string): boolean {
-  return s.startsWith("http://") || s.startsWith("https://") || s.startsWith("/");
-}
-function normalizeListingImages(raw: string | null | undefined): string[] {
-  if (!raw || raw.trim() === "") return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-    .map((s) => (isValidImageUrl(s) ? s : `/api/drive-image?id=${s}&sz=w400`));
-}
-function normalizeAgentPhoto(fileId: string | null | undefined): string {
-  if (!fileId || fileId.trim() === "") return "/images/default-profile.png";
-  const t = fileId.trim();
-  if (t.startsWith("http://") || t.startsWith("https://") || t.startsWith("/")) return t;
-  return `/api/drive-image?id=${t}&sz=w64`;
-}
-
-type RawSearch = string | string[] | undefined;
-const str = (v: RawSearch): string => (Array.isArray(v) ? v[0] : v ?? "").trim();
-
 type Props = {
-  searchParams: {
-    page?: string;
-    q?: string;
-    jenis?: string;
-    kategori?: string;
-    provinsi?: string;
-    kota?: string;
-    kecamatan?: string;
-    kelurahan?: string;
-  };
+  searchParams: Record<string, string | string[] | undefined>;
 };
 
 export default async function DashboardListingsPage({ searchParams }: Props) {
   const session = await getServerSession(authOptions);
   const agentId = (session?.user as any)?.agentId as string | undefined;
   const userRole = (session?.user as any)?.role as string | undefined;
+  // Wewenang OWNER/STOKER ada di `jabatan` (jabatan_agent_enum), BUKAN di
+  // `role` — `role` isinya `peran_enum` yang cuma USER|AGENT, sehingga
+  // perbandingan `role === "OWNER"` di sini dulu tidak pernah benar dan owner
+  // diam-diam hanya melihat listingnya sendiri.
+  const jabatan = (session?.user as any)?.jabatan as string | undefined;
 
   if (!session || !userRole) {
     return (
@@ -75,102 +52,88 @@ export default async function DashboardListingsPage({ searchParams }: Props) {
     );
   }
 
-  // ── Parse search params ──
-  const page = Math.max(1, Number(str(searchParams.page)) || 1);
-  const q = str(searchParams.q);
-  const jenisRaw = str(searchParams.jenis).toUpperCase();
-  const kategoriRaw = str(searchParams.kategori).toUpperCase();
-  const provinsi = str(searchParams.provinsi);
-  const kota = str(searchParams.kota);
-  const kecamatan = str(searchParams.kecamatan);
-  const kelurahan = str(searchParams.kelurahan);
+  // ── Filter & urutan: satu kontrak dipakai server + UI (./lib/filters) ──
+  const filters = parseListingFilters(searchParams);
+  const pageRaw = Array.isArray(searchParams.page) ? searchParams.page[0] : searchParams.page;
+  const page = Math.max(1, Number(pageRaw) || 1);
 
-  const jenis =
-    (VALID_JENIS as readonly string[]).includes(jenisRaw) ? (jenisRaw as Prisma.jenis_transaksi_enum) : undefined;
-  const kategori =
-    (VALID_KATEGORI as readonly string[]).includes(kategoriRaw) ? (kategoriRaw as Prisma.kategori_properti_enum) : undefined;
+  // Cakupannya diturunkan dari mesin izin yang sama dengan tombol "Tandai
+  // Terjual" (@/lib/listingStatusPermission): kamu melihat apa yang boleh kamu
+  // kelola. OWNER → semua; STOKER → miliknya + seluruh aset LELANG; agent →
+  // miliknya sendiri.
+  const scope = listingScopeWhere({ idAgent: agentId, jabatan });
 
-  // ── Build Prisma where ──
-  const isPrivileged = userRole === "OWNER" || userRole === "STOKER";
+  if (!scope) {
+    return (
+      <div className="p-6 text-sm text-slate-200">
+        Akun ini belum terhubung sebagai agent, jadi belum ada listing yang bisa
+        ditampilkan.
+      </div>
+    );
+  }
 
-  const where: Prisma.ListingWhereInput = {
-    status_tayang: "TERSEDIA",
-    ...(!isPrivileged && { id_agent: agentId }),
-    ...(jenis && { jenis_transaksi: jenis }),
-    ...(kategori && { kategori }),
-    ...(provinsi && { provinsi: { contains: provinsi, mode: "insensitive" } }),
-    ...(kota && { kota: { contains: kota, mode: "insensitive" } }),
-    ...(kecamatan && { kecamatan: { contains: kecamatan, mode: "insensitive" } }),
-    ...(kelurahan && { kelurahan: { contains: kelurahan, mode: "insensitive" } }),
-    ...(q && {
-      OR: [
-        { judul: { contains: q, mode: "insensitive" } },
-        { alamat_lengkap: { contains: q, mode: "insensitive" } },
-        // id_property contains — convert to string for partial match
-        ...(/^\d+$/.test(q)
-          ? [{ id_property: { equals: BigInt(q) } } as Prisma.ListingWhereInput]
-          : []),
-      ],
-    }),
-  };
+  // `sekarang` dihitung SEKALI lalu dipakai ulang: `count` dan `findMany`
+  // dengan urutan "jadwal terdekat" harus memakai batas waktu yang sama persis,
+  // kalau tidak jumlah di header bisa berbeda satu dari isi halamannya.
+  const sekarang = new Date();
+  const scopeWhere = scope as Prisma.ListingWhereInput;
+  const where = buildListingWhere({ filters, scope: scopeWhere, sekarang });
 
-  // ── Parallel: header stats + count + data ──
-  const [headerStats, totalItems, properties] = await Promise.all([
-    fetchListingHeaderStats(userRole, agentId),
-    prisma.listing.count({ where }),
-    prisma.listing.findMany({
-      where,
-      orderBy: { tanggal_diupdate: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      include: {
-        agent: {
-          select: {
-            nama_kantor: true,
-            foto_profil_url: true,
-            pengguna: { select: { nama_lengkap: true } },
-          },
-        },
-      },
-    }),
-  ]);
+  const [headerStats, totalItems, properties, facetJenis, facetKategori] =
+    await Promise.all([
+      fetchListingHeaderStats(scope),
+      prisma.listing.count({ where }),
+      prisma.listing.findMany({
+        where,
+        orderBy: orderByDasbor(filters.sort, filters.jenis),
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        include: DASHBOARD_LISTING_INCLUDE,
+      }),
+      // Facet: berapa hasilnya kalau dimensi ini yang diganti, filter lain
+      // tetap. Angka inilah yang membuat dropdown berguna sebelum diklik.
+      prisma.listing.groupBy({
+        by: ["jenis_transaksi"],
+        _count: { _all: true },
+        where: buildListingWhere({ filters, scope: scopeWhere, abaikan: "jenis", sekarang }),
+      }),
+      prisma.listing.groupBy({
+        by: ["kategori"],
+        _count: { _all: true },
+        where: buildListingWhere({ filters, scope: scopeWhere, abaikan: "kategori", sekarang }),
+      }),
+    ]);
 
-  const listings = properties.map((p) => {
-    const idStr = String(p.id_property);
-    const slugId = `${p.slug}-${idStr}`;
-    const fotoList = normalizeListingImages(p.gambar);
+  // Satu query terindeks untuk seluruh halaman, bukan dua query per kartu.
+  // Listing non-lelang tersaring di dalam fungsinya.
+  const limitAwalPerListing = await ambilLimitLelangSebelumnya(properties);
 
-    return {
-      id: idStr,
-      slug: slugId,
-      rawSlug: p.slug,
-      title: p.judul,
-      status: p.status_tayang ?? "",
-      category: p.kategori,
-      transactionType: p.jenis_transaksi,
-      city: p.kota,
-      area: (p as any).area_lokasi ?? "",
-      address: p.alamat_lengkap ?? "",
-      provinsi: p.provinsi ?? "",
-      kecamatan: p.kecamatan ?? "",
-      kelurahan: p.kelurahan ?? "",
-      price: formatRupiah(Number(p.harga)),
-      thumbnailUrl: fotoList[0] || undefined,
-      views: p.dilihat ?? 0,
-      priceRaw: p.nilai_limit_lelang ? Number(p.nilai_limit_lelang) : Number(p.harga),
-      pricePromo: p.harga_promo != null ? Number(p.harga_promo) : null,
-      photos: fotoList,
-      luasTanah: Number(p.luas_tanah ?? 0),
-      luasBangunan: Number(p.luas_bangunan ?? 0),
-      kamarTidur: p.kamar_tidur ?? 0,
-      kamarMandi: p.kamar_mandi ?? 0,
-      tanggalLelang: p.tanggal_lelang ? p.tanggal_lelang.toISOString() : null,
-      agentName: p.agent?.pengguna?.nama_lengkap || "Agent Kosku",
-      agentPhoto: normalizeAgentPhoto(p.agent?.foto_profil_url),
-      agentOffice: p.agent?.nama_kantor || "Kosku",
-      isHotDeal: !!(p as any).is_hot_deal,
-    };
+  const listings: DashboardListing[] = properties.map((p) =>
+    toDashboardListing(p, limitAwalPerListing.get(String(p.id_property)))
+  );
+
+  // Semua pilihan diberi angka, termasuk yang nol. `groupBy` hanya mengembalikan
+  // nilai yang ada barisnya, dan pilihan tanpa angka terbaca sebagai "belum
+  // dihitung" — padahal jawabannya justru yang paling berguna: kosong.
+  const jenisCounts: Record<string, number> = Object.fromEntries(
+    JENIS_OPTIONS.map((o) => [o.value, 0])
+  );
+  let totalSemuaJenis = 0;
+  facetJenis.forEach((row) => {
+    jenisCounts[row.jenis_transaksi] = row._count._all;
+    totalSemuaJenis += row._count._all;
   });
+  jenisCounts.ALL = totalSemuaJenis;
+
+  const kategoriCounts: Record<string, number> = Object.fromEntries(
+    KATEGORI_OPTIONS.map((o) => [o.value, 0])
+  );
+  let totalSemuaKategori = 0;
+  facetKategori.forEach((row) => {
+    kategoriCounts[row.kategori] = row._count._all;
+    totalSemuaKategori += row._count._all;
+  });
+  kategoriCounts.ALL = totalSemuaKategori;
 
   return (
     <ListingsPage
@@ -178,32 +141,13 @@ export default async function DashboardListingsPage({ searchParams }: Props) {
       listings={listings}
       currentAgentId={agentId}
       userRole={userRole}
+      currentJabatan={jabatan}
       currentPage={page}
       totalItems={totalItems}
       pageSize={PAGE_SIZE}
-      initialFilters={{
-        q,
-        vendor: "",
-        jenis: (jenisRaw && (VALID_JENIS as readonly string[]).includes(jenisRaw)
-          ? jenisRaw
-          : "ALL") as any,
-        kategori: (kategoriRaw && (VALID_KATEGORI as readonly string[]).includes(kategoriRaw)
-          ? kategoriRaw
-          : "ALL") as any,
-        provinsi,
-        kota,
-        kecamatan,
-        kelurahan,
-      }}
+      initialFilters={filters}
+      jenisCounts={jenisCounts}
+      kategoriCounts={kategoriCounts}
     />
   );
-}
-
-function formatRupiah(value: number) {
-  if (!value) return "Rp 0";
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(value);
 }

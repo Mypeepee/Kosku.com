@@ -64,8 +64,14 @@ const MobileNav: React.FC<MobileNavProps> = ({
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Saat menu ditutup nilainya WAJIB dikosongkan, bukan "auto".
+  // `html` di globals.css memakai `overflow-x: clip`, jadi overflow milik
+  // <body> tidak lagi dipropagasi ke viewport — begitu body diberi
+  // `overflow: auto` body berubah jadi scroll container sendiri dan SEMUA
+  // `position: sticky` di halaman (mis. sidebar agent di detail properti)
+  // langsung berhenti menempel saat di-scroll.
   useEffect(() => {
-    document.body.style.overflow = isOpen ? "hidden" : "auto";
+    document.body.style.overflow = isOpen ? "hidden" : "";
   }, [isOpen]);
 
   const toggleSubmenu = (index: number) => {

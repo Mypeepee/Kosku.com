@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { PrismaClient, status_agent_enum } from "@prisma/client";
+import { status_agent_enum } from "@prisma/client";
+import prisma from "@/lib/prisma";
 import { notifyNewAgentRegistration } from "@/lib/notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const prisma = (globalThis as any).__prisma__ ?? new PrismaClient();
-if (process.env.NODE_ENV !== "production") (globalThis as any).__prisma__ = prisma;
 
 /* ---------------- Utils ---------------- */
 

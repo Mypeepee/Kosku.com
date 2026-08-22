@@ -3,6 +3,7 @@ import { cache } from "react";
 import { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { bacaSekitarTersimpan } from "@/lib/nearbyPlaces.server";
 import DetailClient from "../DetailClient";
 import { getSimilarItems } from "../lib/similar";
 
@@ -105,7 +106,7 @@ const getProperty = cache(async (id: bigint) => {
   });
 
   if (!product) return null;
-  if (product.status_tayang !== "TERSEDIA") return null;
+  if (product.status_tayang === "TARIK_LISTING") return null;
 
   return product;
 });
@@ -282,13 +283,20 @@ export default async function DetailPage({ params }: Props) {
     ],
   };
 
+  // Hasil pemindaian "apa yang ada di sekitar" yang SUDAH tersimpan. Dibaca
+  // sekali di server supaya aset yang pernah dipindai tampil lengkap di HTML
+  // pertama — tanpa spinner dan tanpa satu pun permintaan dari browser. Aset
+  // yang belum pernah dipindai mengembalikan null, dan komponennya yang
+  // meminta pemindaian lewat /api/listing/{id}/sekitar.
+  const sekitar = await bacaSekitarTersimpan(product.id_property);
+
   const serializedProduct = {
     ...serializeListing(product),
     foto_list,
   };
 
   return (
-    <main className="bg-[#0F0F0F] min-h-screen text-white">
+    <main className="bg-[#070A11] min-h-screen text-white">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -304,6 +312,7 @@ export default async function DetailPage({ params }: Props) {
 
       <DetailClient
         product={serializedProduct}
+        sekitar={sekitar}
         currentAgentId={agentId}
         similarProperties={similarItems}
       />

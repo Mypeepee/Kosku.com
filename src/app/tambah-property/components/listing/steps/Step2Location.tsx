@@ -25,6 +25,9 @@ import {
 import toast from 'react-hot-toast';
 import { cn } from '@/lib/utils';
 import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
+import { AksesTerdekatInput, MAKS_PATOKAN } from '../AksesTerdekatInput';
+import PindaiSekitarPanel from '../PindaiSekitarPanel';
+import type { AksesTerdekat } from '@/app/tambah-property/types/listing';
 
 // ====== CONFIG ======
 interface Step2Props {
@@ -70,6 +73,8 @@ export function Step2Location({ form }: Step2Props) {
     setValue,
     formState: { errors },
   } = form;
+
+  const aksesTerdekat = (watch('akses_terdekat') ?? []) as AksesTerdekat[];
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
@@ -411,7 +416,7 @@ export function Step2Location({ form }: Step2Props) {
         required
         error={errors.alamat_lengkap?.message}
         description="Tulis alamat selengkap mungkin. Sistem akan otomatis mencari titik terdekat di Indonesia, dan mengisi peta + area."
-        hint="Contoh: Grand Pakuwon Cluster Adelaide JF10-32, Surabaya"
+        hint="Contoh: Grand Pakuwon Cluster Adelaide Surabaya"
         icon={<Search className="h-3 w-3 text-emerald-400" />}
         loading={isProcessing}
       >
@@ -695,6 +700,47 @@ export function Step2Location({ form }: Step2Props) {
             </div>
           </FormField>
         </div>
+      </div>
+
+      {/* Patokan & Akses Terdekat — faktor keputusan utama penyewa kos.
+          Judul & deskripsi cukup sekali di sini (tanpa FormField bersarang)
+          supaya tidak ada tiga lapis teks sebelum ada yang bisa dikerjakan. */}
+      <div className="space-y-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/20">
+            <Navigation className="h-5 w-5 text-emerald-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-bold text-slate-100">Patokan & Akses Terdekat</h3>
+              <span className="rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                {aksesTerdekat.length > 0 ? `${aksesTerdekat.length} patokan` : 'Opsional'}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Jarak ke kampus/stasiun sering jadi alasan utama orang memilih. Contoh:{' '}
+              <span className="text-slate-400">&ldquo;5 menit ke UNAIR&rdquo;</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Cari otomatis lebih dulu, ketik manual sesudahnya. Urutannya
+            disengaja: sebagian besar patokan bisa dipetik dari hasil pindaian
+            dalam beberapa klik, dan yang tersisa untuk diketik tinggal yang
+            memang tidak diketahui peta ("5 menit jalan kaki ke pintu tol"). */}
+        <PindaiSekitarPanel
+          koordinat={markerPosition}
+          nilai={aksesTerdekat}
+          onChange={(next) => setValue('akses_terdekat', next, { shouldValidate: true })}
+          maksPatokan={MAKS_PATOKAN}
+        />
+
+        <AksesTerdekatInput
+          value={aksesTerdekat}
+          onChange={(next) => setValue('akses_terdekat', next, { shouldValidate: true })}
+          propertyCoords={markerPosition}
+          placesReady={isLoaded}
+        />
       </div>
     </motion.div>
   );

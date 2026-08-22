@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "@iconify/react";
-import { motion, AnimatePresence, useDragControls } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import {
   type RegionLevel,
@@ -56,7 +56,6 @@ interface ThemeTokens {
   inputIcon: string;
   checkboxIdle: string;
   footer: string;
-  backdrop: string;
   iconBtn: string;
   ghostText: string;
   resetBtn: string;
@@ -83,7 +82,6 @@ const THEMES: Record<Theme, ThemeTokens> = {
     inputIcon: "text-gray-400",
     checkboxIdle: "border-gray-300 bg-white",
     footer: "bg-gray-50 border-gray-100",
-    backdrop: "bg-black/40",
     iconBtn: "hover:bg-gray-200 text-gray-600",
     ghostText: "text-gray-500",
     resetBtn: "text-gray-500 hover:text-red-500 hover:bg-red-50",
@@ -108,7 +106,6 @@ const THEMES: Record<Theme, ThemeTokens> = {
     inputIcon: "text-gray-500",
     checkboxIdle: "border-gray-600 bg-transparent",
     footer: "bg-[#2A2A2A] border-white/10",
-    backdrop: "bg-black/70",
     iconBtn: "hover:bg-white/10 text-gray-400",
     ghostText: "text-gray-400",
     resetBtn: "text-gray-400 hover:text-red-400 hover:bg-red-500/10",
@@ -160,9 +157,6 @@ export default function LocationPicker({
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
-
-  // kontrol drag untuk bottom sheet (geser gagang ke bawah untuk menutup)
-  const dragControls = useDragControls();
 
   // --- panel di-portal ke body (lepas dari stacking/transform induk) ---
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -269,6 +263,28 @@ export default function LocationPicker({
     }
   }, [open, isDesktop]);
 
+  // --- tinggi sheet mobile mengikuti keyboard virtual ---
+  // Sheet di-anchor dari ATAS (top:0), bukan bawah — keyboard hanya pernah
+  // menutupi dari bawah layar, jadi header/input/hasil teratas TIDAK PERNAH
+  // bisa tertutup keyboard secara struktural, apapun akurasi hitungan tinggi
+  // di bawah ini. `h-[100dvh]` (dynamic viewport height) sudah otomatis
+  // menyusut saat keyboard muncul di browser modern; listener visualViewport
+  // di bawah cuma penghalus untuk browser lama yang belum kenal `dvh`.
+  const [vvHeight, setVvHeight] = useState<number | null>(null);
+  useEffect(() => {
+    if (!open || isDesktop) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setVvHeight(vv.height);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [open, isDesktop]);
+
   // --- selection ---
   const selectedKeys = useMemo(
     () => new Set(value.map((v) => regionKey(v))),
@@ -352,17 +368,6 @@ export default function LocationPicker({
     [loadChildren]
   );
 
-  const handleRowClick = useCallback(
-    (region: SelectedRegion) => {
-      if (region.level === "kelurahan") {
-        toggle(region);
-      } else {
-        drillInto(region);
-      }
-    },
-    [toggle, drillInto]
-  );
-
   // Kembali SATU level: buang induk terakhir, muat anak dari induk baru
   // (atau kembali ke daftar provinsi bila path kosong).
   const goBack = useCallback(() => {
@@ -425,11 +430,15 @@ export default function LocationPicker({
         key={`${region.level}-${region.id}`}
         className={`flex items-center justify-between group/row ${t.rowHover} border-b ${t.rowBorder} last:border-0`}
       >
+        {/* Ketuk baris = pilih/hapus langsung — tidak perlu bidik checkbox kecil.
+            Drill-down dipindah ke tombol panah eksplisit di kanan, supaya niat
+            "pilih wilayah ini" vs "lihat isinya" tidak lagi ambigu. */}
         <button
           type="button"
-          onClick={() => handleRowClick(region)}
+          onClick={() => toggle(region)}
           className="flex-1 flex items-center gap-3 px-4 py-3 text-left min-w-0"
         >
+          {checkBox(selected)}
           <Icon
             icon={REGION_ICON[region.level]}
             className={`text-lg shrink-0 ${
@@ -448,34 +457,21 @@ export default function LocationPicker({
               <span className={`text-[10px] block truncate ${t.sub}`}>
                 {region.parent}
               </span>
-            ) : hasChild ? (
-              <span
-                className={`text-[10px] ${t.sub} group-hover/row:text-primary transition-colors`}
-              >
-                Lihat {CHILD_LABEL[region.level]}
-              </span>
             ) : null}
           </div>
-        </button>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            toggle(region);
-          }}
-          className="p-3 shrink-0"
-          aria-label={selected ? `Hapus ${region.name}` : `Pilih ${region.name}`}
-        >
-          {checkBox(selected)}
         </button>
         {hasChild && (
           <button
             type="button"
-            onClick={() => handleRowClick(region)}
-            className={`p-2 shrink-0 ${t.sub} hover:text-primary`}
-            aria-label={`Buka ${region.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              drillInto(region);
+            }}
+            className={`flex items-center gap-1 px-3 py-3 shrink-0 text-[11px] font-bold ${t.sub} hover:text-primary transition-colors`}
+            aria-label={`Lihat ${CHILD_LABEL[region.level]} di ${region.name}`}
           >
-            <Icon icon="solar:alt-arrow-right-linear" />
+            <span className="whitespace-nowrap">{CHILD_LABEL[region.level]}</span>
+            <Icon icon="solar:alt-arrow-right-linear" className="text-base" />
           </button>
         )}
       </div>
@@ -612,7 +608,7 @@ export default function LocationPicker({
       )}
 
       {/* LIST */}
-      <div className={`overflow-y-auto custom-scrollbar flex-1 ${t.bodyBg}`}>
+      <div className={`overflow-y-auto custom-scrollbar flex-1 min-h-0 ${t.bodyBg}`}>
         {/* "Pilih semua di X" — saat drilled, tidak loading, tidak sedang mem-filter */}
         {!globalSearch && !isLoading && !hasQuery && parentRegion && (
           <button
@@ -655,7 +651,8 @@ export default function LocationPicker({
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="px-5 py-2.5 rounded-xl text-sm font-bold bg-primary text-darkmode hover:bg-[#6ee7b7] transition-colors shadow-lg shadow-primary/30"
+          disabled={value.length === 0}
+          className="px-5 py-2.5 rounded-xl text-sm font-bold bg-primary text-darkmode hover:bg-[#6ee7b7] transition-colors shadow-lg shadow-primary/30 disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed"
         >
           Terapkan{value.length > 0 ? ` (${value.length})` : ""}
         </button>
@@ -704,25 +701,19 @@ export default function LocationPicker({
                       maxHeight: desktopMaxH,
                       zIndex: 99999,
                     }}
-                    className={`rounded-2xl shadow-2xl border overflow-hidden flex flex-col ${t.panel}`}
+                    className={`rounded-2xl shadow-2xl border overflow-hidden flex flex-col zoom-safe ${t.panel}`}
                   >
                     {panelBody()}
                   </motion.div>,
                 ]
               : [
-                  // ---- MOBILE: backdrop ----
-                  <motion.div
-                    key="backdrop"
-                    data-search-portal="true"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.25 }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={() => onOpenChange(false)}
-                    className={`fixed inset-0 z-[100000] ${t.backdrop} backdrop-blur-sm`}
-                  />,
-                  // ---- MOBILE: bottom sheet (geser ke bawah untuk tutup) ----
+                  // ---- MOBILE: full-screen takeover, anchor dari ATAS ----
+                  // Pola sama seperti pencarian lokasi di Airbnb/Booking/Google:
+                  // search bar nempel di atas layar, bukan sheet dari bawah.
+                  // Keyboard virtual hanya makan ruang dari bawah, jadi header +
+                  // search + hasil teratas TIDAK PERNAH tertutup keyboard — beda
+                  // dengan sheet ala bottom-anchored yang gampang "digigit" keyboard
+                  // karena berebut sisi bawah viewport yang sama.
                   <motion.div
                     key="sheet"
                     data-search-portal="true"
@@ -730,27 +721,13 @@ export default function LocationPicker({
                     animate={{ y: 0 }}
                     exit={{ y: "100%" }}
                     transition={{ type: "spring", stiffness: 380, damping: 38 }}
-                    drag="y"
-                    dragControls={dragControls}
-                    dragListener={false}
-                    dragConstraints={{ top: 0, bottom: 0 }}
-                    dragElastic={{ top: 0, bottom: 0.85 }}
-                    onDragEnd={(_, info) => {
-                      if (info.offset.y > 110 || info.velocity.y > 600) {
-                        onOpenChange(false);
-                      }
-                    }}
                     onMouseDown={(e) => e.stopPropagation()}
-                    className={`fixed inset-x-0 bottom-0 z-[100001] rounded-t-3xl shadow-2xl border-t flex flex-col max-h-[88vh] ${t.panel}`}
+                    style={{
+                      height: vvHeight ?? undefined,
+                      paddingTop: "env(safe-area-inset-top)",
+                    }}
+                    className={`fixed inset-x-0 top-0 z-[100001] h-screen h-[100dvh] flex flex-col zoom-safe ${t.panel}`}
                   >
-                    {/* GAGANG GESER — area drag (list di bawahnya tetap bisa scroll) */}
-                    <div
-                      onPointerDown={(e) => dragControls.start(e)}
-                      style={{ touchAction: "none" }}
-                      className="flex justify-center pt-3 pb-2 shrink-0 cursor-grab active:cursor-grabbing"
-                    >
-                      <span className="w-11 h-1.5 rounded-full bg-gray-400/50" />
-                    </div>
                     {panelBody(true)}
                   </motion.div>,
                 ])}

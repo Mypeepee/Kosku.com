@@ -7,14 +7,20 @@ import { Icon } from "@iconify/react";
 
 import ImageGallery from "./[agentId]/components/ImageGalleryLelang";
 import DetailInfo from "./[agentId]/components/DetailInfoLelang";
+import type { AuctionHistoryResult } from "@/lib/auctionHistory";
 import BookingSidebar from "./[agentId]/components/AgentSidebarLelang";
 import SimilarProperties from "./[agentId]/components/SimilarPropertiesLelang";
 import type { PropertyItem } from "@/app/properti/[slug]/types";
+import type { SekitarAwal } from "@/components/property/detail/useSekitar";
 import KeperluanAgent from "./[agentId]/components/KeperluanAgent";
 import ShareListingModal from "./[agentId]/components/ShareListingModal";
+import MarkSoldControl from "@/components/property/MarkSoldControl";
+import type { ListingStatus } from "@/lib/listingStatusPermission";
 
 interface ProductData {
   id_property: string;
+  /** Pemegang listing dari DB — penentu siapa yang boleh menandainya terjual. */
+  id_agent?: string | null;
   agent_id?: string | null;
   kode_properti?: string | null;
   slug?: string;
@@ -43,8 +49,12 @@ interface ProductData {
   nomor_legalitas?: string | null;
   vendor?: string | null;
   lampiran?: string | null;
+  /** Tautan pengumuman lelang di sumber aslinya (lelang.go.id / situs vendor). */
+  link?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** Patokan lokasi yang diisi agent — dipakai bagian "Lokasi & sekitar". */
+  akses_terdekat?: unknown;
   kategori: string;
   jenis_transaksi: string;
   status_tayang?: string | null;
@@ -99,6 +109,20 @@ interface DetailClientProps {
   presentingAgent?: PresentingAgent | null;
   /** Profil agent yang sedang login — untuk preview di modal "Bagikan". */
   selfAgent?: PresentingAgent | null;
+  /**
+   * Riwayat lelang aset ini, sudah dihitung di server (lihat
+   * @/lib/auctionHistory). Dikirim sebagai prop supaya blok riwayat langsung
+   * ada di HTML pertama dan tidak bergantung pada fetch dari browser.
+   */
+  riwayatLelang?: AuctionHistoryResult | null;
+  /** Apakah pengunjung sudah login (dihitung di server, bukan dari useSession). */
+  isLoggedIn?: boolean;
+  /**
+   * Hasil pemindaian "apa yang ada di sekitar" yang sudah tersimpan, dibaca di
+   * server. Ada supaya aset yang pernah dipindai tampil lengkap di HTML
+   * pertama — tanpa spinner dan tanpa satu pun permintaan dari browser.
+   */
+  sekitar?: SekitarAwal | null;
 }
 
 export default function DetailClient({
@@ -111,6 +135,9 @@ export default function DetailClient({
   stokerPhone,
   presentingAgent = null,
   selfAgent = null,
+  riwayatLelang = null,
+  isLoggedIn,
+  sekitar = null,
 }: DetailClientProps) {
   useEffect(() => {
     if (!product?.id_property) return;
@@ -147,6 +174,13 @@ export default function DetailClient({
       ? convertToNumber(product.nilai_limit_lelang)
       : null;
 
+  // Status dipegang di sini supaya satu klik "Tandai Terjual" langsung
+  // mengubah galeri, badge di blok informasi, dan panel kontrol sekaligus —
+  // tanpa menunggu render ulang dari server yang bisa saja masih dari cache.
+  const [statusTayang, setStatusTayang] = useState<string>(
+    product.status_tayang ?? "TERSEDIA"
+  );
+
   const propertyData = {
     id_property: product.id_property,
     slug: product.slug || "",
@@ -163,12 +197,16 @@ export default function DetailClient({
     provinsi: product.provinsi ?? null,
     latitude: product.latitude ?? null,
     longitude: product.longitude ?? null,
+    akses_terdekat: Array.isArray(product.akses_terdekat)
+      ? product.akses_terdekat
+      : [],
+    sekitar,
 
     harga,
     harga_promo: hargaPromo,
     jenis_transaksi: product.jenis_transaksi,
     kategori: product.kategori,
-    status_tayang: product.status_tayang ?? "TERSEDIA",
+    status_tayang: statusTayang,
     is_hot_deal: product.is_hot_deal ?? false,
     dilihat: product.dilihat ?? 0,
     tanggal_lelang: product.tanggal_lelang ?? null,
@@ -189,6 +227,7 @@ export default function DetailClient({
     nomor_legalitas: product.nomor_legalitas ?? null,
     vendor: product.vendor ?? null,
     lampiran: product.lampiran ?? null,
+    link: product.link ?? null,
 
     deskripsi: product.deskripsi ?? null,
 
@@ -269,11 +308,20 @@ export default function DetailClient({
 
   const ownerId: string = (propertyData as any).owner?.id || "";
 
+  // `canEdit` menyalakan tombol "Edit Listing", yang mengarah ke
+  // PUT /api/listings/{id} — dan endpoint itu HANYA menerima pemegang
+  // listing. Cabang `currentRole === "OWNER"` yang dulu ada di sini tidak
+  // pernah bernilai true (isinya `peran_enum` = USER|AGENT), jadi tidak ada
+  // perilaku yang hilang saat dibuang. Sengaja TIDAK diganti jadi
+  // `currentJabatan === "OWNER"`: itu akan memunculkan tombol yang lalu
+  // ditolak 403 saat disimpan. Kalau owner memang perlu menyunting listing
+  // agent lain, endpoint-nya dulu yang dibuka, baru tombol ini menyusul.
   const canEdit =
-    currentRole === "OWNER" ||
-    (currentRole === "AGENT" && !!currentAgentId && currentAgentId === ownerId);
+    currentRole === "AGENT" && !!currentAgentId && currentAgentId === ownerId;
 
   const isAgent = currentRole === "AGENT";
+
+  const isSold = statusTayang.toUpperCase() === "TERJUAL";
 
   // Siapapun yang login sebagai agent atau owner bisa share.
   const canShare = !!(currentAgentId);
@@ -293,7 +341,7 @@ export default function DetailClient({
     fotoArray[0] || undefined;
 
   return (
-    <div className="text-white font-sans bg-[#0F0F0F]">
+    <div className="text-white font-sans bg-[#070A11]">
       <div className="lg:hidden h-[60px]" />
       <div className="hidden lg:block h-24 w-full" />
 
@@ -319,8 +367,32 @@ export default function DetailClient({
 
       {/* GALLERY */}
       <div className="container mx-auto lg:px-4 mb-8 px-4 mt-4 lg:mt-0">
-        <ImageGallery images={fotoArray} />
+        {/* Judul listing lelang datang dari sumber lelang dan sering tidak
+            menyebut lokasi sama sekali — yang dipajang di kepala lightbox
+            alamat lengkapnya. Judul cuma cadangan kalau alamatnya kosong. */}
+        <ImageGallery
+          images={fotoArray}
+          judul={product.alamat_lengkap || product.judul}
+          isSold={isSold}
+        />
       </div>
+
+      {/* Panel kontrol agent — tampil untuk pemegang listing, Owner, dan
+          Stoker (yang memang mengurus seluruh stok aset lelang). Ditaruh
+          tepat di atas kartu agent, bukan di atas galeri. */}
+      <MarkSoldControl
+        className="mb-4 lg:mb-6"
+        idProperty={product.id_property}
+        ownerAgentId={product.id_agent ?? product.agent?.id_agent ?? ownerId}
+        jenisTransaksi={product.jenis_transaksi}
+        status={statusTayang}
+        onStatusChange={(s: ListingStatus) => setStatusTayang(s)}
+        judul={product.alamat_lengkap || product.judul}
+        lokasi={shareLocation}
+        harga={nilaiLimitLelang || hargaPromo || harga}
+        hargaLabel={nilaiLimitLelang ? "Harga limit" : "Harga"}
+        thumbnail={shareCoverImage}
+      />
 
       <div className="container mx-auto px-4 relative">
         <div className="flex flex-col lg:flex-row gap-10 items-start">
@@ -331,6 +403,8 @@ export default function DetailClient({
             currentAgentId={currentAgentId}
             currentRole={currentRole}
             currentJabatan={currentJabatan}
+            riwayatLelang={riwayatLelang}
+            isLoggedIn={isLoggedIn}
           />
 
           {isAgent ? (
@@ -355,6 +429,12 @@ export default function DetailClient({
       </div>
 
       <SimilarProperties items={similarProperties} />
+
+      {/* Ruang bawah supaya konten terakhir tidak tertutup dock/bar yang fixed di mobile */}
+      <div
+        className="lg:hidden"
+        style={{ height: `calc(${isAgent ? "100px" : "150px"} + env(safe-area-inset-bottom))` }}
+      />
 
       {/* Modal share — dirender di level atas untuk bebas dari overflow/stacking context apapun */}
       <ShareListingModal

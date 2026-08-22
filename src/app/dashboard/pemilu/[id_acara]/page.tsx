@@ -1,11 +1,11 @@
 // src/app/dashboard/pemilu/[id_acara]/page.tsx
-import { PrismaClient, status_peserta_enum } from "@prisma/client";
+import { status_peserta_enum } from "@prisma/client";
+import prisma from "@/lib/prisma";
 import PemiluClient from "./PemiluClient";
 
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 
-const prisma = new PrismaClient();
 
 interface PageProps {
   params: { id_acara: string };

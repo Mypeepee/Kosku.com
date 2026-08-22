@@ -32,8 +32,42 @@ const STEPS = [
   { id: 2, label: 'Lokasi', icon: '📍' },
   { id: 3, label: 'Harga', icon: '💰' },
   { id: 4, label: 'Spesifikasi', icon: '🏠' },
-  { id: 5, label: 'Media', icon: '📸' },
+  // Judul ikut di langkah terakhir — labelnya menyebutkannya supaya agent tahu
+  // di mana kolom itu berada setelah dipindah dari langkah pertama.
+  { id: 5, label: 'Media & Judul', icon: '📸' },
 ];
+
+// Kos menyusun kamar (jumlah & tipe) lebih dulu, baru harganya — keduanya di
+// step 3. Label menyebut "Kamar" di depan supaya urutannya jelas dari progress
+// bar, dan agent tidak mencari isian kamar di step Spesifikasi.
+const STEPS_KOS = STEPS.map((s) =>
+  s.id === 3 ? { ...s, label: 'Kamar & Harga', icon: '🛏️' } : s,
+);
+
+/**
+ * Pesan error untuk daftar ringkasan di bawah form. Field array (kamar_tipe)
+ * errornya bisa berupa daftar per baris tanpa `message` di level atas — kalau
+ * langsung dibaca `.message`, barisnya tampil kosong dan agent tidak tahu apa
+ * yang salah. Jadi baris pertama yang bermasalah ikut disebut nomornya.
+ */
+function ringkasPesanError(error: unknown): string {
+  if (!error) return 'Perlu diperiksa';
+
+  if (Array.isArray(error)) {
+    const idx = error.findIndex((e) => !!e);
+    if (idx === -1) return 'Perlu diperiksa';
+    const detail = error[idx] as Record<string, any>;
+    const pesan =
+      detail?.message ??
+      Object.values(detail ?? {}).find(
+        (v: any) => typeof v?.message === 'string',
+      )?.message;
+    return `baris ${idx + 1} — ${pesan || 'perlu diperiksa'}`;
+  }
+
+  const e = error as { message?: string; root?: { message?: string } };
+  return e.message ?? e.root?.message ?? 'Perlu diperiksa';
+}
 
 // Isolated subscriber: hanya re-render LivePreview, bukan seluruh halaman
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,6 +121,8 @@ function TambahPropertyContent() {
     reset,
   } = form;
 
+  const kategori = watch('kategori');
+
   useEffect(() => {
     if (isEditMode && listingId) {
       loadListingData(listingId);
@@ -115,7 +151,6 @@ function TambahPropertyContent() {
         slug: listing.slug || '',
         jenis_transaksi: listing.jenis_transaksi,
         kategori: listing.kategori,
-        tipe_property: listing.tipe_property || '',
         vendor: listing.vendor || '',
         status_tayang: listing.status_tayang || 'TERSEDIA',
         harga: listing.harga,
@@ -133,6 +168,9 @@ function TambahPropertyContent() {
         kelurahan: listing.kelurahan || '',
         latitude: listing.latitude || undefined,
         longitude: listing.longitude || undefined,
+        akses_terdekat: Array.isArray(listing.akses_terdekat)
+          ? listing.akses_terdekat
+          : [],
         luas_tanah: listing.luas_tanah || undefined,
         luas_bangunan: listing.luas_bangunan || undefined,
         jumlah_lantai: listing.jumlah_lantai || 1,
@@ -144,7 +182,77 @@ function TambahPropertyContent() {
         kondisi_interior: listing.kondisi_interior || '',
         legalitas: listing.legalitas || undefined,
         nomor_legalitas: listing.nomor_legalitas || '',
+        // Identitas unit apartemen & biaya tambahan — wajib ikut di-prefill:
+        // PUT menulis ulang semua kolom sewaDetail, jadi field yang tidak
+        // dipulihkan di sini akan tertimpa null tiap kali listing disimpan.
+        nama_gedung: listing.sewaDetail?.nama_gedung || '',
+        lantai_unit: listing.sewaDetail?.lantai_unit || '',
+        nomor_unit: listing.sewaDetail?.nomor_unit || '',
+        tipe_unit: listing.sewaDetail?.tipe_unit || undefined,
+        biaya_tambahan: Array.isArray(listing.sewaDetail?.biaya_tambahan)
+          ? listing.sewaDetail.biaya_tambahan.map((b: any) => ({
+              nama: String(b?.nama ?? ''),
+              nominal: b?.nominal != null ? Number(b.nominal) : null,
+              periode: b?.periode === 'SEKALI' || b?.periode === 'TAHUNAN'
+                ? b.periode
+                : 'BULANAN',
+            }))
+          : [],
+        jam_check_in: listing.sewaDetail?.jam_check_in || '',
+        jam_check_out: listing.sewaDetail?.jam_check_out || '',
+        durasi_sewa: listing.sewaDetail?.durasi_sewa || undefined,
+        harga_sewa_harian: listing.sewaDetail?.harga_sewa_harian || undefined,
+        harga_sewa_mingguan: listing.sewaDetail?.harga_sewa_mingguan || undefined,
+        harga_sewa_bulanan: listing.sewaDetail?.harga_sewa_bulanan || undefined,
+        harga_sewa_tahunan: listing.sewaDetail?.harga_sewa_tahunan || undefined,
+        minimal_sewa_jumlah: listing.sewaDetail?.minimal_sewa_jumlah || undefined,
+        minimal_sewa_satuan: listing.sewaDetail?.minimal_sewa_satuan || undefined,
+        deposit: listing.sewaDetail?.deposit || undefined,
+        luas_kamar: listing.sewaDetail?.luas_kamar || undefined,
+        kamar_mandi_tipe: listing.sewaDetail?.kamar_mandi_tipe || undefined,
+        termasuk_listrik: listing.sewaDetail?.termasuk_listrik ?? undefined,
+        termasuk_air: listing.sewaDetail?.termasuk_air ?? undefined,
+        akses_24_jam: listing.sewaDetail?.akses_24_jam ?? undefined,
+        jam_malam: listing.sewaDetail?.jam_malam || '',
+        fasilitas_kamar: listing.sewaDetail?.fasilitas_kamar || '',
+        fasilitas_bersama: listing.sewaDetail?.fasilitas_bersama || '',
+        peraturan: listing.sewaDetail?.peraturan || '',
+        kos_gender: listing.sewaDetail?.kos_gender || undefined,
+        kapasitas_penghuni: listing.sewaDetail?.kapasitas_penghuni || undefined,
+        total_kamar: listing.sewaDetail?.total_kamar || undefined,
+        // ?? bukan || — 0 kamar tersedia (kos penuh) itu nilai sah.
+        kamar_tersedia: listing.sewaDetail?.kamar_tersedia ?? undefined,
+        // Tipe kamar — Decimal dari Prisma datang sebagai string, jadi
+        // dinormalkan ke number supaya input harga & luas langsung terisi.
+        kamar_tipe: Array.isArray(listing.kamarTipe)
+          ? listing.kamarTipe.map((t: any) => ({
+              nama: t.nama || '',
+              jumlah_kamar: Number(t.jumlah_kamar ?? 1),
+              kamar_tersedia: Number(t.kamar_tersedia ?? 0),
+              luas_kamar: t.luas_kamar != null ? Number(t.luas_kamar) : null,
+              kamar_mandi_tipe: t.kamar_mandi_tipe || null,
+              kapasitas_penghuni:
+                t.kapasitas_penghuni != null ? Number(t.kapasitas_penghuni) : null,
+              lantai_kamar: t.lantai_kamar || null,
+              nomor_kamar: t.nomor_kamar || null,
+              harga_sewa_harian:
+                t.harga_sewa_harian != null ? Number(t.harga_sewa_harian) : null,
+              harga_sewa_mingguan:
+                t.harga_sewa_mingguan != null ? Number(t.harga_sewa_mingguan) : null,
+              harga_sewa_bulanan:
+                t.harga_sewa_bulanan != null ? Number(t.harga_sewa_bulanan) : null,
+              harga_sewa_tahunan:
+                t.harga_sewa_tahunan != null ? Number(t.harga_sewa_tahunan) : null,
+              fasilitas_kamar: t.fasilitas_kamar || null,
+              gambar: t.gambar || null,
+              catatan: t.catatan || null,
+            }))
+          : [],
         deskripsi: listing.deskripsi || '',
+        // Wajib ikut di-prefill: PUT menulis semua field yang ada di payload,
+        // jadi field yang tidak dipulihkan di sini akan tertimpa null setiap
+        // kali listing disimpan ulang — walau agent tidak menyentuhnya.
+        lampiran: listing.lampiran || null,
         is_hot_deal: listing.is_hot_deal || false,
       });
 
@@ -183,27 +291,56 @@ function TambahPropertyContent() {
     };
   }, []);
 
-  const validateStep = async (step: number): Promise<boolean> => {
+  const validateStep = async (
+    step: number,
+  ): Promise<{ ok: boolean; pesan?: string | null }> => {
     const fieldsToValidate: Record<number, (keyof ListingFormData)[]> = {
-      1: ['judul', 'jenis_transaksi', 'kategori'],
+      // `judul` TIDAK divalidasi di sini lagi — kolomnya sudah pindah ke step
+      // 5, dirakit otomatis dari data yang baru lengkap di sana. Menahannya di
+      // step 1 berarti menuntut agent mengisi kolom yang belum ada.
+      1: ['jenis_transaksi', 'kategori'],
       2: ['kota', 'provinsi', 'alamat_lengkap'],
-      3: ['harga'],
-      4: ['luas_tanah', 'legalitas'],
+      // Step 3 sekarang memuat kamar + harga (khusus kos), jadi kesalahan
+      // seperti tipe tanpa harga atau sisa kamar melebihi jumlahnya harus
+      // tertahan di sini — bukan baru muncul saat submit di step 5.
+      3: [
+        'harga',
+        'durasi_sewa',
+        'kamar_tipe',
+        'total_kamar',
+        'kamar_tersedia',
+        'biaya_tambahan',
+      ],
+      // luas_bangunan & tipe_unit ikut di sini: keduanya wajib untuk apartemen
+      // dan diisi di step ini, jadi kesalahannya harus tertahan sekarang —
+      // bukan baru muncul saat submit di step 5, jauh dari field yang salah.
+      4: ['luas_tanah', 'luas_bangunan', 'legalitas', 'kos_gender', 'tipe_unit'],
       5: [],
     };
 
     const fields = fieldsToValidate[step];
-    if (fields.length === 0) return true;
+    if (fields.length === 0) return { ok: true as const };
 
-    const result = await trigger(fields);
-    return result;
+    const ok = await trigger(fields);
+    if (ok) return { ok: true as const };
+
+    // Sebutkan MASALAHNYA, bukan sekadar "ada yang kurang".
+    //
+    // Toast generik memaksa agent menebak: ia melihat kartu tipe kamar yang
+    // fotonya masih kosong lalu menyimpulkan foto itu penyebabnya, padahal
+    // yang menahan adalah harga per tipe yang belum diisi di bagian lain.
+    // Menebak salah berarti mencoba memperbaiki hal yang tidak rusak.
+    const errs = form.formState.errors as Record<string, unknown>;
+    const bermasalah = fields.find((f) => errs[f as string]);
+    const pesan = bermasalah ? ringkasPesanError(errs[bermasalah as string]) : null;
+    return { ok: false as const, pesan };
   };
 
   const handleNext = async () => {
-    const isValid = await validateStep(currentStep);
+    const { ok, pesan } = await validateStep(currentStep);
 
-    if (!isValid) {
-      toast.error('Mohon lengkapi field yang diperlukan');
+    if (!ok) {
+      toast.error(pesan || 'Mohon lengkapi field yang diperlukan');
       return;
     }
 
@@ -232,14 +369,23 @@ function TambahPropertyContent() {
     try {
       const formData = new FormData();
 
-      imgs.forEach((img, index) => {
+      // Indeks HARUS rapat (0,1,2,…): API pembaca berhenti di celah pertama
+      // (`if (!file) break`), jadi memakai indeks array asli akan memotong
+      // sisanya begitu ada satu elemen tanpa file.
+      let slot = 0;
+      imgs.forEach((img) => {
         if (img.file) {
-          formData.append(`images[${index}]`, img.file);
+          formData.append(`images[${slot}]`, img.file);
+          slot += 1;
         }
       });
 
       formData.append('kota', kota);
       formData.append('alamat', alamat);
+      // Cover ditentukan urutan di form, dan API mengembalikan URL cover di
+      // posisi pertama (`imageUrls.unshift(coverUrl)`). Karena `imgs` sudah
+      // terurut sesuai susunan agent, "0" berarti file baru pertama — hasilnya
+      // urutan yang kembali tetap sama dengan urutan yang dikirim.
       formData.append('cover_image_index', '0');
 
       const response = await fetch('/api/upload/images', {
@@ -283,10 +429,22 @@ function TambahPropertyContent() {
         );
       }
 
-      const existingImageUrls = images
-        .filter((img) => !img.file)
-        .map((img) => img.preview);
-      const allImageUrls = [...existingImageUrls, ...newImageUrls];
+      // Susun ulang ke URUTAN YANG DIATUR AGENT, bukan "yang lama dulu lalu
+      // yang baru". Foto pertama dipakai sebagai cover di card listing & preview
+      // WhatsApp, jadi menaruh foto lama di depan akan mengabaikan pengaturan
+      // urutan yang baru saja dilakukan di step Media.
+      let indeksBaru = 0;
+      const allImageUrls = images
+        .map((img) => (img.file ? newImageUrls[indeksBaru++] : img.preview))
+        .filter((url): url is string => !!url);
+
+      // Kos dengan beberapa tipe kamar: luas/kamar mandi/kapasitas per kamar
+      // hidup di tiap tipe, jadi kolom tunggalnya tidak boleh ikut terkirim —
+      // kalau ikut, DB menyimpan dua kebenaran yang bisa saling bertentangan.
+      const hasTipeKamar =
+        data.kategori === 'KOS' &&
+        Array.isArray(data.kamar_tipe) &&
+        data.kamar_tipe.length > 0;
 
       const submitData = {
         judul: data.judul,
@@ -294,7 +452,6 @@ function TambahPropertyContent() {
         deskripsi: data.deskripsi || null,
         jenis_transaksi: data.jenis_transaksi,
         kategori: data.kategori,
-        tipe_property: data.tipe_property || null,
         vendor: data.vendor || null,
         status_tayang: data.status_tayang || 'TERSEDIA',
         harga: Number(data.harga),
@@ -314,6 +471,8 @@ function TambahPropertyContent() {
         kelurahan: data.kelurahan || null,
         latitude: data.latitude ? Number(data.latitude) : null,
         longitude: data.longitude ? Number(data.longitude) : null,
+        // Baris patokan yang namanya kosong dibuang — jangan simpan sampah
+        akses_terdekat: (data.akses_terdekat ?? []).filter((a) => a?.nama?.trim()),
         luas_tanah: data.luas_tanah ? Number(data.luas_tanah) : null,
         luas_bangunan: data.luas_bangunan ? Number(data.luas_bangunan) : null,
         jumlah_lantai: data.jumlah_lantai || 1,
@@ -328,6 +487,111 @@ function TambahPropertyContent() {
         gambar: allImageUrls.join(','),
         lampiran: data.lampiran || null,
         is_hot_deal: data.is_hot_deal || false,
+
+        // --- Field SEWA (disimpan API ke tabel ListingSewaDetail) ---
+        // Hanya dikirim saat transaksi SEWA supaya listing jual/lelang tidak
+        // ikut membuat baris sewaDetail kosong.
+        ...(data.jenis_transaksi === 'SEWA' && {
+          // Tipe kamar kos. Kalau daftarnya terisi, server yang menghitung
+          // ulang total/sisa kamar & harga "mulai dari" dari daftar ini —
+          // field tunggal di bawah dikirim apa adanya tapi tidak dipakai.
+          kamar_tipe: hasTipeKamar
+            ? (data.kamar_tipe ?? []).map((t, index) => ({
+                nama: t.nama?.trim() || `Tipe ${index + 1}`,
+                urutan: index,
+                jumlah_kamar: Number(t.jumlah_kamar ?? 1),
+                kamar_tersedia: Number(t.kamar_tersedia ?? 0),
+                luas_kamar: t.luas_kamar != null ? Number(t.luas_kamar) : null,
+                kamar_mandi_tipe: t.kamar_mandi_tipe || null,
+                kapasitas_penghuni:
+                  t.kapasitas_penghuni != null ? Number(t.kapasitas_penghuni) : null,
+                lantai_kamar: t.lantai_kamar || null,
+                nomor_kamar: t.nomor_kamar || null,
+                harga_sewa_harian:
+                  t.harga_sewa_harian != null ? Number(t.harga_sewa_harian) : null,
+                harga_sewa_mingguan:
+                  t.harga_sewa_mingguan != null ? Number(t.harga_sewa_mingguan) : null,
+                harga_sewa_bulanan:
+                  t.harga_sewa_bulanan != null ? Number(t.harga_sewa_bulanan) : null,
+                harga_sewa_tahunan:
+                  t.harga_sewa_tahunan != null ? Number(t.harga_sewa_tahunan) : null,
+                fasilitas_kamar: t.fasilitas_kamar || null,
+                // Foto tipe sudah berupa URL (diunggah saat dipilih), jadi
+                // tidak ikut alur unggah gambar listing di atas.
+                gambar: t.gambar || null,
+                catatan: t.catatan || null,
+              }))
+            : [],
+          durasi_sewa: data.durasi_sewa || null,
+          harga_sewa_harian: data.harga_sewa_harian ? Number(data.harga_sewa_harian) : null,
+          harga_sewa_mingguan: data.harga_sewa_mingguan
+            ? Number(data.harga_sewa_mingguan)
+            : null,
+          harga_sewa_bulanan: data.harga_sewa_bulanan
+            ? Number(data.harga_sewa_bulanan)
+            : null,
+          harga_sewa_tahunan: data.harga_sewa_tahunan
+            ? Number(data.harga_sewa_tahunan)
+            : null,
+          minimal_sewa_jumlah: data.minimal_sewa_jumlah
+            ? Number(data.minimal_sewa_jumlah)
+            : null,
+          minimal_sewa_satuan: data.minimal_sewa_satuan || null,
+          deposit: data.deposit ? Number(data.deposit) : null,
+
+          // --- Identitas unit apartemen ---
+          // Hanya dikirim untuk kategori APARTEMEN: kalau agent sempat mengisi
+          // nama gedung/nomor unit lalu pindah kategori ke Rumah, nilainya
+          // tidak boleh ikut tersimpan — listing rumah dengan "Unit 12A"
+          // adalah data sampah yang akan tampil di halaman detail.
+          ...(data.kategori === 'APARTEMEN'
+            ? {
+                nama_gedung: data.nama_gedung?.trim() || null,
+                lantai_unit: data.lantai_unit?.trim() || null,
+                nomor_unit: data.nomor_unit?.trim() || null,
+                tipe_unit: data.tipe_unit || null,
+              }
+            : {
+                nama_gedung: null,
+                lantai_unit: null,
+                nomor_unit: null,
+                tipe_unit: null,
+              }),
+
+          // Baris biaya tanpa nama dibuang — baris kosong adalah keadaan normal
+          // saat agent baru menekan "tambah" lalu berpindah pikiran. Nominal
+          // boleh null: "listrik sesuai pemakaian" itu jawaban yang sah.
+          biaya_tambahan: (data.biaya_tambahan ?? [])
+            .filter((b) => b?.nama?.trim())
+            .map((b) => ({
+              nama: b.nama.trim(),
+              nominal: b.nominal != null ? Number(b.nominal) : null,
+              periode: b.periode,
+            })),
+
+          jam_check_in: data.jam_check_in || null,
+          jam_check_out: data.jam_check_out || null,
+          luas_kamar:
+            hasTipeKamar || !data.luas_kamar ? null : Number(data.luas_kamar),
+          kamar_mandi_tipe: hasTipeKamar ? null : data.kamar_mandi_tipe || null,
+          termasuk_listrik: data.termasuk_listrik ?? null,
+          termasuk_air: data.termasuk_air ?? null,
+          akses_24_jam: data.akses_24_jam ?? null,
+          jam_malam: data.jam_malam || null,
+          fasilitas_kamar: data.fasilitas_kamar || null,
+          fasilitas_bersama: data.fasilitas_bersama || null,
+          peraturan: data.peraturan || null,
+          kos_gender: data.kos_gender || null,
+          kapasitas_penghuni:
+            hasTipeKamar || !data.kapasitas_penghuni
+              ? null
+              : Number(data.kapasitas_penghuni),
+          total_kamar: data.total_kamar ? Number(data.total_kamar) : null,
+          // != null bukan truthy-check — 0 kamar tersedia (kos penuh) harus ikut
+          // terkirim, kalau tidak angkanya balik jadi "belum diisi".
+          kamar_tersedia:
+            data.kamar_tersedia != null ? Number(data.kamar_tersedia) : null,
+        }),
       };
 
       const url = isEditMode ? `/api/listings/${listingId}` : '/api/listings';
@@ -375,6 +639,11 @@ function TambahPropertyContent() {
           return;
         }
 
+        if (updated.jenis_transaksi === 'SEWA') {
+          router.push('/Sewa');
+          return;
+        }
+
         const base =
           updated.jenis_transaksi === 'LELANG' ? 'Lelang' : 'Jual';
 
@@ -389,6 +658,14 @@ function TambahPropertyContent() {
           jenis_transaksi: 'PRIMARY' | 'SECONDARY' | 'LELANG' | 'SEWA';
           id_agent: number | string;
         };
+
+        // SEWA punya halaman detail sendiri tanpa segmen agent — panel
+        // kanannya adalah pemesanan kamar, bukan kartu agent seperti Jual/
+        // Lelang, jadi tidak ada varian /[agentId] yang perlu dituju.
+        if (created.jenis_transaksi === 'SEWA') {
+          router.push(`/Sewa/${created.slug}-${created.id_property}`);
+          return;
+        }
 
         const base = created.jenis_transaksi === 'LELANG' ? 'Lelang' : 'Jual';
         const detailUrl = `/${base}/${created.slug}-${created.id_property}/${created.id_agent}`;
@@ -616,7 +893,10 @@ function TambahPropertyContent() {
             className="lg:col-span-2"
           >
             <div ref={formTopRef} />
-            <ProgressIndicator currentStep={currentStep} steps={STEPS} />
+            <ProgressIndicator
+              currentStep={currentStep}
+              steps={kategori === 'KOS' ? STEPS_KOS : STEPS}
+            />
 
             <form
               onSubmit={handleFormSubmit}
@@ -639,7 +919,7 @@ function TambahPropertyContent() {
                     <Step2Location form={form} />
                   </div>
                   <div className={currentStep === 3 ? 'block' : 'hidden'}>
-                    <Step3Pricing form={form} />
+                    <Step3Pricing form={form} isEditMode={isEditMode} />
                   </div>
                   <div className={currentStep === 4 ? 'block' : 'hidden'}>
                     <Step4Specifications form={form} />
@@ -649,6 +929,8 @@ function TambahPropertyContent() {
                       form={form}
                       images={images}
                       onImagesChange={setImages}
+                      isEditMode={isEditMode}
+                      aktif={currentStep === 5}
                     />
                   </div>
 
@@ -736,7 +1018,7 @@ function TambahPropertyContent() {
                       <span className="font-medium capitalize">
                         {key.replace(/_/g, ' ')}:
                       </span>{' '}
-                      {error.message as string}
+                      {ringkasPesanError(error)}
                     </li>
                   ))}
                 </ul>

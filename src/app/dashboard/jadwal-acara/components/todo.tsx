@@ -4,23 +4,9 @@ import { useMemo, useState, useEffect } from "react";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSession } from "next-auth/react";
+import { isOwnerAtauPemilik } from "@/lib/sessionJabatan";
+import type { EventData } from "../lib/acara-types";
 
-interface EventData {
-  id_acara: string;
-  judul_acara: string;
-  deskripsi?: string;
-  tanggal_mulai: string;
-  tanggal_selesai: string;
-  tipe_acara: string;
-  lokasi?: string;
-  status_acara: string;
-  agent?: {
-    id_agent: string;
-    pengguna: {
-      nama_lengkap: string;
-    };
-  };
-}
 
 interface TodoProps {
   events: EventData[];
@@ -160,17 +146,12 @@ export default function Todo({ events, onEventClick }: TodoProps) {
     fetchRegistrations();
   }, [events, session]);
 
-  const canEditEvent = (event: EventData): boolean => {
-    if (!session?.user) return false;
-    const currentAgentId = (session.user as any).agentId;
-    const eventCreatorId = event.agent?.id_agent;
-    const userRole = (session.user as any).role;
-    if (userRole === "OWNER") return true;
-    if (currentAgentId && eventCreatorId && currentAgentId === eventCreatorId) {
-      return true;
-    }
-    return false;
-  };
+  // Pembuat acara boleh menyunting acaranya sendiri; OWNER boleh menyunting
+  // semuanya. Wewenang dibaca dari `jabatan` lewat @/lib/sessionJabatan —
+  // dulu dari `session.user.role`, yang isinya USER|AGENT sehingga
+  // perbandingan dengan "OWNER" tidak pernah benar.
+  const canEditEvent = (event: EventData): boolean =>
+    isOwnerAtauPemilik(session?.user, event.agent?.id_agent);
 
   const canAccessPemilu = (event: EventData): boolean => {
     if (event.tipe_acara !== "PEMILU") return false;

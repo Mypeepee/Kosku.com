@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "postinstall": "prisma generate",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next build",
     "start": "cross-env NODE_ENV=production node server.js",
     "lint": "next lint",
@@ -11,7 +12,9 @@
     "deploy": "touch out/.nojekyll && gh-pages -d out --dotfiles",
     "db:reset": "prisma db execute --file prisma/sql/_reset_db.sql --schema prisma/schema.prisma && prisma db push",
     "migrate:users": "node scripts/migrate-users.js",
-    "migrate:agents": "node scripts/migrate-agents.js"
+    "migrate:agents": "node scripts/migrate-agents.js",
+    "pindai:sekitar": "node scripts/pindai-sekitar.mjs",
+    "kamus:tempat": "node scripts/kamus-tempat.mjs"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.6",

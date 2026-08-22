@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Icon } from "@iconify/react";
@@ -16,10 +16,32 @@ import {
   type SelectedRegion,
 } from "@/lib/regionSearch";
 import TypePicker from "@/components/search/TypePicker";
+import MobileSearchDock from "@/components/search/MobileSearchDock";
+import KeywordField from "@/components/search/KeywordField";
+import type { TempatDipilih } from "@/lib/searchTabs";
 import {
   serializeTypes,
   parseTypeParamToDisplays,
 } from "@/lib/propertyType";
+import {
+  DURASI_OPTIONS,
+  EMPTY_SEARCH_STATE,
+  ICON_SEMUA,
+  PROPERTY_ICONS,
+  durasiLabelFor,
+  durasiUnitFor,
+  formatIdNumber,
+  typeOptionsFor,
+  type RangeField,
+} from "@/lib/searchTabs";
+
+/** Animasi masuk saat kolom kriteria berganti mode (Harga/Dimensi ↔ Sewa). */
+const EASE_OUT_EXPO: [number, number, number, number] = [0.16, 1, 0.3, 1];
+const SWAP_MOTION = {
+  initial: { opacity: 0, y: 6 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.24, ease: EASE_OUT_EXPO },
+};
 
 // ─── PORTAL DROPDOWN ─────────────────────────────────────────────────────────
 // Renders children directly into document.body to escape any stacking context
@@ -110,39 +132,60 @@ const LOOPED_LIST = [
   ...KATEGORI_LIST.map((k, i) => ({ ...k, uid: `c-${i}` })),
 ];
 
-const CARD_W  = 152;
-const CARD_GAP = 10;
-const STRIDE  = CARD_W + CARD_GAP;
-const ONE_SET = N * STRIDE;
+// Carousel kategori duduk di sisi kanan hero pada SEMUA ukuran layar, jadi di
+// layar sempit kolomnya cuma ~130px. Lebar kartu karena itu ikut lebar kolom,
+// dengan batas bawah supaya label & angka statistik tetap terbaca.
+const CARD_W_MAX = 152;
+const CARD_W_MIN = 118;
+/** Ruang yang disisakan agar kartu berikutnya "mengintip" → sinyal bisa digeser. */
+const PEEK = 24;
+
+function useCardMetrics(ref: React.RefObject<HTMLElement>) {
+  const [{ cardW, gap }, setMetrics] = useState({ cardW: CARD_W_MAX, gap: 10 });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const compute = () => {
+      const avail = el.clientWidth;
+      if (!avail) return;
+      const nextGap = avail < 260 ? 8 : 10;
+      const nextW = Math.round(
+        Math.min(CARD_W_MAX, Math.max(CARD_W_MIN, avail - nextGap - PEEK))
+      );
+      setMetrics((prev) =>
+        prev.cardW === nextW && prev.gap === nextGap ? prev : { cardW: nextW, gap: nextGap }
+      );
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+
+  const stride = cardW + gap;
+  return { cardW, gap, stride, oneSet: N * stride };
+}
 
 // ─── SEARCH CONFIG ────────────────────────────────────────────────────────────
-const sortAlpha = (arr: string[]) => [...arr].sort((a, b) => a.localeCompare(b));
-
-const PROPERTY_ICONS: Record<string, string> = {
-  "Rumah":       "solar:home-2-bold-duotone",
-  "Apartemen":   "solar:buildings-2-bold-duotone",
-  "Gudang":      "solar:box-minimalistic-bold-duotone",
-  "Tanah":       "solar:map-point-wave-bold-duotone",
-  "Pabrik":      "solar:garage-bold-duotone",
-  "Ruko":        "solar:shop-2-bold-duotone",
-  "Toko":        "solar:shop-bold-duotone",
-  "Hotel & Villa": "solar:bed-bold-duotone",
-};
-
-const PROPERTY_TYPES = {
-  beli:   sortAlpha(["Rumah","Tanah","Gudang","Apartemen","Pabrik","Ruko","Toko","Hotel & Villa"]),
-  sewa:   sortAlpha(["Rumah","Tanah","Gudang","Apartemen","Pabrik","Ruko","Toko"]),
-  lelang: sortAlpha(["Rumah","Tanah","Gudang","Apartemen","Pabrik","Ruko","Toko","Hotel & Villa"]),
-};
-
 type TabType = "beli" | "sewa" | "lelang";
 
 interface SearchState {
   keyword: string;
+  /** Tempat yang dipilih dari saran ("Dekat UNESA"). */
+  dekat: TempatDipilih | null;
+  /** Radius pilihan user (meter); kosong = pakai bawaan kelas tempat. */
+  radius: string;
   locations: SelectedRegion[]; types: string[];
   minPrice: string; maxPrice: string;
   minLt: string; maxLt: string;
   minLb: string; maxLb: string;
+  /** Kriteria khusus tab Sewa — harga sewa dipisah dari harga jual supaya
+   *  berpindah pill tidak membawa budget beli ke kolom harga sewa. */
+  minRent: string; maxRent: string; durasi: string;
+  /** Gender kos. Hanya bisa diisi lewat sheet filter mobile (tab Sewa + tipe
+   *  Kos); search bar desktop di sini belum punya barisnya. */
+  gender: string;
 }
 
 const isNumericOnly = (val: string) => /^\d+$/.test(val.trim());
@@ -160,9 +203,11 @@ const PARTICLES = [
 function StatRow({ label, count, color }: { label: string; count: number; color: string }) {
   const animated = useCountUp(count);
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-[9px] font-semibold text-white/30 uppercase tracking-[0.12em]">{label}</span>
-      <span className="text-[11px] font-black tabular-nums" style={{ color }}>
+    <div className="flex items-center justify-between gap-1">
+      <span className="text-[9px] font-semibold text-white/30 uppercase tracking-[0.08em] lg:tracking-[0.12em] shrink-0">
+        {label}
+      </span>
+      <span className="text-[11px] font-black tabular-nums truncate text-right" style={{ color }}>
         {animated.toLocaleString("id-ID")}
       </span>
     </div>
@@ -170,11 +215,12 @@ function StatRow({ label, count, color }: { label: string; count: number; color:
 }
 
 // ─── KATEGORI CARD ────────────────────────────────────────────────────────────
-function KategoriCard({ item, isActive, tabCounts, scrollRef }: {
+function KategoriCard({ item, isActive, tabCounts, scrollRef, cardW }: {
   item: typeof LOOPED_LIST[0];
   isActive: boolean;
   tabCounts?: TabCounts;
   scrollRef: React.RefObject<HTMLDivElement>;
+  cardW: number;
 }) {
   const router      = useRouter();
   const cardRef     = useRef<HTMLDivElement>(null);
@@ -189,7 +235,7 @@ function KategoriCard({ item, isActive, tabCounts, scrollRef }: {
       const container = scrollRef.current;
       const cardRect  = cardRef.current.getBoundingClientRect();
       const contRect  = container.getBoundingClientRect();
-      const delta     = (cardRect.left - contRect.left) - (container.offsetWidth / 2 - CARD_W / 2);
+      const delta     = (cardRect.left - contRect.left) - (container.offsetWidth / 2 - cardW / 2);
       container.scrollTo({ left: container.scrollLeft + delta, behavior: "smooth" });
       setTimeout(() => router.push(`/properti/${item.slug}`), 260);
     } else {
@@ -198,9 +244,9 @@ function KategoriCard({ item, isActive, tabCounts, scrollRef }: {
   };
 
   return (
-    <div ref={cardRef} className="shrink-0 flex cursor-pointer" style={{ width: CARD_W }} onClick={handleClick}>
+    <div ref={cardRef} className="shrink-0 flex cursor-pointer" style={{ width: cardW }} onClick={handleClick}>
       <div
-        className="relative rounded-2xl p-4 transition-all duration-300 flex flex-col w-full"
+        className="relative rounded-2xl p-3 lg:p-4 transition-all duration-300 flex flex-col w-full"
         style={{
           background: isActive
             ? `linear-gradient(145deg,${item.color}22 0%,${item.color}06 100%)`
@@ -227,24 +273,24 @@ function KategoriCard({ item, isActive, tabCounts, scrollRef }: {
 
         {/* check badge */}
         {isActive && !pending && (
-          <div className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center"
+          <div className="absolute top-2 right-2 lg:top-3 lg:right-3 w-5 h-5 rounded-full flex items-center justify-center"
             style={{ background: `${item.color}22`, border: `1px solid ${item.color}48` }}>
             <Icon icon="solar:check-circle-bold" className="text-xs" style={{ color: item.color }} />
           </div>
         )}
 
         {/* icon */}
-        <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-3 transition-all duration-300 shrink-0"
+        <div className="w-9 h-9 lg:w-11 lg:h-11 rounded-xl flex items-center justify-center mb-2.5 lg:mb-3 transition-all duration-300 shrink-0"
           style={{
             background: `${item.color}18`,
             border: `1px solid ${item.color}28`,
             boxShadow: isActive ? `0 0 18px ${item.color}30` : "none",
           }}>
-          <Icon icon={item.icon} className="text-[22px] transition-all duration-300"
+          <Icon icon={item.icon} className="text-[19px] lg:text-[22px] transition-all duration-300"
             style={{ color: item.color, filter: isActive ? `drop-shadow(0 0 6px ${item.color}aa)` : "none" }} />
         </div>
 
-        <div className="text-[13px] font-bold leading-tight mb-1 transition-colors duration-300"
+        <div className="text-[12px] lg:text-[13px] font-bold leading-tight mb-1 transition-colors duration-300"
           style={{ color: isActive ? item.color : "rgba(255,255,255,0.78)" }}>
           {item.label}
         </div>
@@ -270,11 +316,22 @@ function KategoriCard({ item, isActive, tabCounts, scrollRef }: {
 }
 
 // ─── DARK SEARCH BAR ─────────────────────────────────────────────────────────
-const ALL_PROPERTY_TYPES = sortAlpha([
-  ...new Set([...PROPERTY_TYPES.beli, ...PROPERTY_TYPES.sewa, ...PROPERTY_TYPES.lelang]),
-]);
-
-function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeColor: string; activeTab: TxTab }) {
+function DarkSearchBar({
+  slug,
+  activeColor,
+  activeTab,
+  onTabChange,
+  tempatAwal = null,
+}: {
+  slug: string;
+  activeColor: string;
+  activeTab: TxTab;
+  /** Pill transaksi ikut dirender di dalam sheet filter mobile, jadi setter-nya
+   *  harus turun ke sini — bukan hanya dipakai TransactionTabs di induk. */
+  onTabChange: (tab: TxTab) => void;
+  /** Tempat yang sedang disaring — dioper dari server (lihat KategoriHero). */
+  tempatAwal?: TempatDipilih | null;
+}) {
   const router = useRouter();
   const sp     = useSearchParams();
   const wrapperRef   = useRef<HTMLDivElement>(null);
@@ -282,6 +339,9 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
   const refDimensi   = useRef<HTMLDivElement>(null);
   const keywordInputRef = useRef<HTMLInputElement>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  /** Tab Sewa memakai kriteria Durasi + Harga Sewa, bukan Harga + Dimensi. */
+  const isRent = activeTab === "sewa";
 
   const fmt = (val: string | null) =>
     val ? new Intl.NumberFormat("id-ID").format(Number(val)) : "";
@@ -296,16 +356,27 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
       : cat && cat.key !== "SEMUA"
       ? [cat.label]
       : [];
+    // Harga di URL milik konteks tab yang sedang dibuka: pada tab Sewa ia
+    // adalah harga sewa, selain itu harga jual/lelang.
+    const rentContext = activeTab === "sewa";
     return {
       keyword: rawKeyword,
+      // Chip tempat dihidrasi dari prop server (butuh nama & ikonnya, yang
+      // tidak ada di URL — URL cuma menyimpan slug).
+      dekat: tempatAwal ?? null,
+      radius: sp.get("radius") ?? "",
       locations: locationsToSelectedRegions(parseLocationParams((k) => sp.get(k))),
       types,
-      minPrice: fmt(sp.get("minHarga")),
-      maxPrice: fmt(sp.get("maxHarga")),
+      minPrice: rentContext ? "" : fmt(sp.get("minHarga")),
+      maxPrice: rentContext ? "" : fmt(sp.get("maxHarga")),
       minLt:    fmt(sp.get("minLT") ?? sp.get("minLt")),
       maxLt:    fmt(sp.get("maxLT") ?? sp.get("maxLt")),
       minLb:    fmt(sp.get("minLB") ?? sp.get("minLb")),
       maxLb:    fmt(sp.get("maxLB") ?? sp.get("maxLb")),
+      minRent:  rentContext ? fmt(sp.get("minHarga")) : "",
+      maxRent:  rentContext ? fmt(sp.get("maxHarga")) : "",
+      durasi:   sp.get("durasi") ?? "",
+      gender:   sp.get("gender") ?? "",
     };
   });
 
@@ -325,6 +396,23 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, sp]);
 
+  // Pindah pill bisa mengganti kolom yang sedang membuka dropdown (mis. panel
+  // Dimensi saat berpindah ke Sewa) — selalu tutup supaya tidak ada panel
+  // yatim yang muncul lagi saat user kembali ke tab semula.
+  //
+  // Daftar tipe juga berganti (Sewa punya "Kos", tapi tidak punya "Tanah" atau
+  // "Hotel & Villa"). Tipe terpilih yang tak ada di tab tujuan harus dilepas:
+  // kalau dibiarkan ia tetap terbaca di trigger padahal barisnya tidak ada di
+  // dalam daftar, jadi user tak punya cara untuk membatalkannya.
+  useEffect(() => {
+    setOpenDropdown(null);
+    const allowed = typeOptionsFor(activeTab);
+    setFormData(prev => {
+      const types = prev.types.filter(t => allowed.includes(t));
+      return types.length === prev.types.length ? prev : { ...prev, types };
+    });
+  }, [activeTab]);
+
   useEffect(() => {
     const h = (e: MouseEvent) => {
       const target = e.target as Element;
@@ -340,6 +428,38 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
     const raw = e.target.value.replace(/\D/g, "");
     setFormData(prev => ({ ...prev, [field]: raw ? new Intl.NumberFormat("id-ID").format(Number(raw)) : "" }));
   };
+
+  // --- Jembatan ke MobileSearchDock (sheet filter di layar kecil) ------------
+  // Search bar ini punya state sendiri (bukan `useSearchForm`), tapi bentuk
+  // state-nya identik dengan `SearchFormState`, jadi cukup dioper apa adanya.
+  const patchForm = useCallback((next: Partial<SearchState>) => {
+    setFormData(prev => ({ ...prev, ...next }));
+  }, []);
+
+  const resetForm = useCallback(() => setFormData(EMPTY_SEARCH_STATE), []);
+
+  /** Pilih tempat dari saran; kata kunci lama dibuang karena sudah terwakili
+   *  chip — membiarkannya berarti hasil disaring dua kali, sekali sebagai
+   *  tempat dan sekali sebagai teks yang tidak akan cocok ke alamat mana pun. */
+  const pilihTempat = useCallback((tempat: TempatDipilih | null) => {
+    setFormData((prev) => ({
+      ...prev,
+      dekat: tempat,
+      radius: "",
+      keyword: tempat ? "" : prev.keyword,
+    }));
+    setOpenDropdown(null);
+  }, []);
+
+  /** Kota yang sedang dilihat — MENAIKKAN saran di kota itu, tidak menyaring. */
+  const kotaKonteks = useMemo(
+    () => formData.locations.find((l) => l.level === "kota")?.name ?? null,
+    [formData.locations],
+  );
+
+  const handleDockRange = useCallback((field: RangeField, rawValue: string) => {
+    setFormData(prev => ({ ...prev, [field]: formatIdNumber(rawValue) }));
+  }, []);
 
   const getLabel = (min: string, max: string, def: string, prefix = "") => {
     if (min && max) return `${prefix}${min} – ${prefix}${max}`;
@@ -377,13 +497,36 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
       if (keywordMode === "id") params.set("idProperty", keywordTrimmed);
       else params.set("q", keywordTrimmed);
     }
+    if (formData.dekat) {
+      params.set("dekat", formData.dekat.nilai);
+      // Radius hanya ditulis bila BERBEDA dari bawaan kelasnya — URL yang
+      // dibagikan lewat WhatsApp jadi lebih pendek, dan bawaan yang diperbaiki
+      // nanti tetap berlaku untuk tautan lama.
+      const r = Number(formData.radius);
+      if (Number.isFinite(r) && r > 0 && r !== formData.dekat.radius) {
+        params.set("radius", String(Math.round(r)));
+      }
+    }
     setLocationParams(params, formData.locations);
-    if (formData.minPrice) params.set("minHarga", raw(formData.minPrice));
-    if (formData.maxPrice) params.set("maxHarga", raw(formData.maxPrice));
-    if (formData.minLt)    params.set("minLT",    raw(formData.minLt));
-    if (formData.maxLt)    params.set("maxLT",    raw(formData.maxLt));
-    if (formData.minLb)    params.set("minLB",    raw(formData.minLb));
-    if (formData.maxLb)    params.set("maxLB",    raw(formData.maxLb));
+    // Kriteria mengikuti pill aktif: Sewa memakai durasi + harga sewa,
+    // sisanya harga jual + dimensi (LT/LB).
+    if (activeTab === "sewa") {
+      if (formData.durasi)  params.set("durasi",   formData.durasi);
+      // Gender hanya dipakai listing kos — kirim cuma saat tipe Kos aktif,
+      // sama seperti perakitan query di `buildSearchParams`.
+      if (formData.gender && formData.types.includes("Kos")) {
+        params.set("gender", formData.gender);
+      }
+      if (formData.minRent) params.set("minHarga", raw(formData.minRent));
+      if (formData.maxRent) params.set("maxHarga", raw(formData.maxRent));
+    } else {
+      if (formData.minPrice) params.set("minHarga", raw(formData.minPrice));
+      if (formData.maxPrice) params.set("maxHarga", raw(formData.maxPrice));
+      if (formData.minLt)    params.set("minLT",    raw(formData.minLt));
+      if (formData.maxLt)    params.set("maxLT",    raw(formData.maxLt));
+      if (formData.minLb)    params.set("minLB",    raw(formData.minLb));
+      if (formData.maxLb)    params.set("maxLB",    raw(formData.maxLb));
+    }
 
     setOpenDropdown(null);
 
@@ -438,9 +581,26 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
   return (
     <div ref={wrapperRef} className="w-full relative z-[100] zoom-safe">
 
-      {/* SEARCH BAR */}
+      {/* MOBILE: command bar ringkas — detail filter pindah ke bottom sheet */}
+      <MobileSearchDock
+        className="lg:hidden"
+        tab={activeTab}
+        onTabChange={onTabChange}
+        state={formData}
+        patch={patchForm}
+        patchRange={patchForm}
+        resetForm={resetForm}
+        errors={{}}
+        onRangeChange={handleDockRange}
+        searching={searching}
+        onSubmit={handleSearch}
+        onPilihTempat={pilihTempat}
+        kotaKonteks={kotaKonteks}
+      />
+
+      {/* DESKTOP: SEARCH BAR */}
       <div
-        className="rounded-[1.75rem] p-2"
+        className="hidden lg:block rounded-[1.75rem] p-2"
         style={{
           background: "rgba(255,255,255,0.04)",
           border: "1px solid rgba(255,255,255,0.09)",
@@ -449,62 +609,25 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
       >
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center divide-y lg:divide-y-0 lg:divide-x divide-white/[0.07]">
 
-          {/* A. KEYWORD / ID PROPERTI */}
-          <div
-            className="w-full lg:w-[24%] px-3 py-2.5 relative group min-w-0"
-            onClick={() => { setOpenDropdown(null); keywordInputRef.current?.focus(); }}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <label
-                htmlFor="kategori-search-keyword"
-                className="text-[10px] font-extrabold tracking-wider text-white/30 uppercase block group-focus-within:text-white/60 transition-colors cursor-pointer"
-              >
-                Cari Properti
-              </label>
-              {keywordMode && (
-                <span
-                  className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-[1px] rounded-full leading-none border"
-                  style={
-                    keywordMode === "id"
-                      ? { background: "rgba(96,165,250,0.12)", borderColor: "rgba(96,165,250,0.35)", color: "#93c5fd" }
-                      : { background: `${activeColor}1a`, borderColor: `${activeColor}55`, color: activeColor }
-                  }
-                  title={keywordMode === "id" ? "Akan dicari sebagai ID Properti" : "Akan dicari sebagai Alamat / kata kunci"}
-                >
-                  {keywordMode === "id" ? "ID" : "Alamat"}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Icon
-                icon={keywordMode === "id" ? "solar:hashtag-square-bold-duotone" : "solar:magnifer-bold-duotone"}
-                className="text-xl text-white/30 group-focus-within:text-white/60 transition-colors shrink-0"
-              />
-              <input
-                id="kategori-search-keyword"
-                ref={keywordInputRef}
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                value={formData.keyword}
-                placeholder="Alamat / ID, ex: 12345"
-                onChange={(e) => setFormData(prev => ({ ...prev, keyword: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
-                onClick={(e) => e.stopPropagation()}
-                className="w-full bg-transparent outline-none font-bold text-white/85 text-sm placeholder:font-medium placeholder:text-white/20 truncate"
-              />
-              {formData.keyword && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setFormData(prev => ({ ...prev, keyword: "" })); keywordInputRef.current?.focus(); }}
-                  className="shrink-0 p-1 -m-1 rounded-full text-white/25 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  aria-label="Hapus pencarian"
-                >
-                  <Icon icon="solar:close-circle-bold" className="text-base" />
-                </button>
-              )}
-            </div>
-          </div>
+          {/* A. KEYWORD / ID PROPERTI / TEMPAT
+              Dulu kolom ini menggandakan KeywordField dengan markup sendiri.
+              Sejak kotak pencarian juga menawarkan TEMPAT ("deket unesa"),
+              duplikat itu berarti satu-satunya halaman kategori tidak ikut
+              kebagian — jadi ia dipakai bersama sekarang. */}
+          <KeywordField
+            id="kategori-search-keyword"
+            theme="dark"
+            label="Cari Properti"
+            width="lg:w-[24%]"
+            value={formData.keyword}
+            onChange={(keyword) => setFormData((prev) => ({ ...prev, keyword }))}
+            onSubmit={handleSearch}
+            onFocusField={() => setOpenDropdown(null)}
+            dekat={formData.dekat}
+            onPilihTempat={pilihTempat}
+            kota={kotaKonteks}
+            tx={activeTab === "beli" || activeTab === "sewa" || activeTab === "lelang" ? activeTab : "semua"}
+          />
 
           {/* B. LOKASI */}
           <div className="w-full lg:w-[20%] px-3 py-2.5 relative min-w-0">
@@ -523,63 +646,189 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
               theme="dark"
               value={formData.types}
               onChange={(ts) => setFormData((prev) => ({ ...prev, types: ts }))}
-              options={ALL_PROPERTY_TYPES}
+              options={typeOptionsFor(activeTab)}
               icons={PROPERTY_ICONS}
               open={openDropdown === "type"}
               onOpenChange={(o) => setOpenDropdown(o ? "type" : null)}
             />
           </div>
 
-          {/* D. HARGA */}
+          {/* D. HARGA — pada tab Sewa berganti jadi DURASI SEWA */}
           <div ref={refHarga} className="w-full lg:w-[16%] px-3 py-2.5 relative group min-w-0">
-            <div className="cursor-pointer" onClick={() => setOpenDropdown(openDropdown === "price" ? null : "price")}>
-              <label className="text-[10px] font-extrabold tracking-wider text-white/30 uppercase mb-1 block group-hover:text-white/60 transition-colors">
-                Harga
-              </label>
-              <div className="flex items-center gap-2">
-                <Icon icon="solar:wallet-money-bold-duotone" className="text-xl text-white/30 group-hover:text-white/60 transition-colors shrink-0" />
-                <p className="font-bold text-white/85 text-sm truncate flex-1">
-                  {getLabel(formData.minPrice, formData.maxPrice, "Range Harga")}
-                </p>
-                <motion.div animate={{ rotate: openDropdown === "price" ? 180 : 0 }} transition={{ duration: 0.2 }}>
-                  <Icon icon="solar:alt-arrow-down-linear" className="text-white/25 shrink-0" />
-                </motion.div>
-              </div>
-            </div>
-
-            <PortalDropdown triggerRef={refHarga} open={openDropdown === "price"}>
-              <AnimatePresence>
-              {openDropdown === "price" && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={{ duration: 0.18, ease: [0.16,1,0.3,1] }}
-                  className="w-[320px] rounded-2xl p-5"
-                  style={panelStyle}
-                >
-                  <h4 className="font-bold text-white/70 mb-3 text-sm">Range Budget (Rp)</h4>
-                  <div className="flex items-center gap-2">
-                    <input type="text" placeholder="Min" value={formData.minPrice}
-                      onChange={e => handleFormattedInput(e, "minPrice")}
-                      className={inputCls} style={inputStyle}
-                      onFocus={e => Object.assign(e.target.style, inputFocusStyle)}
-                      onBlur={e => Object.assign(e.target.style, inputStyle)}
-                    />
-                    <span className="text-white/30 font-medium shrink-0">s/d</span>
-                    <input type="text" placeholder="Max" value={formData.maxPrice}
-                      onChange={e => handleFormattedInput(e, "maxPrice")}
-                      className={inputCls} style={inputStyle}
-                      onFocus={e => Object.assign(e.target.style, inputFocusStyle)}
-                      onBlur={e => Object.assign(e.target.style, inputStyle)}
-                    />
+            {isRent ? (
+              <>
+                <motion.div key="kat-durasi" {...SWAP_MOTION}>
+                  <div className="cursor-pointer" onClick={() => setOpenDropdown(openDropdown === "durasi" ? null : "durasi")}>
+                    <label className="text-[10px] font-extrabold tracking-wider text-white/30 uppercase mb-1 block group-hover:text-white/60 transition-colors">
+                      Durasi Sewa
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Icon icon="solar:calendar-date-bold-duotone" className="text-xl text-white/30 group-hover:text-white/60 transition-colors shrink-0" />
+                      <p className="font-bold text-white/85 text-sm truncate flex-1">
+                        {durasiLabelFor(formData.durasi)}
+                      </p>
+                      <motion.div animate={{ rotate: openDropdown === "durasi" ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                        <Icon icon="solar:alt-arrow-down-linear" className="text-white/25 shrink-0" />
+                      </motion.div>
+                    </div>
                   </div>
                 </motion.div>
-              )}
-              </AnimatePresence>
-            </PortalDropdown>
+
+                <PortalDropdown triggerRef={refHarga} open={openDropdown === "durasi"}>
+                  <AnimatePresence>
+                  {openDropdown === "durasi" && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={{ duration: 0.18, ease: [0.16,1,0.3,1] }}
+                      className="w-[280px] rounded-2xl p-3"
+                      style={panelStyle}
+                    >
+                      {[{ value: "", label: "Semua Durasi", icon: ICON_SEMUA }, ...DURASI_OPTIONS].map((d) => {
+                        const active = formData.durasi === d.value;
+                        return (
+                          <button
+                            key={d.value || "all"}
+                            type="button"
+                            onClick={() => { setFormData(prev => ({ ...prev, durasi: d.value })); setOpenDropdown(null); }}
+                            className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors"
+                            style={active
+                              ? { background: `${activeColor}1f`, color: activeColor }
+                              : { color: "rgba(255,255,255,0.65)" }}
+                          >
+                            <Icon
+                              icon={d.icon}
+                              className="text-lg opacity-70 shrink-0"
+                            />
+                            <span className="flex-1">{d.label}</span>
+                            {active && <Icon icon="solar:check-circle-bold" className="text-lg" />}
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+                </PortalDropdown>
+              </>
+            ) : (
+              <>
+                <motion.div key="kat-price" {...SWAP_MOTION}>
+                  <div className="cursor-pointer" onClick={() => setOpenDropdown(openDropdown === "price" ? null : "price")}>
+                    <label className="text-[10px] font-extrabold tracking-wider text-white/30 uppercase mb-1 block group-hover:text-white/60 transition-colors">
+                      Harga
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Icon icon="solar:wallet-money-bold-duotone" className="text-xl text-white/30 group-hover:text-white/60 transition-colors shrink-0" />
+                      <p className="font-bold text-white/85 text-sm truncate flex-1">
+                        {getLabel(formData.minPrice, formData.maxPrice, "Range Harga")}
+                      </p>
+                      <motion.div animate={{ rotate: openDropdown === "price" ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                        <Icon icon="solar:alt-arrow-down-linear" className="text-white/25 shrink-0" />
+                      </motion.div>
+                    </div>
+                  </div>
+                </motion.div>
+
+                <PortalDropdown triggerRef={refHarga} open={openDropdown === "price"}>
+                  <AnimatePresence>
+                  {openDropdown === "price" && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={{ duration: 0.18, ease: [0.16,1,0.3,1] }}
+                      className="w-[320px] rounded-2xl p-5"
+                      style={panelStyle}
+                    >
+                      <h4 className="font-bold text-white/70 mb-3 text-sm">Range Budget (Rp)</h4>
+                      <div className="flex items-center gap-2">
+                        <input type="text" inputMode="numeric" placeholder="Min" value={formData.minPrice}
+                          onChange={e => handleFormattedInput(e, "minPrice")}
+                          className={inputCls} style={inputStyle}
+                          onFocus={e => Object.assign(e.target.style, inputFocusStyle)}
+                          onBlur={e => Object.assign(e.target.style, inputStyle)}
+                        />
+                        <span className="text-white/30 font-medium shrink-0">s/d</span>
+                        <input type="text" inputMode="numeric" placeholder="Max" value={formData.maxPrice}
+                          onChange={e => handleFormattedInput(e, "maxPrice")}
+                          className={inputCls} style={inputStyle}
+                          onFocus={e => Object.assign(e.target.style, inputFocusStyle)}
+                          onBlur={e => Object.assign(e.target.style, inputStyle)}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+                </PortalDropdown>
+              </>
+            )}
           </div>
 
-          {/* E. DIMENSI */}
+          {/* E. DIMENSI — pada tab Sewa berganti jadi HARGA SEWA */}
           <div ref={refDimensi} className="w-full lg:w-[17%] px-3 py-2.5 relative group min-w-0">
+            {isRent && (
+              <>
+                <motion.div key="kat-rent" {...SWAP_MOTION}>
+                  <div className="cursor-pointer" onClick={() => setOpenDropdown(openDropdown === "rent" ? null : "rent")}>
+                    <label className="text-[10px] font-extrabold tracking-wider text-white/30 uppercase mb-1 block group-hover:text-white/60 transition-colors">
+                      Harga Sewa
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Icon icon="solar:wallet-money-bold-duotone" className="text-xl text-white/30 group-hover:text-white/60 transition-colors shrink-0" />
+                      <p className="font-bold text-white/85 text-sm truncate flex-1">
+                        {getLabel(
+                          formData.minRent,
+                          formData.maxRent,
+                          "Range Harga",
+                        )}
+                        {(formData.minRent || formData.maxRent) && durasiUnitFor(formData.durasi)
+                          ? ` ${durasiUnitFor(formData.durasi)}`
+                          : ""}
+                      </p>
+                      <motion.div animate={{ rotate: openDropdown === "rent" ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                        <Icon icon="solar:alt-arrow-down-linear" className="text-white/25 shrink-0" />
+                      </motion.div>
+                    </div>
+                  </div>
+                </motion.div>
+
+                <PortalDropdown triggerRef={refDimensi} open={openDropdown === "rent"}>
+                  <AnimatePresence>
+                  {openDropdown === "rent" && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={{ duration: 0.18, ease: [0.16,1,0.3,1] }}
+                      className="w-[320px] rounded-2xl p-5"
+                      style={panelStyle}
+                    >
+                      <h4 className="font-bold text-white/70 mb-1 text-sm">Range Harga Sewa (Rp)</h4>
+                      <p className="text-[11px] text-white/35 mb-3">
+                        {formData.durasi
+                          ? `Dihitung ${durasiUnitFor(formData.durasi)} sesuai durasi yang dipilih.`
+                          : "Pilih durasi dulu agar harga dibandingkan pada satuan yang sama."}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <input type="text" inputMode="numeric" placeholder="Min" value={formData.minRent}
+                          onChange={e => handleFormattedInput(e, "minRent")}
+                          className={inputCls} style={inputStyle}
+                          onFocus={e => Object.assign(e.target.style, inputFocusStyle)}
+                          onBlur={e => Object.assign(e.target.style, inputStyle)}
+                        />
+                        <span className="text-white/30 font-medium shrink-0">s/d</span>
+                        <input type="text" inputMode="numeric" placeholder="Max" value={formData.maxRent}
+                          onChange={e => handleFormattedInput(e, "maxRent")}
+                          className={inputCls} style={inputStyle}
+                          onFocus={e => Object.assign(e.target.style, inputFocusStyle)}
+                          onBlur={e => Object.assign(e.target.style, inputStyle)}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+                </PortalDropdown>
+              </>
+            )}
+
+            {!isRent && (
+              <>
+            <motion.div key="kat-dimensi" {...SWAP_MOTION}>
             <div className="cursor-pointer" onClick={() => setOpenDropdown(openDropdown === "dimensions" ? null : "dimensions")}>
               <label className="text-[10px] font-extrabold tracking-wider text-white/30 uppercase mb-1 block group-hover:text-white/60 transition-colors">
                 Dimensi
@@ -596,6 +845,7 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
                 </motion.div>
               </div>
             </div>
+            </motion.div>
 
             <PortalDropdown triggerRef={refDimensi} open={openDropdown === "dimensions"}>
               <AnimatePresence>
@@ -650,6 +900,8 @@ function DarkSearchBar({ slug, activeColor, activeTab }: { slug: string; activeC
               )}
               </AnimatePresence>
             </PortalDropdown>
+              </>
+            )}
           </div>
 
           {/* F. TOMBOL CARI */}
@@ -688,11 +940,25 @@ interface KategoriHeroProps {
   slug: string;
   label: string;
   tabCounts: TabCounts;
+  /** Tempat yang sedang disaring ("dekat UNESA"), dari server. */
+  tempatAwal?: TempatDipilih | null;
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
-export default function KategoriHero({ slug, label, tabCounts }: KategoriHeroProps) {
+export default function KategoriHero({
+  slug,
+  label,
+  tabCounts,
+  /**
+   * Tempat yang sedang disaring. Dioper server, bukan dibaca dari URL: URL
+   * hanya menyimpan slug, sementara chip butuh nama, ikon, dan warnanya —
+   * dan menembak API hanya untuk menggambar satu chip berarti chip itu
+   * berkedip di setiap kunjungan.
+   */
+  tempatAwal = null,
+}: KategoriHeroProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { cardW, gap, stride, oneSet } = useCardMetrics(scrollRef);
   const dragging       = useRef(false);
   const dragStartX     = useRef(0);
   const dragScrollLeft = useRef(0);
@@ -725,22 +991,22 @@ export default function KategoriHero({ slug, label, tabCounts }: KategoriHeroPro
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (el.scrollLeft < ONE_SET * 0.5)      el.scrollLeft += ONE_SET;
-    else if (el.scrollLeft > ONE_SET * 1.5) el.scrollLeft -= ONE_SET;
-  }, []);
+    if (el.scrollLeft < oneSet * 0.5)      el.scrollLeft += oneSet;
+    else if (el.scrollLeft > oneSet * 1.5) el.scrollLeft -= oneSet;
+  }, [oneSet]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const cardOffset = activeIdx >= 0 ? activeIdx * STRIDE : 0;
-    let scrollTarget = ONE_SET + cardOffset - el.offsetWidth / 2 + CARD_W / 2;
-    // Normalise ke range valid [ONE_SET*0.5, ONE_SET*1.5] tanpa mengubah posisi visual
-    while (scrollTarget > ONE_SET * 1.5) scrollTarget -= ONE_SET;
-    while (scrollTarget < ONE_SET * 0.5) scrollTarget += ONE_SET;
+    const cardOffset = activeIdx >= 0 ? activeIdx * stride : 0;
+    let scrollTarget = oneSet + cardOffset - el.offsetWidth / 2 + cardW / 2;
+    // Normalise ke range valid [oneSet*0.5, oneSet*1.5] tanpa mengubah posisi visual
+    while (scrollTarget > oneSet * 1.5) scrollTarget -= oneSet;
+    while (scrollTarget < oneSet * 0.5) scrollTarget += oneSet;
     el.scrollLeft = scrollTarget;
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
-  }, [activeIdx, handleScroll]);
+  }, [activeIdx, handleScroll, cardW, stride, oneSet]);
 
   const onMouseDown = (e: React.MouseEvent) => {
     dragging.current       = true;
@@ -801,16 +1067,18 @@ export default function KategoriHero({ slug, label, tabCounts }: KategoriHeroPro
       {/* CONTENT */}
       <div className="relative z-10 container mx-auto max-w-screen-xl px-5 sm:px-8 md:px-10 pt-[72px] pb-8 md:pt-20 md:pb-10">
 
-        {/* TOP ROW */}
-        <div className="flex flex-col lg:flex-row lg:items-stretch gap-6 lg:gap-10 xl:gap-14">
+        {/* TOP ROW — teks kiri, carousel kategori kanan di semua breakpoint */}
+        <div className="flex flex-row items-stretch gap-3 sm:gap-5 lg:gap-10 xl:gap-14">
 
-          {/* LEFT */}
-          <div className="flex-1 min-w-0">
+          {/* LEFT — ukuran teks fluid: kolom ini menyempit saat carousel di kanan,
+              jadi skala px per breakpoint selalu meleset. clamp() mengisi ruang
+              yang tersisa tanpa menabrak kolom kanan. */}
+          <div className="flex-1 min-w-0 flex flex-col justify-center">
             <motion.div initial={{ opacity: 0, x: -14 }} animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.08, duration: 0.5 }} className="inline-flex items-center gap-2 mb-4">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[11px] font-bold tracking-wide"
+              transition={{ delay: 0.08, duration: 0.5 }} className="inline-flex max-w-full items-center gap-2 mb-3 sm:mb-4">
+              <div className="inline-flex max-w-full items-center gap-2 px-3 py-1 sm:px-4 sm:py-1.5 rounded-full text-[clamp(10px,1.35vw,13px)] font-bold tracking-wide"
                 style={{ background: `${activeColor}15`, border: `1px solid ${activeColor}38`, color: activeColor }}>
-                <span className="relative flex h-1.5 w-1.5">
+                <span className="relative flex h-1.5 w-1.5 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-70" style={{ background: activeColor }} />
                   <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: activeColor }} />
                 </span>
@@ -820,7 +1088,7 @@ export default function KategoriHero({ slug, label, tabCounts }: KategoriHeroPro
 
             <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.16, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-              className="font-black text-white leading-[0.9] tracking-tight text-[28px] sm:text-4xl md:text-5xl lg:text-[54px]">
+              className="font-black text-white leading-[1.02] md:leading-[0.96] lg:leading-[0.9] tracking-tight text-[clamp(21px,5.5vw,56px)]">
               Temukan Properti
               <br />
               <span className="text-transparent bg-clip-text"
@@ -832,14 +1100,14 @@ export default function KategoriHero({ slug, label, tabCounts }: KategoriHeroPro
                 {label}
               </span>
               <br />
-              <span className="text-white/48 text-[22px] sm:text-3xl md:text-[36px] lg:text-[40px] font-semibold">
+              <span className="text-white/48 text-[clamp(16px,3.95vw,40px)] font-semibold">
                 Terbaik Anda
               </span>
             </motion.h1>
 
             <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.26, duration: 0.5 }}
-              className="text-white/32 text-[13px] mt-3.5 max-w-[340px] leading-relaxed">
+              className="text-white/32 text-[clamp(11.5px,1.5vw,15px)] mt-3 sm:mt-4 max-w-[340px] md:max-w-[460px] leading-relaxed">
               Properti dijual, disewa & dilelang di seluruh Indonesia. Satu platform, semua pilihan.
             </motion.p>
           </div>
@@ -847,33 +1115,36 @@ export default function KategoriHero({ slug, label, tabCounts }: KategoriHeroPro
           {/* RIGHT — carousel */}
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.2, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full lg:w-auto lg:max-w-[400px] xl:max-w-[440px] shrink-0 lg:flex lg:flex-col">
+            className="w-[46%] max-w-[176px] sm:w-[44%] sm:max-w-[260px] md:max-w-[320px] lg:w-auto lg:max-w-[400px] xl:max-w-[440px] shrink-0 flex flex-col">
 
-            <div className="flex items-center mb-3 px-1 lg:shrink-0">
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/20">Semua Kategori</span>
+            <div className="flex items-center mb-2 sm:mb-3 px-1 shrink-0">
+              <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] sm:tracking-[0.2em] text-white/20">
+                Semua Kategori
+              </span>
             </div>
 
-            <div className="relative lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
-              <div className="absolute left-0 inset-y-0 w-10 z-10 pointer-events-none"
+            <div className="relative flex-1 min-h-0 flex flex-col">
+              <div className="absolute left-0 inset-y-0 w-4 sm:w-6 lg:w-10 z-10 pointer-events-none"
                 style={{ background: "linear-gradient(90deg,rgba(7,8,15,0.9),transparent)" }} />
-              <div className="absolute right-0 inset-y-0 w-10 z-10 pointer-events-none"
+              <div className="absolute right-0 inset-y-0 w-4 sm:w-6 lg:w-10 z-10 pointer-events-none"
                 style={{ background: "linear-gradient(270deg,rgba(7,8,15,0.9),transparent)" }} />
 
               <div ref={scrollRef}
                 onMouseDown={onMouseDown} onMouseMove={onMouseMove}
                 onMouseUp={stopDrag} onMouseLeave={stopDrag}
-                className="flex overflow-x-scroll lg:flex-1"
+                className="flex overflow-x-scroll flex-1"
                 style={{
-                  gap: CARD_GAP, paddingTop: 8, paddingBottom: 10,
+                  gap, paddingTop: 8, paddingBottom: 10,
                   scrollbarWidth: "none", msOverflowStyle: "none",
                   cursor: "grab", WebkitOverflowScrolling: "touch",
+                  overscrollBehaviorX: "contain",
                   alignItems: "stretch",
                 }}>
                 {LOOPED_LIST.map(item => (
                   <KategoriCard key={item.uid} item={item}
                     isActive={item.key === categoryKey}
                     tabCounts={item.key === categoryKey ? tabCounts : undefined}
-                    scrollRef={scrollRef} />
+                    scrollRef={scrollRef} cardW={cardW} />
                 ))}
               </div>
             </div>
@@ -885,7 +1156,13 @@ export default function KategoriHero({ slug, label, tabCounts }: KategoriHeroPro
           transition={{ delay: 0.42, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
           className="mt-7 md:mt-8">
           <TransactionTabs active={activeTab} onChange={setActiveTab} />
-          <DarkSearchBar slug={slug} activeColor={activeColor} activeTab={activeTab} />
+          <DarkSearchBar
+            slug={slug}
+            activeColor={activeColor}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            tempatAwal={tempatAwal}
+          />
         </motion.div>
       </div>
 

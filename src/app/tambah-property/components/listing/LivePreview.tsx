@@ -6,6 +6,15 @@ import { formatCurrency } from '@/lib/utils';
 import { Icon } from '@iconify/react';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
+import { AksesMarquee } from '@/components/AksesMarquee';
+import { KosChipRow } from '@/components/kos/KosChipRow';
+import { KosPillBadge } from '@/components/kos/KosPillBadge';
+import { buildFasilitasChips, pilihAksesUtama, type AksesTerdekat } from '@/lib/kosCard';
+import {
+  kamarMandiSeragam,
+  ringkasKamarTipe,
+  type KamarTipe,
+} from '@/lib/kosRoomTypes';
 
 interface ImageFile {
   id: string;
@@ -50,6 +59,7 @@ const getPropertyIcon = (kategori?: string): string => {
     RUKO: 'solar:shop-2-bold-duotone',
     TOKO: 'solar:shop-bold-duotone',
     HOTEL_DAN_VILLA: 'solar:bed-bold-duotone',
+    KOS: 'solar:bed-bold-duotone',
   };
   return ICONS[kategori?.toUpperCase() || ''] || 'solar:home-2-bold-duotone';
 };
@@ -80,6 +90,14 @@ const toNumber = (value: unknown): number | null => {
   return Number.isNaN(num) ? null : num;
 };
 
+// Suffix durasi sewa untuk label harga (harus konsisten dgn DURASI_SEWA_OPTIONS)
+const DURASI_SUFFIX: Record<string, string> = {
+  HARIAN: '/hari',
+  MINGGUAN: '/minggu',
+  BULANAN: '/bulan',
+  TAHUNAN: '/tahun',
+};
+
 export function LivePreview({ data, images }: LivePreviewProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
@@ -87,6 +105,7 @@ export function LivePreview({ data, images }: LivePreviewProps) {
   const isPrimary = data.jenis_transaksi === 'PRIMARY';
   const isSecondary = data.jenis_transaksi === 'SECONDARY';
   const isSewa = data.jenis_transaksi === 'SEWA';
+  const isKos = data.kategori === 'KOS';
   const isPrivacyMode = isSecondary || isSewa;
 
   const days = daysUntil(data.tanggal_lelang);
@@ -95,7 +114,45 @@ export function LivePreview({ data, images }: LivePreviewProps) {
   const nilaiLimit = toNumber(data.nilai_limit_lelang);
   const hargaPromo = toNumber(data.harga_promo);
   const hargaNormal = toNumber(data.harga);
-  const hasPromo = hargaPromo !== null && hargaPromo > 0;
+  // Promo cuma valid kalau beneran lebih murah dari harga normal — angka promo
+  // yang >= harga normal (sisa draft/duration lama) tidak boleh ditampilkan.
+  const hasPromo =
+    hargaPromo !== null &&
+    hargaPromo > 0 &&
+    hargaNormal !== null &&
+    hargaNormal > 0 &&
+    hargaPromo < hargaNormal;
+  const durasiSuffix = data.durasi_sewa ? DURASI_SUFFIX[data.durasi_sewa] : undefined;
+
+  // Cerminan card listing publik — aturan chip-nya dipusatkan di lib/kosCard
+  // supaya preview tidak pernah menjanjikan tampilan yang beda dari card asli.
+  const aksesChips = isKos
+    ? pilihAksesUtama(data.akses_terdekat as AksesTerdekat[] | null | undefined)
+    : [];
+  // Kos dengan beberapa tipe kamar: angka di card adalah turunan dari tiap
+  // tipe (Σ kamar kosong, harga termurah, kamar mandi kalau semua tipe
+  // seragam) — dihitung di sini juga supaya preview tidak bergantung pada
+  // urutan effect yang menulis kolom agregat ke form.
+  const kamarTipe = (data.kamar_tipe ?? []) as KamarTipe[];
+  const adaTipeKamar = isKos && kamarTipe.length > 0;
+  const ringkasanTipe = ringkasKamarTipe(kamarTipe);
+  const sisaKamarCard = adaTipeKamar
+    ? ringkasanTipe.kamarTersedia
+    : data.kamar_tersedia;
+  const kamarMandiCard = adaTipeKamar
+    ? kamarMandiSeragam(kamarTipe)
+    : data.kamar_mandi_tipe;
+
+  const { labelChips, iconChips } = isKos
+    ? buildFasilitasChips({
+        kamarMandiTipe: kamarMandiCard,
+        fasilitasKamar: data.fasilitas_kamar,
+        fasilitasBersama: data.fasilitas_bersama,
+        gender: data.kos_gender,
+        sertakanGender: sisaKamarCard != null,
+      })
+    : { labelChips: [], iconChips: [] };
+  const adaBarisRingkas = labelChips.length > 0 || iconChips.length > 0;
 
   const nextImage = () => {
     setCurrentImageIndex((prev) => (prev + 1) % images.length);
@@ -207,9 +264,21 @@ export function LivePreview({ data, images }: LivePreviewProps) {
     }
 
     if (isSewa) {
+      // Kos: slot ini dipakai ketersediaan kamar, sama seperti card publik —
+      // di halaman Sewa pill "SEWA" nol informasi.
+      if (isKos) {
+        return (
+          <KosPillBadge
+            kamarTersedia={sisaKamarCard}
+            gender={data.kos_gender}
+            className="absolute top-4 right-4 z-10"
+          />
+        );
+      }
+
       return (
         <div className="absolute top-4 right-4 z-10">
-          <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold border backdrop-blur-xl bg-blue-500/20 border-blue-400/60 text-blue-300">
+          <span className="relative inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-[11px] font-bold border backdrop-blur-xl bg-emerald-500/20 border-emerald-400/60 text-emerald-300">
             <Icon icon="solar:key-bold-duotone" className="text-xs" />
             <span>SEWA</span>
           </span>
@@ -328,7 +397,11 @@ export function LivePreview({ data, images }: LivePreviewProps) {
             {isLelang
               ? 'Nilai Limit Lelang'
               : isSewa
-              ? 'Harga Sewa'
+              ? // Beberapa tipe kamar = satu angka tidak mewakili semuanya;
+                // yang tampil adalah tipe termurah, dan itu harus dikatakan.
+                adaTipeKamar
+                ? 'Harga Sewa · Mulai Dari'
+                : 'Harga Sewa'
               : 'Harga'}
           </span>
 
@@ -342,24 +415,24 @@ export function LivePreview({ data, images }: LivePreviewProps) {
               </h3>
             </div>
           ) : hasPromo ? (
-            // PRIMARY / SECONDARY / SEWA dengan promo
-            <>
-              <div className="flex items-baseline gap-2">
-                <h3 className="text-white text-2xl font-extrabold tracking-tight">
-                  {formatCurrency(hargaPromo!)}
-                </h3>
-                {isSewa && (
-                  <span className="text-sm text-slate-400 font-medium">
-                    /tahun
+            // PRIMARY / SECONDARY / SEWA dengan promo — satu baris, sama dengan
+            // card publik: harga yang dibayar + persen diskon saja. Harga coret
+            // tidak ikut karena di card asli pun tidak ditampilkan.
+            <h3 className="flex items-baseline gap-2 text-white text-2xl font-extrabold tracking-tight">
+              <span>
+                {formatCurrency(hargaPromo!)}
+                {isSewa && durasiSuffix && (
+                  <span className="ml-1 text-sm font-medium text-slate-400">
+                    {durasiSuffix}
                   </span>
                 )}
-              </div>
+              </span>
               {hargaNormal !== null && hargaNormal > 0 && (
-                <p className="text-sm text-slate-500 line-through mt-1">
-                  {formatCurrency(hargaNormal)}
-                </p>
+                <span className="shrink-0 text-[11px] font-bold leading-none text-rose-400">
+                  −{Math.round(((hargaNormal - hargaPromo!) / hargaNormal) * 100)}%
+                </span>
               )}
-            </>
+            </h3>
           ) : (
             // PRIMARY / SECONDARY / SEWA tanpa promo
             <div className="flex items-baseline gap-2">
@@ -368,9 +441,9 @@ export function LivePreview({ data, images }: LivePreviewProps) {
                   ? formatCurrency(hargaNormal)
                   : 'Rp -'}
               </h3>
-              {isSewa && (
+              {isSewa && durasiSuffix && (
                 <span className="text-sm text-slate-400 font-medium">
-                  /tahun
+                  {durasiSuffix}
                 </span>
               )}
             </div>
@@ -453,8 +526,26 @@ export function LivePreview({ data, images }: LivePreviewProps) {
               </div>
             </div>
           </div>
+        ) : isKos ? (
+          /* KOS: cerminan card listing publik — luas kamar & kapasitas dibuang
+             karena bukan penyaring utama, diganti patokan terdekat + fasilitas
+             yang benar-benar dipakai calon penghuni untuk memilih. */
+          <div className="flex flex-col gap-2">
+            <AksesMarquee items={aksesChips} />
+
+            {adaBarisRingkas ? (
+              <KosChipRow labelChips={labelChips} iconChips={iconChips} />
+            ) : (
+              aksesChips.length === 0 && (
+                <span className="text-[11px] text-slate-600">
+                  Isi patokan terdekat &amp; fasilitas di Step 2 &amp; 4 — ini yang
+                  tampil di card listing
+                </span>
+              )
+            )}
+          </div>
         ) : (
-          /* PRIMARY / SECONDARY / SEWA: grid KT/KM/LT/LB */
+          /* PRIMARY / SECONDARY / SEWA non-kos: grid KT/KM/LT/LB */
           <div className="bg-gradient-to-br from-white/5 to-white/[0.02] rounded-xl p-4 mb-0 border border-white/10 shadow-inner">
             <div className="grid grid-cols-4 divide-x divide-white/10">
               <div className="px-2 text-center">

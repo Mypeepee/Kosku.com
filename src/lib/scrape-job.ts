@@ -9,6 +9,8 @@ export type LogEvent =
       msg: string;
       judul: string;
       kota: string;
+      /** Sudah dikirim scraper sejak lama, tapi belum pernah masuk tipe ini. */
+      alamat_lengkap?: string | null;
       harga: number;
       gambar: string | null;
       totalSaved: number;

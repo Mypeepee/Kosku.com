@@ -122,12 +122,21 @@ export function buildPrefPayloads(p: PreferensiForm) {
     budget_max:      p.budget_max ? Number(unformatRupiah(p.budget_max)) : null,
     luas_min:        p.luas_min ? Number(unformatRupiah(p.luas_min)) : null,
     luas_max:        p.luas_max ? Number(unformatRupiah(p.luas_max)) : null,
+    legalitas:       p.legalitas || null,
+    dekat_nilai:     p.dekat?.nilai ?? null,
+    dekat_radius:    p.dekat?.radius ?? null,
+    alamat_teks:     p.alamat_teks?.trim() || null,
     tujuan_beli:     p.tujuan_beli || null,
     catatan:         p.catatan.trim() || null,
   };
   const locs: (SelectedRegion | null)[] = p.locations.length ? p.locations : [null];
+  /* Tanpa tipe → SATU baris per lokasi dengan tipe null ("semua tipe").
+     Sebelumnya loop ini menghasilkan NOL baris saat tipe kosong, dan itulah
+     sebabnya tipe jadi wajib secara struktural: preferensi tersimpan tanpa
+     satu pun baris adalah preferensi yang tidak pernah mencocokkan apa pun. */
+  const tipes: (string | null)[] = p.tipe_properti.length ? p.tipe_properti : [null];
   const rows: Record<string, unknown>[] = [];
-  for (const tipe of p.tipe_properti) {
+  for (const tipe of tipes) {
     for (const loc of locs) {
       rows.push({
         tipe_properti: tipe,
@@ -152,6 +161,13 @@ function groupPreferensi(rows: PreferensiKlien[]): PreferensiForm[] {
       p.jenis_transaksi || "",
       p.budget_min ?? "", p.budget_max ?? "",
       p.luas_min ?? "", p.luas_max ?? "",
+      /* legalitas WAJIB ikut sidik grup. Tanpanya, "Rumah SHM" dan "Rumah HGB"
+         dianggap satu kartu, dan sertifikat salah satunya hilang begitu
+         formulir disimpan ulang. */
+      p.legalitas || "",
+      /* Ikut sidik grup, alasan yang sama dengan legalitas: "Rumah dekat UNESA"
+         dan "Rumah dekat Tunjungan Plaza" adalah dua kriteria berbeda. */
+      p.dekat_nilai || "", p.dekat_radius ?? "", p.alamat_teks || "",
       p.tujuan_beli || "", p.catatan || "",
     ]);
     let card = map.get(sig);
@@ -164,12 +180,28 @@ function groupPreferensi(rows: PreferensiKlien[]): PreferensiForm[] {
         budget_max:      p.budget_max ? formatRupiah(String(p.budget_max)) : "",
         luas_min:        p.luas_min ? formatRupiah(String(p.luas_min)) : "",
         luas_max:        p.luas_max ? formatRupiah(String(p.luas_max)) : "",
+        legalitas:       p.legalitas || "",
+        alamat_teks:     p.alamat_teks || "",
+        /* Chip tempat dirakit ulang dari kolom yang tersimpan. Label & ikonnya
+           diisi seadanya di sini; KeywordField menggantinya dengan yang benar
+           begitu agent menyentuh kolomnya. Menanyakan kamus dari komponen
+           formulir hanya demi label akan menambah satu permintaan jaringan
+           untuk sesuatu yang tidak mengubah apa pun saat disimpan. */
+        dekat:           p.dekat_nilai
+          ? { nilai: p.dekat_nilai, nama: p.dekat_nilai, label: "Tempat",
+              icon: "solar:map-point-bold-duotone", warna: "emerald",
+              radius: p.dekat_radius ?? 1500 }
+          : null,
         tujuan_beli:     p.tujuan_beli || "",
         catatan:         p.catatan || "",
       };
       map.set(sig, card);
     }
-    if (!card.tipe_properti.includes(p.tipe_properti)) card.tipe_properti.push(p.tipe_properti);
+    /* Baris ber-tipe null tidak menambah centang apa pun — "semua tipe" adalah
+       daftar centang yang KOSONG, dan itulah cara ia dibaca kembali. */
+    if (p.tipe_properti && !card.tipe_properti.includes(p.tipe_properti)) {
+      card.tipe_properti.push(p.tipe_properti);
+    }
     const region = locFieldsToRegion(p);
     if (region && !card.locations.some(l => regionKey(l) === regionKey(region))) {
       card.locations.push(region);

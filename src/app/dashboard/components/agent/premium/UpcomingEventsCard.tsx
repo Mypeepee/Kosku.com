@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "@iconify/react";
 import { useSession } from "next-auth/react";
+import { isOwnerAtauPemilik } from "@/lib/sessionJabatan";
 import ModalAcara from "@/app/dashboard/jadwal-acara/components/modal-acara";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -258,12 +259,10 @@ export function UpcomingEventsCard() {
   const [modalEvent, setModalEvent] = useState<EventApi | null>(null);
 
   const openEvent = (ev: EventApi) => {
-    const userRole = (session?.user as { role?: string } | undefined)?.role;
-    const currentAgentId = (session?.user as { agentId?: string } | undefined)?.agentId;
-    const eventCreatorId = ev.agent?.id_agent;
-    const canEdit =
-      userRole === "OWNER" ||
-      (!!currentAgentId && !!eventCreatorId && currentAgentId === eventCreatorId);
+    // Wewenang dibaca dari `jabatan` (@/lib/sessionJabatan) — dulu dari
+    // `session.user.role` yang isinya USER|AGENT, jadi cabang OWNER-nya tidak
+    // pernah aktif dan owner selalu jatuh ke mode "lihat saja".
+    const canEdit = isOwnerAtauPemilik(session?.user, ev.agent?.id_agent);
     setModalEvent(ev);
     setModalMode(canEdit ? "edit" : "view");
     setModalOpen(true);

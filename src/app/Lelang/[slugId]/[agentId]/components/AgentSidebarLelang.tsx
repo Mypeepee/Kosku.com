@@ -14,6 +14,7 @@ import { PAYMENT_METHODS, PaymentMethod } from "@/lib/paymentMethods";
 import { pusherClient } from "@/lib/pusher-client";
 import CobrokeModal, { CobrokeClaimSummary } from "@/components/PropertyDetail/CobrokeModal";
 import { downloadPropertyImages } from "@/lib/downloadPropertyImages";
+import { SITE_URL } from "@/lib/site";
 
 // ─── PENAWARAN — status penawaran milik user untuk properti ini ─────────────
 interface ExistingOffer {
@@ -926,6 +927,13 @@ export default function AgentSidebar({ data, currentAgentId, presentingAgent = n
   const isOwnerViewer = !!viewerAgentId && viewerAgentId === String(agentData.id);
   const editPropertyHref = `/tambah-property?id=${data.id_property}&mode=edit`;
 
+  // ── Listing sudah terjual: lead-gen (WA, penawaran, survei, co-broke,
+  // poster) dikunci — transaksinya sudah selesai. Edit & bagikan tetap
+  // dibuka untuk owner supaya listing masih bisa dikelola.
+  const isSold = String(data.status_tayang || "").toUpperCase() === "TERJUAL";
+  const soldLabel = "Terjual";
+  const browseMoreHref = "/Lelang";
+
   useEffect(() => {
     if (!isCobrokeViewer || !data.id_property) return;
     fetch(`/api/leads/cobroke/mine?id_property=${data.id_property}`)
@@ -942,7 +950,17 @@ export default function AgentSidebar({ data, currentAgentId, presentingAgent = n
   const handleWa = () => {
     const phone = agentData.phone.replace(/^0/,"62").replace(/\D/g,"");
     trackLeadClick({ id_property: data.id_property, id_agent: agentData.id, source: "whatsapp" });
-    const msg = `Halo ${agentData.name}, saya tertarik dengan properti: *${data.title}*. Apakah masih tersedia?`;
+    const lokasi = data.area_lokasi || [data.kecamatan, data.kota].filter(Boolean).join(", ") || data.kota || "";
+    const propertyUrl = `${SITE_URL}/Lelang/${data.slug ? `${data.slug}-${data.id_property}` : data.id_property}`;
+    const msg =
+      `Halo ${agentData.name} 👋\n\n` +
+      `Saya tertarik dengan properti lelang berikut, apakah masih tersedia?\n\n` +
+      `🔨 *${data.title}*\n` +
+      (lokasi ? `📍 ${lokasi}\n` : "") +
+      `💰 *${fmt(askingPrice)}*\n` +
+      `🔖 Kode: ${data.id_property}\n` +
+      `\n🔗 Detail lengkap:\n${propertyUrl}\n\n` +
+      `Mohon infonya, terima kasih! 🙏`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
@@ -1022,7 +1040,12 @@ export default function AgentSidebar({ data, currentAgentId, presentingAgent = n
       )}
 
       {/* ════════════════════ DESKTOP ════════════════════ */}
-      <div className="hidden lg:flex flex-col w-[360px] shrink-0 sticky top-[max(6rem,_calc(50vh-320px))] h-fit rounded-[1.75rem] overflow-hidden"
+      {/* Kartu nempel tepat di bawah header (top-24 = tinggi spacer h-24).
+          Offset lama `max(6rem, calc(50vh-320px))` bikin kartu berhenti di
+          tengah layar pada monitor tinggi — kelihatan seperti tidak mengikuti
+          scroll. `self-start` + `max-h` menjaga kartu tetap punya ruang geser
+          dan tombol CTA tidak terpotong di layar pendek. */}
+      <div className="hidden lg:flex flex-col w-[360px] shrink-0 self-start sticky top-24 max-h-[calc(100dvh-7rem)] overflow-y-auto no-scrollbar rounded-[1.75rem]"
         style={{ background:"#0C0C0C", boxShadow:"0 0 0 1px rgba(255,255,255,0.06), 0 32px 80px rgba(0,0,0,0.7)" }}>
 
         {/* ── PRICE ── */}
@@ -1098,12 +1121,31 @@ export default function AgentSidebar({ data, currentAgentId, presentingAgent = n
                 <Icon icon="solar:pen-2-bold-duotone" className="text-xl" />
                 Edit Properti
               </Link>
-              <button onClick={handleDownloadBrosur} disabled={isDownloadingBrosur}
-                className="w-full bg-white/[0.04] border border-white/[0.09] hover:bg-white/[0.08] text-white/70 hover:text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 disabled:opacity-60">
-                <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-base ${isDownloadingBrosur ? "animate-spin" : ""}`} />
-                {isDownloadingBrosur ? "Mengunduh..." : "Download Poster"}
-              </button>
+              {isSold ? (
+                <div className="w-full rounded-xl border border-red-500/25 bg-red-500/[0.06] py-3 px-3.5 flex items-center gap-2.5">
+                  <Icon icon="solar:lock-keyhole-minimalistic-bold-duotone" className="text-red-400 text-lg shrink-0" />
+                  <span className="text-[11px] text-red-300/80 font-semibold leading-snug">
+                    Listing sudah {soldLabel.toLowerCase()} — poster tidak tersedia.
+                  </span>
+                </div>
+              ) : (
+                <button onClick={handleDownloadBrosur} disabled={isDownloadingBrosur}
+                  className="w-full bg-white/[0.04] border border-white/[0.09] hover:bg-white/[0.08] text-white/70 hover:text-white font-bold text-sm py-3.5 rounded-xl transition-all flex justify-center items-center gap-2 disabled:opacity-60">
+                  <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-base ${isDownloadingBrosur ? "animate-spin" : ""}`} />
+                  {isDownloadingBrosur ? "Mengunduh..." : "Download Poster"}
+                </button>
+              )}
             </>
+          ) : isSold ? (
+            <div className="rounded-2xl border border-red-500/25 bg-red-500/[0.06] p-4 text-center">
+              <Icon icon="solar:lock-keyhole-minimalistic-bold-duotone" className="text-2xl text-red-400 mx-auto mb-2" />
+              <p className="text-red-300 font-bold text-sm">Properti ini sudah {soldLabel}</p>
+              <Link href={browseMoreHref}
+                className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#86efac] hover:text-[#6ee7a8] transition-colors">
+                Lihat properti lainnya
+                <Icon icon="solar:arrow-right-linear" className="text-sm" />
+              </Link>
+            </div>
           ) : (
           <>
           <button onClick={handleWa}
@@ -1211,13 +1253,32 @@ export default function AgentSidebar({ data, currentAgentId, presentingAgent = n
                   <Icon icon="solar:pen-2-bold-duotone" className="text-white/70 text-[18px] shrink-0" />
                   <span className="text-[8px] font-black text-white/35 uppercase tracking-widest">Edit</span>
                 </Link>
-                <button onClick={handleDownloadBrosur} disabled={isDownloadingBrosur}
-                  className="flex-1 flex flex-col items-center justify-center gap-[3px] rounded-2xl transition-all active:scale-[0.96] disabled:opacity-60"
-                  style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)" }}>
-                  <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-white/70 text-[17px] ${isDownloadingBrosur ? "animate-spin" : ""}`} />
-                  <span className="text-[8px] font-black text-white/35 uppercase tracking-widest">Poster</span>
-                </button>
+                {isSold ? (
+                  <div className="flex-1 flex flex-col items-center justify-center gap-[3px] py-2 rounded-2xl border border-red-500/25 bg-red-500/[0.06]">
+                    <Icon icon="solar:lock-keyhole-minimalistic-bold-duotone" className="text-red-400 text-[17px]" />
+                    <span className="text-[8px] font-black text-red-300/70 uppercase tracking-widest">Poster</span>
+                  </div>
+                ) : (
+                  <button onClick={handleDownloadBrosur} disabled={isDownloadingBrosur}
+                    className="flex-1 flex flex-col items-center justify-center gap-[3px] rounded-2xl transition-all active:scale-[0.96] disabled:opacity-60"
+                    style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)" }}>
+                    <Icon icon={isDownloadingBrosur ? "solar:refresh-bold" : "solar:gallery-download-bold-duotone"} className={`text-white/70 text-[17px] ${isDownloadingBrosur ? "animate-spin" : ""}`} />
+                    <span className="text-[8px] font-black text-white/35 uppercase tracking-widest">Poster</span>
+                  </button>
+                )}
               </>
+            ) : isSold ? (
+              <div className="flex-1 flex items-center gap-2.5 rounded-2xl border border-red-500/25 bg-red-500/[0.06] py-3 px-3.5">
+                <Icon icon="solar:lock-keyhole-minimalistic-bold-duotone" className="text-red-400 text-lg shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-red-300 font-bold text-[11px] leading-tight">
+                    Sudah {soldLabel}
+                  </p>
+                  <Link href={browseMoreHref} className="text-[10px] font-semibold text-[#86efac] hover:text-[#6ee7a8] transition-colors">
+                    Lihat properti lainnya →
+                  </Link>
+                </div>
+              </div>
             ) : (
             <>
             <button onClick={handleWa}

@@ -22,9 +22,11 @@ export default function Loading() {
         ))}
       </div>
 
-      {/* Filter bar skeleton */}
-      <div className="mx-auto max-w-6xl space-y-5">
-        <div className="h-[148px] rounded-[24px] border border-emerald-400/20 bg-emerald-400/[0.04] animate-pulse" />
+      {/* Filter bar skeleton — tingginya harus SAMA dengan bilah aslinya
+          (kontrol 36px + padding 6px = 48px). Kalau beda, isi halaman
+          melompat sejauh selisihnya begitu data datang. */}
+      <div className="mx-auto max-w-6xl space-y-4">
+        <div className="h-12 rounded-2xl border border-white/10 bg-white/5 animate-pulse" />
 
         {/* Action row skeleton */}
         <div className="flex items-center justify-between px-1">
@@ -36,11 +38,11 @@ export default function Loading() {
         </div>
 
         {/* Card grid skeleton */}
-        <div className="grid grid-cols-1 gap-y-2 gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-y-5 gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="flex flex-col">
               <div
-                className="relative h-[480px] rounded-3xl border border-white/8 bg-gradient-to-b from-zinc-900/60 to-zinc-950 overflow-hidden"
+                className="relative h-[480px] rounded-3xl border border-white/10 bg-gradient-to-b from-zinc-900/60 to-zinc-950 overflow-hidden"
                 style={{ animation: `pulse 1.6s ease-in-out ${i * 0.12}s infinite` }}
               >
                 <div className="absolute inset-x-0 top-0 h-64 bg-white/[0.03]" />
@@ -50,7 +52,7 @@ export default function Loading() {
                 {/* shimmer line */}
                 <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/30 to-transparent" />
               </div>
-              <div className="-mt-4 flex items-center justify-between rounded-b-2xl border-x border-b border-white/8 bg-zinc-950/95 px-4 pb-3 pt-6">
+              <div className="-mt-4 flex items-center justify-between rounded-b-3xl border-x border-b border-white/5 bg-zinc-950/95 px-4 pb-3 pt-6">
                 <div className="flex items-center gap-3">
                   <div className="h-6 w-6 rounded-lg bg-white/5" />
                   <div className="h-3 w-3 bg-white/5" />

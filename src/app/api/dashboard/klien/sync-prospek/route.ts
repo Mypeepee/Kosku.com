@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
+import { normPhone } from "@/lib/prospek";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,18 +31,6 @@ const LEAD_TO_KLIEN_STATUS: Record<string, string> = {
   new: "lead_baru", contacted: "sudah_dikontak", hot: "hot_buyer",
   closing: "closing", cold: "lost_iseng",
 };
-
-function normPhone(raw?: string | null): string | null {
-  if (!raw) return null;
-  let d = raw.replace(/\D/g, "");
-  if (!d) return null;
-  if (d.startsWith("0"))      d = "62" + d.slice(1);
-  else if (d.startsWith("8")) d = "62" + d;
-  // hapus "620..." → "62..."
-  d = d.replace(/^620+/, "62");
-  if (d.length < 9 || d.length > 16) return null;
-  return d;
-}
 
 function rpShort(n: number | null | undefined): string | null {
   if (!n) return null;
@@ -192,14 +181,47 @@ export async function POST() {
       if (k.id_lead_asal != null) byLead.set(String(k.id_lead_asal), k);
     }
 
+    /* ── NISAN: prospek yang SENGAJA dibuang agent ──
+       Dibaca sebagai peta kunci → waktu pembuangan. Kandidat dilewati hanya
+       bila aktivitas sumbernya TIDAK LEBIH BARU dari nisannya; lead yang datang
+       sesudah pembuangan berarti orang itu menghubungi lagi, dan itu bukan
+       sampah lama. Kandidat tanpa waktu kontak diperlakukan sebagai lama —
+       menerbitkan ulang sesuatu yang tak bertanggal akan membuat penghapusan
+       terasa tidak pernah bekerja. */
+    const nisanRows = await prisma.prospekDiabaikan.findMany({
+      where: { id_agent: agentId },
+      select: { kunci: true, diabaikan_pada: true },
+    });
+    const nisan = new Map(nisanRows.map(n => [n.kunci, n.diabaikan_pada]));
+
+    const diabaikan = (c: Candidate): boolean => {
+      if (nisan.size === 0) return false;
+      const kunci = [c.phone, c.id_lead != null ? `lead:${c.id_lead}` : null].filter(Boolean) as string[];
+      for (const k of kunci) {
+        const pada = nisan.get(k);
+        if (!pada) continue;
+        if (!c.kontak_at || c.kontak_at <= pada) return true;
+      }
+      return false;
+    };
+
     const seen = new Set<string>();
     const creates: any[] = [];
     const updates: { id_klien: string; data: any }[] = [];
     const usedLeadIds = new Set<string>(); // hindari konflik unique id_lead_asal
 
+    let dilewati = 0;
     for (const c of candidates) {
       if (seen.has(c.key)) continue;
       seen.add(c.key);
+
+      /* Nisan hanya menghalangi PEMBUATAN. Kalau kartu kliennya ternyata ada
+         (agent membuatnya sendiri secara manual sesudah membuang prospeknya),
+         pembaruan tetap jalan — nisan itu menolak impor, bukan menolak orangnya. */
+      if (diabaikan(c) && !(c.phone && byPhone.has(c.phone)) && !(c.id_lead != null && byLead.has(String(c.id_lead)))) {
+        dilewati++;
+        continue;
+      }
 
       const existing =
         (c.phone ? byPhone.get(c.phone) : undefined) ??
@@ -262,6 +284,7 @@ export async function POST() {
       created,
       updated: updates.length,
       scanned: candidates.length,
+      dilewati,
     });
   } catch (e: any) {
     console.error("[sync-prospek]", e);

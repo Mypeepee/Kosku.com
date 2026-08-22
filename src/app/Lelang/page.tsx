@@ -1,12 +1,30 @@
 import React from "react";
 import { Metadata } from "next";
+import { redirect } from "next/navigation";
 import SearchHero from "./SearchHero";
 import ProductList from "./produklist";
-import SortBar from "./sortbar";
+import FilterCommandBar from "@/components/listing/filterbar/FilterCommandBar";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { buildLocationWhere } from "@/lib/listingLocationFilter";
+import { buildKataKunciWhere } from "@/lib/listingKataKunci";
+import {
+  ambilJarakKeTempat,
+  buildTempatWhere,
+  siapkanTempat,
+  urutkanTerdekat,
+} from "@/lib/listingTempatFilter";
+import TempatAktifBar from "@/components/listing/TempatAktifBar";
 import { parseCategoryDbList } from "@/lib/propertyType";
+import { OPSI_JADWAL, whereJadwal, type JadwalLelang } from "@/lib/listingFilters";
+import {
+  buildOrderBy,
+  buildSortWhere,
+  parseHalaman,
+  parseSort,
+  urlHalamanTerakhir,
+} from "@/lib/listingSort";
+import { ambilLimitLelangSebelumnya } from "@/lib/auctionDiscount";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 
@@ -107,8 +125,9 @@ async function getReferralPresenter(code: string | null | undefined) {
 }
 
 export default async function SearchPage({ searchParams }: Props) {
-  const page =
-    typeof searchParams.page === "string" ? Number(searchParams.page) : 1;
+  // Divalidasi, bukan Number() mentah: "?page=abc" dulu jadi NaN → skip NaN →
+  // Prisma error → halaman 500.
+  const page = parseHalaman(searchParams.page);
   const kota =
     typeof searchParams.kota === "string" ? searchParams.kota : undefined;
   const tipe =
@@ -146,6 +165,13 @@ export default async function SearchPage({ searchParams }: Props) {
     typeof searchParams.legalitas === "string"
       ? searchParams.legalitas
       : undefined;
+  const hotDeal = searchParams.hotDeal === "1";
+  const jadwalRaw =
+    typeof searchParams.jadwal === "string" ? searchParams.jadwal : undefined;
+  const jadwal: JadwalLelang | undefined =
+    jadwalRaw && OPSI_JADWAL.some((o) => o.value === jadwalRaw)
+      ? (jadwalRaw as JadwalLelang)
+      : undefined;
 
   // ✅ Filter harga, luas tanah, dan luas bangunan dari SearchHero
   const minHarga =
@@ -175,11 +201,12 @@ export default async function SearchPage({ searchParams }: Props) {
 
   // ✅ Sort parameter (default: terbaru — TANPA filter tanggal otomatis).
   //    Filter waktu lelang (terdekat/terjauh/berlalu) hanya aktif jika user
-  //    memilihnya sendiri lewat SortBar.
-  const sortRaw =
-    typeof searchParams.sort === "string"
-      ? searchParams.sort
-      : "terbaru";
+  //    memilihnya sendiri lewat Urutkan di FilterCommandBar. Dinormalkan
+  //    lewat katalog bersama (@/lib/listingSort) supaya nilai asing tidak
+  //    lolos jadi orderBy kosong.
+  // Dihitung setelah tempatnya diketahui — "terdekat" hanya sah bila ada titik
+  // acuannya (lihat parseSort).
+  const sortMentah = searchParams.sort;
 
   const limit = 30;
   const skip = (page - 1) * limit;
@@ -190,6 +217,11 @@ export default async function SearchPage({ searchParams }: Props) {
   // Filter lokasi multi-wilayah (provinsi/kota/kecamatan/kelurahan) → grup OR.
   const locationWhere = buildLocationWhere(searchParams);
 
+  // Filter "dekat X" — menangani `?dekat=…` maupun `?q=deket unesa`.
+  const siapTempat = await siapkanTempat(searchParams, { q, kota });
+  const tempatWhere = buildTempatWhere(siapTempat.tempat);
+  const sort = parseSort(sortMentah, "LELANG", siapTempat.chip?.nama);
+
   // ✅ Tanggal hari ini (awal hari untuk comparison yang fair)
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -199,15 +231,31 @@ export default async function SearchPage({ searchParams }: Props) {
   // pasti tampil selama jenis_transaksi-nya memang LELANG.
   const whereClause: Prisma.ListingWhereInput = {
     jenis_transaksi: "LELANG",
-    status_tayang: "TERSEDIA",
+    status_tayang: { in: ["TERSEDIA", "TERJUAL"] },
 
     ...(idPropertyRaw && { id_property: BigInt(idPropertyRaw) }),
 
-    ...(!idPropertyRaw && q && {
-      alamat_lengkap: { contains: q, mode: "insensitive" },
-    }),
 
-    ...(!idPropertyRaw && locationWhere && { AND: [locationWhere] }),
+    // Digabung dalam SATU daftar AND — dua kunci `AND` di objek yang sama akan
+    // saling menimpa, dan filter yang hilang diam-diam adalah kerusakan yang
+    // tidak terlihat sebagai kerusakan.
+    // Kata kunci, lokasi administratif, dan "dekat tempat" digabung dalam SATU
+    // daftar AND — dua kunci `AND` di objek yang sama akan saling menimpa, dan
+    // filter yang hilang diam-diam adalah kerusakan yang tidak terlihat
+    // sebagai kerusakan.
+    //
+    // Kata kunci memakai pembangun bersama (src/lib/listingKataKunci.ts): ia
+    // mencari lintas kolom, bukan cuma `alamat_lengkap`. "Dukuh Kupang" adalah
+    // nama KELURAHAN dan sering tidak tertulis ulang di dalam alamat — dicari
+    // di satu kolom saja, orang mengetik nama yang benar lalu mendapat nol.
+    ...(() => {
+      const and = [
+        buildKataKunciWhere(siapTempat.q),
+        locationWhere,
+        tempatWhere,
+      ].filter(Boolean) as Prisma.ListingWhereInput[];
+      return !idPropertyRaw && and.length ? { AND: and } : {};
+    })(),
 
     ...(!idPropertyRaw && kategoriList.length > 0 && {
       kategori: { in: kategoriList as any },
@@ -237,9 +285,21 @@ export default async function SearchPage({ searchParams }: Props) {
       legalitas: { equals: legalitas as any },
     }),
 
-    // ✅ Filter HARGA pakai nilai_limit_lelang (BUKAN harga)
+    ...(!idPropertyRaw && hotDeal && { is_hot_deal: true }),
+
+    // ✅ Filter JADWAL LELANG — pilihan eksplisit pemakai, menang atas batasan
+    //    implisit dari "Urutkan → jadwal terdekat" (lihat di bawah): kalau
+    //    tidak, memilih jadwal "Sudah berlalu" bertabrakan dengan urutan yang
+    //    diam-diam menyaring `tanggal_lelang >= hari ini` dan hasilnya nol
+    //    tanpa sebab yang terlihat.
+    ...(!idPropertyRaw && jadwal && whereJadwal(jadwal, today)),
+
+    // ✅ Filter HARGA pakai `harga_efektif` — kolom yang sama dengan "Urutkan
+    //    → harga terendah". Untuk lelang nilainya identik dengan
+    //    nilai_limit_lelang (diperiksa: 0 dari 121.821 baris berbeda), tapi
+    //    memakai satu kolom membuat filter & urutan mustahil berselisih.
     ...(!idPropertyRaw && (minHarga !== undefined || maxHarga !== undefined) && {
-      nilai_limit_lelang: {
+      harga_efektif: {
         ...(minHarga !== undefined && { gte: minHarga }),
         ...(maxHarga !== undefined && { lte: maxHarga }),
       },
@@ -261,83 +321,86 @@ export default async function SearchPage({ searchParams }: Props) {
       },
     }),
 
-    // ✅ FILTER berdasarkan waktu lelang
-    ...(!idPropertyRaw && sortRaw === "lelang-terdekat" && {
-      tanggal_lelang: { gte: today }, // Lelang yang akan datang
-    }),
-    ...(!idPropertyRaw && sortRaw === "lelang-terjauh" && {
-      tanggal_lelang: { gte: today }, // Lelang yang akan datang
-    }),
-    ...(!idPropertyRaw && sortRaw === "lelang-berlalu" && {
-      tanggal_lelang: { lt: today }, // Lelang yang sudah lewat
-    }),
+    // ✅ FILTER berdasarkan waktu lelang — menempel pada pilihan urut
+    //    ("jadwal terdekat" tidak masuk akal kalau lelang tahun lalu ikut
+    //    tampil). Aturannya ada di buildSortWhere supaya count & findMany
+    //    memakai batas waktu yang sama persis. Dilewati kalau pemakai SUDAH
+    //    memilih jadwal secara eksplisit di atas — filter eksplisit menang,
+    //    urutannya tetap dipakai (aturan yang sama dipakai /properti/[slug]).
+    ...(!idPropertyRaw && !jadwal
+      ? (buildSortWhere(sort, "LELANG", today) ?? {})
+      : {}),
   };
 
-  // ✅ Switch-based sorting
-  let orderBy: Prisma.ListingOrderByWithRelationInput[] = [];
+  // ✅ Urutan dari katalog bersama. Harga memakai `harga_efektif` (bukan
+  //    `nilai_limit_lelang`): keduanya identik untuk lelang — sudah diperiksa,
+  //    0 dari 121.821 baris berbeda — tapi itulah kolom yang dicetak kartu dan
+  //    dipakai filter, jadi satu kolom saja yang perlu diurus. Setiap urutan
+  //    ditutup pemecah seri `id_property` supaya paginasi tidak pernah bocor.
+  const orderBy = buildOrderBy(sort, "LELANG");
 
-  switch (sortRaw) {
-    case "lelang-terdekat":
-      // Lelang yang akan datang, dari yang paling dekat
-      orderBy = [{ tanggal_lelang: "asc" }];
-      break;
-    case "lelang-terjauh":
-      // Lelang yang akan datang, dari yang paling jauh
-      orderBy = [{ tanggal_lelang: "desc" }];
-      break;
-    case "lelang-berlalu":
-      // Lelang yang sudah lewat, dari yang baru lewat
-      orderBy = [{ tanggal_lelang: "desc" }];
-      break;
-    case "termurah":
-      orderBy = [{ nilai_limit_lelang: "asc" }];
-      break;
-    case "termahal":
-      orderBy = [{ nilai_limit_lelang: "desc" }];
-      break;
-    case "terluas":
-      orderBy = [{ luas_tanah: "desc" }];
-      break;
-    case "terkecil":
-      orderBy = [{ luas_tanah: "asc" }];
-      break;
-    case "terpopuler":
-      orderBy = [{ dilihat: "desc" }];
-      break;
-    default:
-      // terbaru = default (sort by created date)
-      orderBy = [{ tanggal_dibuat: "desc" }];
-  }
+  const sertakanAgent = {
+    agent: {
+      select: {
+        nama_kantor: true,
+        foto_profil_url: true,
+        pengguna: { select: { nama_lengkap: true } },
+      },
+    },
+  } as const;
 
-  const [totalItems, propertiesRaw] = await prisma
-    .$transaction([
-      prisma.listing.count({ where: whereClause }),
-      prisma.listing.findMany({
-        where: whereClause,
-        take: limit,
-        skip,
-        orderBy,
-        include: {
-          agent: {
-            select: {
-              nama_kantor: true,
-              foto_profil_url: true,
-              pengguna: {
-                select: {
-                  nama_lengkap: true,
-                },
-              },
-            },
-          },
-        },
-      }),
-    ])
-    .catch((error) => {
-      console.error("Prisma Error:", error);
-      throw error;
-    });
+  // "Terdekat" diurut di luar `orderBy` — jaraknya ada di relasi to-many dan
+  // berbeda per tempat yang dicari. Lihat urutkanTerdekat().
+  const urutJarak =
+    sort === "terdekat" && siapTempat.tempat
+      ? await urutkanTerdekat(siapTempat.tempat, whereClause, page, limit)
+      : null;
+
+  const [totalItems, propertiesRaw] = urutJarak
+    ? [
+        urutJarak.total,
+        await prisma.listing
+          .findMany({
+            where: { id_property: { in: urutJarak.ids } },
+            include: sertakanAgent,
+          })
+          .then((baris) => {
+            // findMany tidak menjamin urutan daftar `in` — disusun ulang
+            // mengikuti jarak yang sudah dihitung.
+            const peta = new Map(baris.map((b) => [String(b.id_property), b]));
+            return urutJarak.ids
+              .map((id) => peta.get(String(id)))
+              .filter(Boolean) as typeof baris;
+          }),
+      ]
+    : await prisma
+        .$transaction([
+          prisma.listing.count({ where: whereClause }),
+          prisma.listing.findMany({
+            where: whereClause,
+            take: limit,
+            skip,
+            orderBy,
+            include: sertakanAgent,
+          }),
+        ])
+        .catch((error) => {
+          console.error("Prisma Error:", error);
+          throw error;
+        });
+
+  const petaJarak = await ambilJarakKeTempat(
+    siapTempat.tempat,
+    propertiesRaw.map((p) => p.id_property),
+  );
 
   const totalPages = Math.ceil(totalItems / limit);
+
+  // Halaman di luar jangkauan → geser ke halaman terakhir. Lazim terjadi di
+  // /Lelang: pilihan urut "Sudah berlalu" sekaligus menyaring hasil, jadi
+  // jumlah halamannya menyusut drastis sementara ?page= masih tertinggal.
+  const tujuan = urlHalamanTerakhir("/Lelang", searchParams, page, totalPages);
+  if (tujuan) redirect(tujuan);
 
   // MONOPOLI LELANG: hanya untuk KLIEN referral (yang masih punya atensi beli),
   // BUKAN agent. Begitu user jadi agent (punya agentId / peran AGENT), monopoli
@@ -353,6 +416,10 @@ export default async function SearchPage({ searchParams }: Props) {
       ? await getReferralPresenter(referralCode)
       : null;
 
+  // Limit lelang sebelumnya untuk SELURUH halaman sekaligus — satu query
+  // terindeks (~2,5 ms untuk 12 listing), bukan dua query per card.
+  const limitAwalPerListing = await ambilLimitLelangSebelumnya(propertiesRaw);
+
   const formattedData = propertiesRaw.map((item) => {
     const rawGambar = item.gambar || "";
     const foto_list =
@@ -366,7 +433,10 @@ export default async function SearchPage({ searchParams }: Props) {
     const agentPhotoUrl = normalizeAgentPhoto(item.agent.foto_profil_url);
 
     return {
-      id_property: item.id_property,
+      // BigInt Prisma tidak bisa diserialisasi ke Client Component — dan kartu
+      // memang hanya menampilkannya. Dikonversi di sini, sama seperti halaman
+      // daftar lain, supaya bentuknya seragam di semua sumber data.
+      id_property: String(item.id_property),
       slug: item.slug,
       judul: item.judul,
       kota: item.kota,
@@ -378,6 +448,7 @@ export default async function SearchPage({ searchParams }: Props) {
         : Number(item.harga),
 
       jenis_transaksi: item.jenis_transaksi,
+      status_tayang: item.status_tayang,
 
       // ✅ Format kategori untuk display (HOTEL_DAN_VILLA → HOTEL DAN VILLA)
       kategori: formatKategoriDisplay(item.kategori),
@@ -397,16 +468,24 @@ export default async function SearchPage({ searchParams }: Props) {
       tanggal_lelang: item.tanggal_lelang
         ? item.tanggal_lelang.toISOString()
         : null,
+      lelang_limit_awal:
+        limitAwalPerListing.get(String(item.id_property)) ?? null,
       is_hot_deal: !!item.is_hot_deal,
+      // Nama tempatnya yang dicetak, bukan nama filternya: "152 m dari
+      // Universitas Ciputra" menjawab pertanyaan pembaca, "152 m dari Semua
+      // kampus" mengulang apa yang sudah ia ketik sendiri.
+      jarak_tempat: petaJarak.get(String(item.id_property)) ?? null,
     };
   });
 
   return (
     <main className="bg-[#0F0F0F] min-h-screen pb-20">
       <SearchHero
-        key={`${q ?? ""}_${idPropertyRaw ?? ""}_${kota ?? ""}_${tipe ?? ""}_${minHarga ?? ""}_${maxHarga ?? ""}_${minLT ?? ""}_${maxLT ?? ""}_${minLB ?? ""}_${maxLB ?? ""}`}
+        key={`${q ?? ""}_${siapTempat.chip?.nilai ?? ""}_${idPropertyRaw ?? ""}_${kota ?? ""}_${tipe ?? ""}_${minHarga ?? ""}_${maxHarga ?? ""}_${minLT ?? ""}_${maxLT ?? ""}_${minLB ?? ""}_${maxLB ?? ""}`}
         initial={{
-          q: q,
+          q: siapTempat.q,
+          dekat: siapTempat.chip,
+          radius: siapTempat.tempat?.radius,
           idProperty: idPropertyRaw,
           kota: kota,
           tipe: tipe,
@@ -419,20 +498,33 @@ export default async function SearchPage({ searchParams }: Props) {
         }}
       />
 
-      <section className="container mx-auto px-4 mt-6">
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
-          <div>
-            <h2 className="text-white text-2xl md:text-3xl font-black">
-              Listing Lelang Properti
-            </h2>
-            <p className="text-sm text-slate-400 mt-1">
-              {totalItems} properti ditemukan
-            </p>
-          </div>
+      <FilterCommandBar
+        konteks="LELANG"
+        tabAktif="lelang"
+        totalHasil={totalItems}
+        namaTempat={siapTempat.chip?.nama ?? null}
+        showSegments={false}
+      />
 
-          <div className="w-full md:w-auto">
-            <SortBar />
-          </div>
+      <section className="container mx-auto px-4 mt-6">
+        {(siapTempat.chip || siapTempat.catatan) && (
+          <TempatAktifBar
+            tempat={siapTempat.chip}
+            radius={siapTempat.tempat?.radius}
+            jumlah={totalItems}
+            ditebak={siapTempat.ditebak}
+            kueriAsli={q}
+            catatan={siapTempat.catatan}
+          />
+        )}
+
+        <div className="mb-4">
+          <h2 className="text-white text-2xl md:text-3xl font-black">
+            Listing Lelang Properti
+          </h2>
+          <p className="text-sm text-slate-400 mt-1">
+            {totalItems} properti ditemukan
+          </p>
         </div>
 
         <ProductList

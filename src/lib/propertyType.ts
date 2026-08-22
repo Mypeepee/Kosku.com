@@ -21,6 +21,7 @@ export const TYPE_DISPLAY_TO_DB: Record<string, string> = {
   Ruko: "RUKO",
   Toko: "TOKO",
   "Hotel & Villa": "HOTEL_DAN_VILLA",
+  Kos: "KOS",
 };
 
 export const TYPE_DB_TO_DISPLAY: Record<string, string> = Object.fromEntries(

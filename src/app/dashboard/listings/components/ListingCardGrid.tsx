@@ -5,13 +5,25 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
-import PropertyCard from "@/app/properti/[slug]/components/PropertyCard";
-import ListingFilters, {
-  ListingFilterState,
-} from "@/app/dashboard/transaksi/components/ListingFilters";
+/**
+ * Kartu yang dipakai di sini adalah kartu YANG SAMA dengan halaman publik
+ * (/properti, /Jual, /Lelang, /Sewa). Sebelumnya dasbor memanggil kartu lama
+ * yang tinggal di dalam folder halaman kategori, dan dua kartu untuk benda yang
+ * sama pasti menyimpang: kos tampil dengan grid KT/KM/LT/LB yang seluruhnya
+ * "-", apartemen sewa kehilangan tipe unit & kondisi interior, dan aset lelang
+ * tidak menunjukkan penurunan limit. Agent jadi menilai listingnya dari
+ * tampilan yang tidak pernah dilihat calon pembeli.
+ */
+import { PropertyCard, getPropertyUrl } from "@/components/property/PropertyCard";
+import ListingFilterBar from "./ListingFilterBar";
 import MarkSoldDialog from "./MarkSoldDialog";
-import type { Listing } from "./listings-table";
-import type { PropertyItem } from "@/app/properti/[slug]/types";
+import type { DashboardListing } from "../lib/listing-item";
+import {
+  buildListingQuery,
+  FILTER_KOSONG,
+  jumlahFilterAktif,
+  type ListingFilters,
+} from "../lib/filters";
 import {
   getPaginationPages,
   getPaginationPagesCompact,
@@ -21,71 +33,45 @@ import {
 const formatViews = (n: number) =>
   new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(n || 0);
 
-function toPropertyItem(l: Listing): PropertyItem {
-  return {
-    id_property: l.id,
-    slug: l.rawSlug,
-    judul: l.title,
-    kota: l.city,
-    alamat_lengkap: l.address,
-    harga: l.priceRaw,
-    harga_promo: l.pricePromo,
-    jenis_transaksi: l.transactionType,
-    kategori: l.category,
-    gambar: l.thumbnailUrl || "/images/hero/banner.jpg",
-    foto_list: l.photos,
-    luas_tanah: l.luasTanah,
-    luas_bangunan: l.luasBangunan,
-    kamar_tidur: l.kamarTidur,
-    kamar_mandi: l.kamarMandi,
-    tanggal_lelang: l.tanggalLelang,
-    agent_name: l.agentName,
-    agent_photo: l.agentPhoto,
-    agent_office: l.agentOffice,
-    is_hot_deal: !!l.isHotDeal,
-  };
-}
+/** Sidik jari isi filter — dua state dianggap sama bila hasilnya sama. */
+const sidikFilter = (f: ListingFilters) =>
+  [f.q, f.jenis, f.kategori, f.provinsi, f.kota, f.kecamatan, f.kelurahan, f.sort].join("|");
 
 interface ListingCardGridProps {
-  listings: Listing[];
+  listings: DashboardListing[];
   currentAgentId?: string | null;
   userRole?: string;
+  /** jabatan_agent_enum — sumber wewenang OWNER/STOKER. */
+  currentJabatan?: string;
   currentPage: number;
   totalItems: number;
   pageSize: number;
-  initialFilters: ListingFilterState;
-}
-
-function buildSearchParams(
-  filters: ListingFilterState,
-  page: number
-): string {
-  const params = new URLSearchParams();
-  if (filters.q.trim()) params.set("q", filters.q.trim());
-  if (filters.jenis !== "ALL") params.set("jenis", filters.jenis);
-  if (filters.kategori !== "ALL") params.set("kategori", filters.kategori);
-  if (filters.provinsi) params.set("provinsi", filters.provinsi);
-  if (filters.kota) params.set("kota", filters.kota);
-  if (filters.kecamatan) params.set("kecamatan", filters.kecamatan);
-  if (filters.kelurahan) params.set("kelurahan", filters.kelurahan);
-  if (page > 1) params.set("page", String(page));
-  return params.toString();
+  initialFilters: ListingFilters;
+  jenisCounts?: Record<string, number>;
+  kategoriCounts?: Record<string, number>;
 }
 
 export default function ListingCardGrid({
   listings,
-  userRole,
+  currentJabatan,
   currentPage,
   totalItems,
   pageSize,
   initialFilters,
+  jenisCounts,
+  kategoriCounts,
 }: ListingCardGridProps) {
-  const canManageAll = userRole === "OWNER" || userRole === "STOKER";
+  // Takedown tetap aksi manajemen (Owner & Stoker), bukan aksi agent biasa.
+  // Yang diperbaiki: penilaiannya dari `jabatan`, bukan dari `userRole` yang
+  // isinya USER|AGENT sehingga perbandingannya tidak pernah benar dan tombol
+  // ini tidak pernah muncul untuk siapa pun.
+  const jabatan = (currentJabatan || "").toUpperCase();
+  const canManageAll = jabatan === "OWNER" || jabatan === "STOKER";
   const router = useRouter();
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
 
-  const [filters, setFilters] = useState<ListingFilterState>(initialFilters);
+  const [filters, setFilters] = useState<ListingFilters>(initialFilters);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [marking, setMarking] = useState(false);
@@ -99,14 +85,24 @@ export default function ListingCardGrid({
 
   // ── Debounced URL sync for text input (q field) ──
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isFirstRender = useRef(true);
+  /**
+   * Sidik jari filter yang terakhir KITA dorong ke URL.
+   *
+   * Dipakai untuk membedakan dua hal yang sama-sama mengubah `initialFilters`:
+   * gema dari navigasi kita sendiri (harus diabaikan) dan navigasi dari luar —
+   * tombol back/forward (harus diikuti). Tanpa pembeda ini, gema yang datang
+   * ~350ms setelah ketikan terakhir menimpa huruf yang diketik selama
+   * perjalanan itu, dan kotak cari terlihat "memuntahkan" ketikan pemakai.
+   */
+  const sidikTerakhir = useRef<string>(sidikFilter(initialFilters));
 
   const pushUrl = (
-    nextFilters: ListingFilterState,
+    nextFilters: ListingFilters,
     page: number,
     opts?: { manageScroll?: boolean }
   ) => {
-    const qs = buildSearchParams(nextFilters, page);
+    sidikTerakhir.current = sidikFilter(nextFilters);
+    const qs = buildListingQuery(nextFilters, page);
     const url = qs ? `${pathname}?${qs}` : pathname;
     startTransition(() => {
       // When manageScroll = true, we handle scrolling ourselves and disable
@@ -115,7 +111,7 @@ export default function ListingCardGrid({
     });
   };
 
-  const handleFilterChange = (next: ListingFilterState) => {
+  const handleFilterChange = (next: ListingFilters) => {
     setFilters(next);
 
     const qChanged = next.q !== filters.q;
@@ -125,10 +121,11 @@ export default function ListingCardGrid({
       next.provinsi !== filters.provinsi ||
       next.kota !== filters.kota ||
       next.kecamatan !== filters.kecamatan ||
-      next.kelurahan !== filters.kelurahan;
+      next.kelurahan !== filters.kelurahan ||
+      next.sort !== filters.sort;
 
     if (otherChanged) {
-      // Immediate URL update for dropdown / pill changes
+      // Immediate URL update for dropdown changes
       if (debounceRef.current) clearTimeout(debounceRef.current);
       pushUrl(next, 1);
       return;
@@ -147,13 +144,12 @@ export default function ListingCardGrid({
     };
   }, []);
 
-  // Sync local filter state if server-provided initialFilters change
-  // (e.g. back/forward navigation)
+  // Ikuti filter dari server HANYA kalau perubahannya datang dari luar
+  // (back/forward, atau tautan langsung) — bukan gema dorongan kita sendiri.
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    const sidik = sidikFilter(initialFilters);
+    if (sidik === sidikTerakhir.current) return;
+    sidikTerakhir.current = sidik;
     setFilters(initialFilters);
   }, [
     initialFilters.q,
@@ -163,6 +159,7 @@ export default function ListingCardGrid({
     initialFilters.kota,
     initialFilters.kecamatan,
     initialFilters.kelurahan,
+    initialFilters.sort,
   ]);
 
   // ── Selection (only current page ids) ──
@@ -171,7 +168,7 @@ export default function ListingCardGrid({
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
 
-  const visibleIds = listings.map((l) => l.id);
+  const visibleIds = listings.map((l) => String(l.id_property));
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
 
@@ -187,9 +184,9 @@ export default function ListingCardGrid({
   const selectedPreview = useMemo(
     () =>
       listings
-        .filter((l) => selectedIds.includes(l.id))
+        .filter((l) => selectedIds.includes(String(l.id_property)))
         .slice(0, 6)
-        .map((l) => ({ id: l.id, title: l.title })),
+        .map((l) => ({ id: String(l.id_property), title: l.judul })),
     [listings, selectedIds]
   );
 
@@ -284,17 +281,30 @@ export default function ListingCardGrid({
   );
 
   return (
-    <div className="space-y-5">
+    <div
+      // Ruang cadangan di dasar halaman saat toolbar mengambang tampil, supaya
+      // ia tidak menutupi baris paginasi persis ketika pemakai men-scroll
+      // sampai ujung daftar.
+      className={`space-y-4 transition-[padding] duration-300 ${
+        selectedIds.length > 0 ? "pb-20" : "pb-0"
+      }`}
+    >
       {/* ── Filter bar ── */}
-      <ListingFilters
+      <ListingFilterBar
         value={filters}
         onChange={handleFilterChange}
         total={totalItems}
         loading={isPending}
-        hideVendor
+        jenisCounts={jenisCounts}
+        kategoriCounts={kategoriCounts}
       />
 
-      {/* ── Action bar ── */}
+      {/* ── Action bar ──
+          Aksi bulk (Tandai Terjual/Takedown) SENGAJA tidak ditaruh di sini
+          lagi. Kartu yang dipilih ada di tengah/bawah daftar, baris ini di
+          paling atas — memilih lalu menekan aksinya berarti scroll balik ke
+          puncak halaman setiap kali. Sekarang keduanya hidup di toolbar
+          mengambang (di bawah) yang ikut kemanapun pemakai men-scroll. */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-1">
         <div className="flex items-center gap-3 text-xs text-zinc-400">
           <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -306,49 +316,31 @@ export default function ListingCardGrid({
             />
             <span>Pilih semua di halaman ini</span>
           </label>
-          <span className="text-zinc-600">|</span>
-          <span>
-            <span className="text-emerald-400 font-semibold">{totalItems}</span> listing
-            {selectedIds.length > 0 && (
-              <span className="ml-1.5 text-zinc-500">· {selectedIds.length} dipilih</span>
-            )}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => selectedIds.length > 0 && setConfirmOpen(true)}
-            disabled={selectedIds.length === 0}
-            className="group inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-200 transition-all hover:border-emerald-300/70 hover:bg-emerald-500/20 hover:shadow-[0_0_16px_rgba(16,185,129,0.35)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none"
-          >
-            <Icon icon="solar:verified-check-bold-duotone" className="text-sm text-emerald-300" />
-            Tandai Terjual ({selectedIds.length})
-          </button>
-
-          {canManageAll && (
-            <button
-              onClick={() => selectedIds.length > 0 && setTakedownOpen(true)}
-              disabled={selectedIds.length === 0}
-              className="group inline-flex items-center gap-1.5 rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-200 transition-all hover:border-red-300/70 hover:bg-red-500/20 hover:shadow-[0_0_16px_rgba(239,68,68,0.35)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:shadow-none"
-            >
-              <Icon icon="solar:eye-closed-bold-duotone" className="text-sm text-red-300" />
-              Takedown ({selectedIds.length})
-            </button>
+          {selectedIds.length > 0 && (
+            <>
+              <span className="text-zinc-600">|</span>
+              <span className="text-emerald-400 font-semibold">
+                {selectedIds.length} dipilih
+              </span>
+            </>
           )}
-
-          <Link
-            href="/tambah-property"
-            className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-4 py-1.5 text-[11px] font-bold text-emerald-100 shadow-[0_0_16px_rgba(16,185,129,0.3)] transition-all hover:border-emerald-300 hover:bg-emerald-500/25 hover:shadow-[0_0_20px_rgba(16,185,129,0.5)]"
-          >
-            <Icon icon="solar:add-circle-bold-duotone" className="text-sm text-emerald-300" />
-            Tambah property
-          </Link>
         </div>
+
+        <Link
+          href="/tambah-property"
+          className="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-4 py-1.5 text-[11px] font-bold text-emerald-100 shadow-[0_0_16px_rgba(16,185,129,0.3)] transition-all hover:border-emerald-300 hover:bg-emerald-500/25 hover:shadow-[0_0_20px_rgba(16,185,129,0.5)]"
+        >
+          <Icon icon="solar:add-circle-bold-duotone" className="text-sm text-emerald-300" />
+          Tambah property
+        </Link>
       </div>
 
       {/* ── Grid ── */}
       {listings.length === 0 ? (
-        <EmptyState isFiltered={totalItems === 0 && initialFilters.q !== ""} />
+        <EmptyState
+          isFiltered={jumlahFilterAktif(filters) > 0}
+          onReset={() => handleFilterChange({ ...FILTER_KOSONG })}
+        />
       ) : (
         <div ref={gridRef} className="relative scroll-mt-6">
           {/* Top progress bar — appears only while transitioning */}
@@ -361,95 +353,95 @@ export default function ListingCardGrid({
             <div className="lcg-progress h-full w-2/5 rounded-full bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_10px_rgba(52,211,153,0.7)]" />
           </div>
 
-        <div
-          key={currentPage}
-          className={`lcg-page-enter grid grid-cols-1 gap-y-2 gap-x-6 sm:grid-cols-2 xl:grid-cols-3 transition-opacity duration-200 ${
-            isPending ? "opacity-90" : "opacity-100"
-          }`}
-        >
-          {listings.map((listing) => {
-            const isSelected = selectedIds.includes(listing.id);
-            const editUrl = `/tambah-property?id=${listing.id}&mode=edit`;
+          {/* items-stretch + h-full berantai sampai ke kartunya: PropertyCard
+              memakai `flex flex-col h-full` supaya footer agent menempel di
+              dasar. Tanpa rantai tinggi ini, kartu dengan judul dua baris jadi
+              lebih jangkung dari tetangganya dan baris grid terlihat gompal. */}
+          <div
+            key={currentPage}
+            className={`lcg-page-enter grid grid-cols-1 items-stretch gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-3 transition-opacity duration-200 ${
+              isPending ? "opacity-90" : "opacity-100"
+            }`}
+          >
+            {listings.map((listing) => {
+              const id = String(listing.id_property);
+              const isSelected = selectedIds.includes(id);
+              const editUrl = `/tambah-property?id=${id}&mode=edit`;
 
-            return (
-              <div key={listing.id} className="flex flex-col">
-                <div
-                  className={`relative z-10 transition-all duration-200 ${
-                    isSelected ? "drop-shadow-[0_0_18px_rgba(52,211,153,0.45)]" : ""
-                  }`}
-                >
-                  <PropertyCard
-                    item={toPropertyItem(listing)}
-                    forceAlamatLengkap
-                    idBadge={listing.id}
-                    onIdBadgeClick={(e, id) => {
-                      navigator.clipboard.writeText(id);
-                      toast.success(`ID #${id} disalin`, {
-                        duration: 1500,
-                        description: "ID properti tersalin ke clipboard",
-                      });
-                    }}
-                  />
-                </div>
-
-                <div
-                  className={`-mt-4 flex items-center justify-between rounded-b-2xl border-x border-b px-4 pb-3 pt-6 transition-all duration-200 ${
-                    isSelected
-                      ? "border-emerald-400/40 bg-[#020d08]"
-                      : "border-white/8 bg-zinc-950/95"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => toggleSelect(listing.id)}
-                      aria-label={isSelected ? "Batalkan pilih" : "Pilih listing"}
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all duration-150 ${
-                        isSelected
-                          ? "border-emerald-400 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.6)]"
-                          : "border-white/20 bg-white/5 hover:border-white/40 hover:bg-white/10"
-                      }`}
-                    >
-                      {isSelected && (
-                        <svg viewBox="0 0 12 10" fill="none" className="h-2.5 w-2.5 shrink-0">
-                          <path
-                            d="M1 5l3.5 3.5L11 1"
-                            stroke="white"
-                            strokeWidth="2.2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      )}
-                    </button>
-
-                    <div className="h-3 w-px bg-white/10" />
-
-                    <div className="flex items-center gap-1.5">
-                      <Icon icon="solar:eye-bold-duotone" className="text-sm text-sky-400/80" />
-                      <span className="text-xs font-semibold text-zinc-300">
-                        {formatViews(listing.views)}
-                      </span>
-                    </div>
-
-                  </div>
-
+              return (
+                <div key={id} className="flex h-full flex-col">
+                  {/* Kartu = tautan ke halaman detail publik, sama seperti yang
+                      dilihat calon pembeli. Aksi dasbor (pilih & edit) sengaja
+                      berada di BAWAH tautan, bukan di dalamnya: tombol di dalam
+                      anchor berarti setiap klik salah sasaran akan pindah
+                      halaman dan membatalkan pilihan yang sedang disusun. */}
                   <Link
-                    href={editUrl}
-                    className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[11px] font-bold transition-all duration-150 ${
-                      isSelected
-                        ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
-                        : "border-white/12 bg-white/5 text-zinc-300 hover:border-white/25 hover:bg-white/10 hover:text-white"
+                    href={getPropertyUrl(listing)}
+                    className={`relative z-10 block flex-1 rounded-3xl transition-all duration-200 ${
+                      isSelected ? "drop-shadow-[0_0_18px_rgba(52,211,153,0.45)]" : ""
                     }`}
                   >
-                    <Icon icon="solar:pen-new-square-linear" className="text-xs" />
-                    Edit
+                    <PropertyCard item={listing} />
                   </Link>
+
+                  <div
+                    className={`-mt-4 flex items-center justify-between rounded-b-3xl border-x border-b px-4 pb-3 pt-6 transition-all duration-200 ${
+                      isSelected
+                        ? "border-emerald-400/40 bg-[#020d08]"
+                        : "border-white/5 bg-zinc-950/95"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleSelect(id)}
+                        aria-label={isSelected ? "Batalkan pilih" : "Pilih listing"}
+                        aria-pressed={isSelected}
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all duration-150 ${
+                          isSelected
+                            ? "border-emerald-400 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.6)]"
+                            : "border-white/20 bg-white/5 hover:border-white/40 hover:bg-white/10"
+                        }`}
+                      >
+                        {isSelected && (
+                          <svg viewBox="0 0 12 10" fill="none" className="h-2.5 w-2.5 shrink-0">
+                            <path
+                              d="M1 5l3.5 3.5L11 1"
+                              stroke="white"
+                              strokeWidth="2.2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        )}
+                      </button>
+
+                      <div className="h-3 w-px bg-white/10" />
+
+                      <div className="flex items-center gap-1.5" title="Jumlah dilihat">
+                        <Icon icon="solar:eye-bold-duotone" className="text-sm text-sky-400/80" />
+                        <span className="text-xs font-semibold text-zinc-300">
+                          {formatViews(listing.views)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <Link
+                      href={editUrl}
+                      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[11px] font-bold transition-all duration-150 ${
+                        isSelected
+                          ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
+                          : "border-white/10 bg-white/5 text-zinc-300 hover:border-white/25 hover:bg-white/10 hover:text-white"
+                      }`}
+                    >
+                      <Icon icon="solar:pen-new-square-linear" className="text-xs" />
+                      Edit
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -533,6 +525,62 @@ export default function ListingCardGrid({
         </nav>
       )}
 
+      {/* ── Toolbar mengambang ──
+          Menempel di BAWAH LAYAR (bukan di dalam alur halaman), muncul begitu
+          ada kartu yang dicentang dan ikut kemanapun pemakai men-scroll. Ini
+          yang membuat aksinya reachable dari kartu manapun tanpa harus
+          scroll balik ke atas — beda dengan baris aksi lama yang diam di
+          puncak halaman padahal kartunya bisa saja tiga layar ke bawah. */}
+      <div
+        className={`fixed inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 transition-all duration-300 ${
+          selectedIds.length > 0
+            ? "translate-y-0 opacity-100"
+            : "pointer-events-none translate-y-4 opacity-0"
+        }`}
+      >
+        <div
+          role="toolbar"
+          aria-label="Aksi untuk listing terpilih"
+          className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-white/10 bg-[#0a0f0d]/95 p-1.5 pl-3 shadow-[0_20px_60px_-8px_rgba(0,0,0,0.75)] backdrop-blur-xl"
+        >
+          <button
+            type="button"
+            onClick={() => setSelectedIds([])}
+            aria-label="Batalkan semua pilihan"
+            title="Batalkan pilihan"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Icon icon="mdi:close" className="text-sm" />
+          </button>
+
+          <span className="pr-1 text-xs font-bold text-emerald-300">
+            {selectedIds.length} dipilih
+          </span>
+
+          <span className="h-5 w-px shrink-0 bg-white/10" />
+
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-200 transition-all hover:border-emerald-300/70 hover:bg-emerald-500/20 hover:shadow-[0_0_16px_rgba(16,185,129,0.35)]"
+          >
+            <Icon icon="solar:verified-check-bold-duotone" className="text-sm text-emerald-300" />
+            Tandai Terjual
+          </button>
+
+          {canManageAll && (
+            <button
+              type="button"
+              onClick={() => setTakedownOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-1.5 text-[11px] font-semibold text-red-200 transition-all hover:border-red-300/70 hover:bg-red-500/20 hover:shadow-[0_0_16px_rgba(239,68,68,0.35)]"
+            >
+              <Icon icon="solar:eye-closed-bold-duotone" className="text-sm text-red-300" />
+              Takedown
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* ── Premium confirm: tandai Terjual ── */}
       <MarkSoldDialog
         open={confirmOpen}
@@ -557,9 +605,15 @@ export default function ListingCardGrid({
   );
 }
 
-function EmptyState({ isFiltered }: { isFiltered: boolean }) {
+function EmptyState({
+  isFiltered,
+  onReset,
+}: {
+  isFiltered: boolean;
+  onReset: () => void;
+}) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-3xl border border-white/5 bg-white/[0.02] py-24 text-center">
+    <div className="flex flex-col items-center justify-center rounded-3xl border border-white/5 bg-white/5 py-24 text-center">
       <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-white/5 shadow-[0_0_40px_rgba(52,211,153,0.08)]">
         <Icon icon="solar:buildings-bold-duotone" className="text-4xl text-white/20" />
       </div>
@@ -567,15 +621,32 @@ function EmptyState({ isFiltered }: { isFiltered: boolean }) {
         {isFiltered ? "Tidak ada listing yang cocok" : "Belum ada listing"}
       </h3>
       <p className="mb-8 text-sm text-white/20">
-        {isFiltered ? "Coba ubah filter pencarian" : "Mulai dengan menambah listing pertama"}
+        {isFiltered
+          ? "Filter yang aktif menyaring semuanya. Longgarkan salah satunya."
+          : "Mulai dengan menambah listing pertama"}
       </p>
-      <Link
-        href="/tambah-property"
-        className="inline-flex items-center gap-2 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-6 py-2.5 text-sm font-bold text-emerald-200 shadow-[0_0_20px_rgba(52,211,153,0.3)] transition-all hover:bg-emerald-500/25"
-      >
-        <Icon icon="solar:add-circle-bold-duotone" className="text-base" />
-        Tambah Property
-      </Link>
+
+      {/* Jalan keluar yang benar berbeda menurut sebabnya: daftar kosong
+          karena filter butuh tombol hapus filter, bukan ajakan menambah
+          properti yang tidak menyelesaikan apa pun. */}
+      {isFiltered ? (
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex items-center gap-2 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-6 py-2.5 text-sm font-bold text-emerald-200 shadow-[0_0_20px_rgba(52,211,153,0.3)] transition-all hover:bg-emerald-500/25"
+        >
+          <Icon icon="solar:restart-bold" className="text-base" />
+          Hapus semua filter
+        </button>
+      ) : (
+        <Link
+          href="/tambah-property"
+          className="inline-flex items-center gap-2 rounded-full border border-emerald-400/60 bg-emerald-500/15 px-6 py-2.5 text-sm font-bold text-emerald-200 shadow-[0_0_20px_rgba(52,211,153,0.3)] transition-all hover:bg-emerald-500/25"
+        >
+          <Icon icon="solar:add-circle-bold-duotone" className="text-base" />
+          Tambah Property
+        </Link>
+      )}
     </div>
   );
 }

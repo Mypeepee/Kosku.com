@@ -1,9 +1,9 @@
 // src/app/api/cron/pemilu-scheduler/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient, status_peserta_enum } from "@prisma/client";
+import { status_peserta_enum } from "@prisma/client";
+import prisma from "@/lib/prisma";
 import Pusher from "pusher";
 
-const prisma = new PrismaClient();
 
 const pusher = new Pusher({
   appId: process.env.PUSHER_APP_ID!,

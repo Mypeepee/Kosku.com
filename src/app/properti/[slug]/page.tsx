@@ -3,21 +3,28 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { buildLocationWhere } from "@/lib/listingLocationFilter";
-import { parseCategoryDbList } from "@/lib/propertyType";
+import { ambilLimitLelangSebelumnya } from "@/lib/auctionDiscount";
+import {
+  buildListingWhere,
+  jadwalMenimpaSort,
+  konteksDariTab,
+  parseFilters,
+} from "@/lib/listingFilters";
+import {
+  buildOrderBy,
+  buildSortWhere,
+  parseHalaman,
+  parseSort,
+  urlHalamanTerakhir,
+} from "@/lib/listingSort";
 import KategoriPageClient from "./KategoriPageClient";
-
-// --- SLUG → KATEGORI MAP ---
-const SLUG_TO_KATEGORI: Record<string, Prisma.kategori_properti_enum> = {
-  "rumah":          "RUMAH",
-  "apartemen":      "APARTEMEN",
-  "ruko":           "RUKO",
-  "tanah":          "TANAH",
-  "gudang":         "GUDANG",
-  "hotel-dan-villa":"HOTEL_DAN_VILLA",
-  "toko":           "TOKO",
-  "pabrik":         "PABRIK",
-};
+import {
+  ambilJarakKeTempat,
+  buildTempatWhere,
+  siapkanTempat,
+  urutkanTerdekat,
+} from "@/lib/listingTempatFilter";
+import { KATEGORI_TO_SLUG, SLUG_TO_KATEGORI } from "./constants";
 
 const KATEGORI_LABEL: Record<string, string> = {
   "rumah":          "Rumah",
@@ -29,10 +36,6 @@ const KATEGORI_LABEL: Record<string, string> = {
   "toko":           "Kios / Toko",
   "pabrik":         "Pabrik",
 };
-
-const KATEGORI_TO_SLUG: Record<string, string> = Object.fromEntries(
-  Object.entries(SLUG_TO_KATEGORI).map(([slugKey, kat]) => [kat, slugKey])
-);
 
 const TIPE_FOR_JENIS: Record<string, string> = {
   PRIMARY:   "jual",
@@ -123,24 +126,26 @@ export default async function KategoriPage({ params, searchParams }: Props) {
 
   const label = isSemua ? "Semua Kategori" : KATEGORI_LABEL[slug];
 
-  // Parse searchParams
-  const page = typeof searchParams.page === "string" ? Number(searchParams.page) : 1;
-  const tipe = typeof searchParams.tipe === "string" ? searchParams.tipe         : "semua";
-  const minHarga = typeof searchParams.minHarga === "string" ? Number(searchParams.minHarga) : undefined;
-  const maxHarga = typeof searchParams.maxHarga === "string" ? Number(searchParams.maxHarga) : undefined;
-  const minLT    = typeof searchParams.minLT    === "string" ? Number(searchParams.minLT)    : undefined;
-  const maxLT    = typeof searchParams.maxLT    === "string" ? Number(searchParams.maxLT)    : undefined;
-  const minLB    = typeof searchParams.minLB    === "string" ? Number(searchParams.minLB)    : undefined;
-  const maxLB    = typeof searchParams.maxLB    === "string" ? Number(searchParams.maxLB)    : undefined;
-  // Keyword pencarian: q (alamat) / idProperty (eksak)
-  const q =
-    typeof searchParams.q === "string" && searchParams.q.trim().length > 0
-      ? searchParams.q.trim()
-      : undefined;
-  const idPropertyRaw =
-    typeof searchParams.idProperty === "string" && /^\d+$/.test(searchParams.idProperty.trim())
-      ? searchParams.idProperty.trim()
-      : undefined;
+  // Parse searchParams.
+  //
+  // Seluruh kriteria dibaca lewat mesin filter bersama (@/lib/listingFilters):
+  // ia yang menjinakkan angka rusak, menukar min/max yang terbalik, membuang
+  // nilai enum yang tidak dikenal, dan memutuskan bidang mana yang berlaku di
+  // tab ini. Sebelumnya halaman ini memarsing sendiri dan diam-diam MENGABAIKAN
+  // delapan parameter yang dikirim search bar (durasi, gender, minKT, minKM,
+  // lantai, kondisi, hadap, legalitas) — filternya terlihat aktif di URL tapi
+  // tidak menyaring apa pun.
+  const page = parseHalaman(searchParams.page);
+  const tipe = typeof searchParams.tipe === "string" ? searchParams.tipe : "semua";
+  const konteks = konteksDariTab(tipe);
+  const filters = parseFilters(searchParams);
+  const idPropertyRaw = filters.idProperty;
+
+  // Satu titik waktu untuk seluruh permintaan. Kalau filter jadwal dan batasan
+  // jadwal milik urutan masing-masing memanggil `new Date()`, lelang yang
+  // jadwalnya persis di pergantian hari bisa lolos di satu klausa dan tidak di
+  // klausa lain — dan `count` bisa tidak cocok dengan `findMany`.
+  const sekarang = new Date();
 
   // Pencarian by ID: cari listing-nya dulu (tanpa filter kategori/tipe) lalu
   // arahkan ke tab & kategori yang sesuai dengan data aslinya, supaya hasil
@@ -167,12 +172,12 @@ export default async function KategoriPage({ params, searchParams }: Props) {
     }
   }
 
-  // rawSort: hanya ada nilai jika user memang memilih sort (untuk highlight pill)
-  // sort: selalu punya nilai fallback untuk query DB
-  const rawSort = typeof searchParams.sort === "string" ? searchParams.sort : "";
-  const sort     = rawSort || "terbaru";
+  // Urutan dinormalkan lewat katalog bersama (@/lib/listingSort): nilai lama
+  // yang beredar di tautan ("luas-desc", "asc") tetap dikenali lewat alias,
+  // nilai asing jatuh ke default, dan kolom yang dipakai adalah `harga_efektif`
+  // — angka yang sama dengan yang dicetak kartu & dipakai filter harga.
   const limit = 30;
-  const skip  = (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
   // jenis_transaksi filter berdasarkan tab
   const transaksiFilter = (): Prisma.ListingWhereInput["jenis_transaksi"] => {
@@ -182,108 +187,150 @@ export default async function KategoriPage({ params, searchParams }: Props) {
     return { in: ["PRIMARY", "SECONDARY", "LELANG", "SEWA"] };
   };
 
-  // Pencarian by ID bersifat eksak & sudah diarahkan ke tab/kategori yang
-  // benar di atas, jadi filter sekunder (lokasi, harga, dimensi) tidak perlu
-  // ikut membatasi — supaya properti yang dicari pasti tampil.
-  //
-  // `baseWhere` = semua filter pencarian KECUALI jenis_transaksi (tab). Dipakai
-  // bersama oleh daftar listing & perhitungan tab count, supaya angka di pill
-  // tab ikut menyesuaikan filter user (kota, harga, dll), bukan total semua.
-  // Filter lokasi multi-wilayah (provinsi/kota/kecamatan/kelurahan) → grup OR.
-  const locationWhere = buildLocationWhere(searchParams);
-
-  // Multi-tipe aset: param `kategori` (daftar enum) MENGGANTIKAN kategori slug.
-  const kategoriList = parseCategoryDbList(searchParams.kategori);
+  // Kategori: param `kategori` (daftar enum, multi) MENGGANTIKAN kategori slug.
+  // Saat param terisi, klausanya disusun mesin filter — di sini cukup kosong.
   const kategoriWhere: Prisma.ListingWhereInput =
-    kategoriList.length > 0
-      ? { kategori: { in: kategoriList as any } }
+    filters.kategori.length > 0
+      ? {}
       : kategori
-      ? { kategori }
+      ? { kategori: kategori as Prisma.ListingWhereInput["kategori"] }
       : {};
 
+  // Sebagian pilihan urut di lelang ikut MENYARING jadwal ("jadwal terdekat"
+  // hanya menampilkan yang belum berlangsung). Kalau pemakai sudah memilih
+  // filter jadwal sendiri, filternyalah yang menang — kalau tidak, irisan
+  // "sudah berlalu" × "jadwal terdekat" selalu nol tanpa sebab yang terlihat.
+  // Aturan yang sama dipakai /api/listings/count.
+  /**
+   * Filter "dekat X". Halaman inilah tujuan bawaan kotak pencarian di beranda
+   * (tab "Semua" → /properti/semua), jadi di sinilah "deket unesa" paling
+   * sering mendarat.
+   *
+   * Ikut masuk `baseWhere` — bukan hanya `whereClause` — supaya angka di
+   * segmen tab (Jual 12 · Lelang 3 · Sewa 8) ikut menyusut sesuai tempat yang
+   * dipilih. Kalau tidak, tabnya menjanjikan hasil yang tidak akan ditemukan
+   * pemakai saat ia mengklik.
+   */
+  const siapTempat = await siapkanTempat(searchParams, {
+    q: filters.q,
+    kota: filters.lokasi.kota[0] ?? null,
+  });
+  const tempatWhere = buildTempatWhere(siapTempat.tempat);
+
+  // Urutan dihitung SETELAH tempatnya diketahui: "terdekat" hanya sah kalau
+  // ada titik acuannya (lihat parseSort).
+  const sort = parseSort(searchParams.sort, konteks, siapTempat.chip?.nama);
+  const sortWhere = jadwalMenimpaSort(filters, konteks)
+    ? undefined
+    : buildSortWhere(sort, konteks, sekarang);
+
+  // `baseWhere` = semua kriteria KECUALI jenis_transaksi (tab). Dipakai bersama
+  // oleh daftar listing & perhitungan angka tiap tab, supaya angka di segmen
+  // tab ikut menyesuaikan filter pemakai — bukan total isi database.
   const baseWhere: Prisma.ListingWhereInput = {
-    ...kategoriWhere,
-    status_tayang: "TERSEDIA",
-    ...(idPropertyRaw && { id_property: BigInt(idPropertyRaw) }),
-    // Keyword dicari lintas kolom (alamat, kota, area administratif, judul),
-    // bukan cuma alamat_lengkap — supaya mis. "surabaya" tetap ketemu walau
-    // kata itu hanya ada di kolom `kota`/`judul`, bukan di alamat.
-    ...(!idPropertyRaw && q && {
-      OR: [
-        { alamat_lengkap: { contains: q, mode: "insensitive" } },
-        { kota:           { contains: q, mode: "insensitive" } },
-        { kecamatan:      { contains: q, mode: "insensitive" } },
-        { kelurahan:      { contains: q, mode: "insensitive" } },
-        { provinsi:       { contains: q, mode: "insensitive" } },
-        { judul:          { contains: q, mode: "insensitive" } },
-      ],
-    }),
-    ...(!idPropertyRaw && locationWhere && { AND: [locationWhere] }),
-    ...(!idPropertyRaw && (minHarga !== undefined || maxHarga !== undefined) && {
-      harga: {
-        ...(minHarga !== undefined && { gte: minHarga }),
-        ...(maxHarga !== undefined && { lte: maxHarga }),
-      },
-    }),
-    ...(!idPropertyRaw && (minLT !== undefined || maxLT !== undefined) && {
-      luas_tanah: {
-        ...(minLT !== undefined && { gte: minLT }),
-        ...(maxLT !== undefined && { lte: maxLT }),
-      },
-    }),
-    ...(!idPropertyRaw && (minLB !== undefined || maxLB !== undefined) && {
-      luas_bangunan: {
-        ...(minLB !== undefined && { gte: minLB }),
-        ...(maxLB !== undefined && { lte: maxLB }),
-      },
-    }),
+    AND: [
+      { status_tayang: "TERSEDIA" },
+      kategoriWhere,
+      buildListingWhere(
+        // Teks yang sudah ditafsirkan jadi tempat tidak boleh ikut dicari
+        // sebagai alamat — "deket unesa" dijamin nol hasil di kolom alamat,
+        // dan menahannya berarti membatalkan pencarian yang sudah benar.
+        siapTempat.tempat ? { ...filters, q: siapTempat.q } : filters,
+        konteks,
+        sekarang,
+      ),
+      ...(tempatWhere ? [tempatWhere] : []),
+      ...(sortWhere ? [sortWhere] : []),
+    ],
   };
 
   const whereClause: Prisma.ListingWhereInput = {
-    ...baseWhere,
-    jenis_transaksi: transaksiFilter(),
+    AND: [baseWhere, { jenis_transaksi: transaksiFilter() }],
   };
 
-  // Sorting. Untuk sort eksplisit harga/luas, urutan HARUS murni sesuai kolom
-  // yang dipilih — is_hot_deal TIDAK boleh mengapung ke atas, kalau tidak card
-  // pertama "Termurah" bukan yang termurah. Hot deal hanya diprioritaskan untuk
-  // browsing default (Terbaru).
-  let secondaryOrder: Prisma.ListingOrderByWithRelationInput = { tanggal_dibuat: "desc" };
-  if (sort === "termurah")   secondaryOrder = { harga: "asc" };
-  if (sort === "termahal")   secondaryOrder = { harga: "desc" };
-  if (sort === "terpopuler") secondaryOrder = { dilihat: "desc" };
-  if (sort === "luas-asc")   secondaryOrder = { luas_tanah: "asc" };
-  if (sort === "luas-desc")  secondaryOrder = { luas_tanah: "desc" };
+  // Urutan inti dari mesin bersama: status → kunci pilihan pemakai → pemecah
+  // seri `id_property` (yang membuat paginasi tidak pernah bocor).
+  //
+  // Satu tambahan khas halaman ini yang sengaja DIPERTAHANKAN: hot deal
+  // mengapung, TAPI hanya pada urutan bawaan "terbaru". Pada urutan eksplisit
+  // ia tidak boleh ikut campur — kartu pertama daftar "harga terendah" harus
+  // benar-benar yang termurah, bukan hot deal yang kebetulan lebih mahal.
+  const orderBy: Prisma.ListingOrderByWithRelationInput[] = (() => {
+    const inti = buildOrderBy(sort, konteks);
+    if (sort !== "terbaru") return inti;
+    const [status, ...sisa] = inti;
+    return [status, { is_hot_deal: "desc" }, ...sisa];
+  })();
 
-  // Hot deal mengapung hanya pada sort default (terbaru); sort eksplisit murni.
-  const floatHotDeal = sort === "terbaru";
-  const orderBy: Prisma.ListingOrderByWithRelationInput[] = [
-    ...(floatHotDeal ? [{ is_hot_deal: "desc" } as Prisma.ListingOrderByWithRelationInput] : []),
-    secondaryOrder,
-    // Tiebreak stabil supaya paginasi konsisten saat nilai sort sama.
-    { id_property: "desc" },
-  ];
-
-  const [totalItems, propertiesRaw] = await prisma.$transaction([
-    prisma.listing.count({ where: whereClause }),
-    prisma.listing.findMany({
-      where: whereClause,
-      take: limit,
-      skip,
-      orderBy,
-      include: {
-        agent: {
-          select: {
-            nama_kantor: true,
-            foto_profil_url: true,
-            pengguna: { select: { nama_lengkap: true } },
-          },
-        },
+  const sertakan = {
+    agent: {
+      select: {
+        nama_kantor: true,
+        foto_profil_url: true,
+        pengguna: { select: { nama_lengkap: true } },
       },
-    }),
-  ]);
+    },
+    // Halaman ini memakai kartu yang sama dengan /Sewa & /Jual, dan untuk
+    // listing KOS kartu itu menampilkan sisa kamar, gender, kamar mandi
+    // dalam/luar & fasilitas — semuanya hidup di listing_sewa_detail.
+    // Tanpa include ini, kos di sini akan tampil dengan grid KT/KM/LT/LB
+    // yang seluruhnya "-", persis keluhan yang bikin kartunya disatukan.
+    sewaDetail: true,
+    _count: { select: { kamarTipe: true } },
+  } as const;
+
+  // "Terdekat" diurut di luar `orderBy` — jaraknya ada di relasi to-many dan
+  // berbeda per tempat yang dicari. Lihat urutkanTerdekat().
+  const urutJarak =
+    sort === "terdekat" && siapTempat.tempat
+      ? await urutkanTerdekat(siapTempat.tempat, whereClause, page, limit)
+      : null;
+
+  const [totalItems, propertiesRaw] = urutJarak
+    ? [
+        urutJarak.total,
+        await prisma.listing
+          .findMany({
+            where: { id_property: { in: urutJarak.ids } },
+            include: sertakan,
+          })
+          .then((baris) => {
+            // findMany tidak menjamin urutan daftar `in` — disusun ulang
+            // mengikuti jarak yang sudah dihitung.
+            const peta = new Map(baris.map((b) => [String(b.id_property), b]));
+            return urutJarak.ids
+              .map((id) => peta.get(String(id)))
+              .filter(Boolean) as typeof baris;
+          }),
+      ]
+    : await prisma.$transaction([
+        prisma.listing.count({ where: whereClause }),
+        prisma.listing.findMany({
+          where: whereClause,
+          take: limit,
+          skip,
+          orderBy,
+          include: sertakan,
+        }),
+      ]);
+
+  const petaJarak = await ambilJarakKeTempat(
+    siapTempat.tempat,
+    propertiesRaw.map((p) => p.id_property),
+  );
 
   const totalPages = Math.ceil(totalItems / limit);
+
+  // Halaman di luar jangkauan → pindahkan ke halaman terakhir. Ini yang terjadi
+  // setiap kali pemakai mempersempit filter selagi berada di halaman jauh:
+  // sebelumnya ia mendarat di grid kosong bertuliskan "Belum ada listing"
+  // padahal hasilnya ada, hanya tidak sebanyak itu.
+  const tujuan = urlHalamanTerakhir(`/properti/${slug}`, searchParams, page, totalPages);
+  if (tujuan) redirect(tujuan);
+
+  // Satu query terindeks untuk seluruh halaman (halaman ini mayoritas isinya
+  // lelang), bukan dua query per card. Listing non-lelang tersaring di dalam.
+  const limitAwalPerListing = await ambilLimitLelangSebelumnya(propertiesRaw);
 
   const properties = propertiesRaw.map((item) => {
     const foto_list = normalizeListingImages(item.gambar);
@@ -292,6 +339,8 @@ export default async function KategoriPage({ params, searchParams }: Props) {
       slug:            item.slug,
       judul:           item.judul,
       kota:            item.kota,
+      kecamatan:       item.kecamatan,
+      kelurahan:       item.kelurahan,
       alamat_lengkap:  item.alamat_lengkap ?? "",
       harga:           item.nilai_limit_lelang
                          ? Number(item.nilai_limit_lelang)
@@ -299,6 +348,7 @@ export default async function KategoriPage({ params, searchParams }: Props) {
       harga_promo:     item.harga_promo != null ? Number(item.harga_promo) : null,
       jenis_transaksi: item.jenis_transaksi,
       kategori:        item.kategori,
+      status_tayang:   item.status_tayang,
       gambar:          foto_list[0] || "/images/hero/banner.jpg",
       foto_list,
       luas_tanah:      Number(item.luas_tanah ?? 0),
@@ -306,10 +356,30 @@ export default async function KategoriPage({ params, searchParams }: Props) {
       kamar_tidur:     item.kamar_tidur ?? 0,
       kamar_mandi:     item.kamar_mandi ?? 0,
       tanggal_lelang:  item.tanggal_lelang ? item.tanggal_lelang.toISOString() : null,
+      lelang_limit_awal: limitAwalPerListing.get(String(item.id_property)) ?? null,
+      // Field kos — dipakai kartu bersama untuk listing KOS/SEWA.
+      durasi_sewa:        item.sewaDetail?.durasi_sewa ?? null,
+      kamar_mandi_tipe:   item.sewaDetail?.kamar_mandi_tipe ?? null,
+      kos_gender:         item.sewaDetail?.kos_gender ?? null,
+      kamar_tersedia:     item.sewaDetail?.kamar_tersedia ?? null,
+      tipe_unit:          item.sewaDetail?.tipe_unit ?? null,
+      lantai_unit:        item.sewaDetail?.lantai_unit ?? null,
+      kapasitas_penghuni: item.sewaDetail?.kapasitas_penghuni ?? null,
+      kondisi_interior:   item.kondisi_interior ?? null,
+      jumlah_tipe_kamar:  item._count?.kamarTipe ?? 0,
+      fasilitas_kamar:    item.sewaDetail?.fasilitas_kamar ?? null,
+      fasilitas_bersama:  item.sewaDetail?.fasilitas_bersama ?? null,
+      akses_terdekat:     Array.isArray(item.akses_terdekat)
+                            ? (item.akses_terdekat as any[])
+                            : [],
       agent_name:      item.agent?.pengguna?.nama_lengkap || "Agent Kosku",
       agent_photo:     normalizeAgentPhoto(item.agent?.foto_profil_url),
       agent_office:    item.agent?.nama_kantor || "Kosku",
       is_hot_deal:     !!item.is_hot_deal,
+      // Nama tempatnya yang dicetak, bukan nama filternya: "152 m dari
+      // Universitas Ciputra" menjawab pertanyaan pembaca, "152 m dari Semua
+      // kampus" mengulang apa yang sudah ia ketik sendiri.
+      jarak_tempat: petaJarak.get(String(item.id_property)) ?? null,
     };
   });
 
@@ -335,9 +405,14 @@ export default async function KategoriPage({ params, searchParams }: Props) {
       slug={slug}
       label={label}
       initialData={properties}
+      tempat={siapTempat.chip}
+      radiusTempat={siapTempat.tempat?.radius ?? null}
+      tempatDitebak={siapTempat.ditebak}
+      kueriAsli={filters.q ?? null}
+      catatanTempat={siapTempat.catatan}
       pagination={{ currentPage: page, totalPages, totalItems }}
       activeTipe={tipe}
-      activeSort={rawSort}
+      konteks={konteks}
       tabCounts={{
         semua:  totalCount,
         jual:   jualCount,

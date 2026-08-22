@@ -2,13 +2,15 @@
 import React from "react";
 import { cache } from "react";
 import { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { bacaSekitarTersimpan } from "@/lib/nearbyPlaces.server";
 import DetailClient from "./DetailClient";
 import { getSimilarItems } from "@/app/Jual/[slug]/lib/similar";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { SITE_URL, lelangOgImageUrl } from "@/lib/site";
+import { getAuctionHistory } from "@/lib/auctionHistory";
 
 // --- TYPES ---
 type ParamsShape = {
@@ -118,7 +120,7 @@ const getProperty = cache(async (id: bigint) => {
   });
 
   if (!product) return null;
-  if (product.status_tayang !== "TERSEDIA") return null;
+  if (product.status_tayang === "TARIK_LISTING") return null;
 
   return product;
 });
@@ -263,16 +265,16 @@ export default async function DetailPage({ params }: Props) {
 
     if (expectedSlugId !== slugId) {
       if (presenterId) {
-        return redirect(`/Lelang/${expectedSlugId}/${presenterId}`);
+        return permanentRedirect(`/Lelang/${expectedSlugId}/${presenterId}`);
       }
-      return redirect(`/Lelang/${expectedSlugId}`);
+      return permanentRedirect(`/Lelang/${expectedSlugId}`);
     }
   }
 
   if (presenterId) {
     const safeSlugId =
       slugId || `${product.slug}-${product.id_property.toString()}`;
-    return redirect(`/Lelang/${safeSlugId}/${presenterId}`);
+    return permanentRedirect(`/Lelang/${safeSlugId}/${presenterId}`);
   }
 
   const safeSlugId =
@@ -283,11 +285,26 @@ export default async function DetailPage({ params }: Props) {
   const fotoArray = normalizeListingImages(product.gambar);
 
   // Rekomendasi "Properti Serupa" — campuran Primary/Secondary/Lelang, di-ranking relevansi.
-  const similarItems = await getSimilarItems(product);
+  // Riwayat lelang diambil di server (bukan fetch dari browser) supaya bloknya
+  // selalu ada di HTML pertama. Lihat @/lib/auctionHistory.
+  const [similarItems, riwayatLelang] = await Promise.all([
+    getSimilarItems(product),
+    getAuctionHistory(product.id_property).catch((e) => {
+      console.error("❌ Gagal menyiapkan riwayat lelang untuk halaman detail:", e);
+      return null;
+    }),
+  ]);
 
   const productAgentPhoto = normalizeAgentPhoto(
     product.agent?.foto_profil_url
   );
+
+  // Hasil pemindaian "apa yang ada di sekitar" yang SUDAH tersimpan. Dibaca
+  // sekali di server supaya aset yang pernah dipindai tampil lengkap di HTML
+  // pertama — tanpa spinner dan tanpa satu pun permintaan dari browser. Aset
+  // yang belum pernah dipindai mengembalikan null, dan komponennya yang
+  // meminta pemindaian lewat /api/listing/{id}/sekitar.
+  const sekitar = await bacaSekitarTersimpan(product.id_property);
 
   const productForClient = serializePrisma({
     ...product,
@@ -341,7 +358,7 @@ export default async function DetailPage({ params }: Props) {
   };
 
   return (
-    <main className="bg-[#0F0F0F] min-h-screen text-white">
+    <main className="bg-[#070A11] min-h-screen text-white">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -357,9 +374,12 @@ export default async function DetailPage({ params }: Props) {
 
       <DetailClient
         product={productForClient}
+        sekitar={sekitar}
         fotoArray={fotoArray}
         similarProperties={similarItems}
         currentAgentId={null}
+        riwayatLelang={riwayatLelang}
+        isLoggedIn={Boolean(session?.user)}
       />
     </main>
   );

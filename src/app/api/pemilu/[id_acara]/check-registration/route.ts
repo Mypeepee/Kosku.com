@@ -1,10 +1,9 @@
 // src/app/api/pemilu/[id_acara]/check-registration/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import prisma from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 
-const prisma = new PrismaClient();
 
 interface RouteContext {
   params: { id_acara: string };

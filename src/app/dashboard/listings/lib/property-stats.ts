@@ -1,5 +1,6 @@
 // src/app/dashboard/listings/lib/property-stats.ts
 import prisma from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 export type KategoriEnum =
   | "RUMAH"
@@ -22,16 +23,23 @@ export type ListingHeaderStats = {
   countsByCategory: ListingTypeCounts;
 };
 
+/**
+ * Angka di kepala halaman HARUS memakai cakupan yang sama persis dengan daftar
+ * di bawahnya. Dulu fungsi ini menghitung cakupannya sendiri dari `userRole` —
+ * yang isinya `peran_enum` (USER|AGENT), sehingga `userRole === "OWNER"` tidak
+ * pernah benar dan owner melihat "12 listing" di kartu statistik sementara
+ * daftarnya menampilkan ratusan. Sekarang cakupannya dikirim dari pemanggil,
+ * hasil `listingScopeWhere()` — satu perhitungan untuk keduanya.
+ */
 export async function fetchListingHeaderStats(
-  userRole: string,
-  idAgent?: string,
+  scope: Record<string, unknown>,
 ): Promise<ListingHeaderStats> {
-  const baseWhere = userRole === "OWNER"
-    ? { status_tayang: "TERSEDIA" as const }
-    : {
-        id_agent: idAgent!,
-        status_tayang: "TERSEDIA" as const,
-      };
+  const baseWhere = {
+    status_tayang: "TERSEDIA" as const,
+    // `AND`, bukan spread: scope milik STOKER berisi kunci `OR`, dan menyatukan
+    // dua `OR` dalam satu objek membuat salah satunya hilang diam-diam.
+    AND: [scope as Prisma.ListingWhereInput],
+  } satisfies Prisma.ListingWhereInput;
 
   // Semua query dijalankan paralel — dari 6 sequential (~180ms) → 1 batch (~30ms)
   const [

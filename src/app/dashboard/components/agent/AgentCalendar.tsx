@@ -2,39 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
+import { isOwnerAtauPemilik } from "@/lib/sessionJabatan";
 import Kalendar from "@/app/dashboard/jadwal-acara/components/kalendar";
 import Todo from "@/app/dashboard/jadwal-acara/components/todo";
 import ModalAcara from "@/app/dashboard/jadwal-acara/components/modal-acara";
+import type { EventData } from "@/app/dashboard/jadwal-acara/lib/acara-types";
 
-interface EventData {
-  id_acara: string;
-  judul_acara: string;
-  deskripsi?: string;
-  tanggal_mulai: string;
-  tanggal_selesai: string;
-  waktu_mulai?: string;
-  waktu_selesai?: string;
-  tipe_acara: string;
-  lokasi?: string;
-  status_acara: string;
-  id_property?: string;
-  durasi_pilih?: number;
-  agent?: { id_agent?: string } | null;
-  // Diisi dari /api/dashboard/acara GET response — daftar agent yang
-  // di-invite. ModalAcara hydrate ke chip PesertaPicker pas view/edit.
-  undangan?: Array<{
-    id_undangan?: string;
-    id_agent: string;
-    status_undangan?: string;
-    agent?: {
-      id_agent: string;
-      foto_profil_url?: string | null;
-      pengguna?: { nama_lengkap?: string };
-    };
-  }>;
-  // Hint dari backend: hanya owner yang boleh edit.
-  _isOwner?: boolean;
-}
 
 type ModalMode = "create" | "edit" | "view";
 
@@ -103,16 +76,12 @@ export function AgentCalendar({ compact = false }: { compact?: boolean } = {}) {
     // ownership berbasis session — paling akurat. Fallback ke
     // perbandingan client kalau hint absent (mis. event dari sumber
     // lain seperti MOU yang belum dapet flag).
-    const userRole = (session?.user as { role?: string } | null)?.role;
-    const currentAgentId = (session?.user as { agentId?: string } | null)
-      ?.agentId;
-    const eventCreatorId = event.agent?.id_agent;
+    // Wewenang dibaca dari `jabatan` (@/lib/sessionJabatan) — dulu dari
+    // `session.user.role` yang isinya USER|AGENT, jadi cabang OWNER-nya tidak
+    // pernah aktif dan owner selalu jatuh ke mode "lihat saja".
     const canEdit =
-      userRole === "OWNER" ||
       event._isOwner === true ||
-      (!!currentAgentId &&
-        !!eventCreatorId &&
-        currentAgentId === eventCreatorId);
+      isOwnerAtauPemilik(session?.user, event.agent?.id_agent);
     handleEventClick({ ...event, canEdit });
   };
 

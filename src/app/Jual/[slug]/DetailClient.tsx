@@ -11,11 +11,16 @@ import DetailInfo from "./[agentId]/components/DetailInfo";
 import BookingSidebar from "./[agentId]/components/AgentSidebar";
 import SimilarProperties from "./[agentId]/components/SimilarProperties";
 import ShareListingModal from "@/app/Lelang/[slugId]/[agentId]/components/ShareListingModal";
+import MarkSoldControl from "@/components/property/MarkSoldControl";
+import type { ListingStatus } from "@/lib/listingStatusPermission";
 import type { PropertyItem } from "@/app/properti/[slug]/types";
+import type { SekitarAwal } from "@/components/property/detail/useSekitar";
 
 // ================== INTERFACE ==================
 interface ProductData {
   id_property: string;
+  /** Pemegang listing dari DB — penentu siapa yang boleh menandainya terjual. */
+  id_agent?: string | null;
   kode_properti?: string;
   slug?: string;
   judul: string;
@@ -44,6 +49,8 @@ interface ProductData {
   legalitas?: string;
   latitude?: number;
   longitude?: number;
+  /** Patokan lokasi yang diisi agent — dipakai bagian "Lokasi & sekitar". */
+  akses_terdekat?: unknown;
   kategori: string;
   jenis_transaksi: string;
   status_tayang?: string;
@@ -69,6 +76,12 @@ interface DetailClientProps {
   product: ProductData;
   currentAgentId?: string | null;
   similarProperties?: PropertyItem[];
+  /**
+   * Hasil pemindaian "apa yang ada di sekitar" yang sudah tersimpan, dibaca di
+   * server. Ada supaya aset yang pernah dipindai tampil lengkap di HTML
+   * pertama — tanpa spinner dan tanpa satu pun permintaan dari browser.
+   */
+  sekitar?: SekitarAwal | null;
 }
 
 // ================== COMPONENT ==================
@@ -76,6 +89,7 @@ export default function DetailClient({
   product,
   currentAgentId,
   similarProperties = [],
+  sekitar = null,
 }: DetailClientProps) {
   // ================== INCREMENT VIEW ==================
   useEffect(() => {
@@ -123,6 +137,15 @@ export default function DetailClient({
     ? convertToNumber(product.harga_promo)
     : null;
 
+  // ================== STATUS TAYANG ==================
+  // Dipegang di sini (bukan dibaca langsung dari prop) supaya satu kali klik
+  // "Tandai Terjual" langsung mengubah galeri, badge, dan panel kontrol
+  // sekaligus — tanpa menunggu halaman dimuat ulang dari server yang bisa
+  // saja masih menyajikan versi cache.
+  const [statusTayang, setStatusTayang] = useState<string>(
+    product.status_tayang || "TERSEDIA"
+  );
+
   // ================== PROPERTY DATA ==================
   const propertyData = {
     id_property: product.id_property,
@@ -141,12 +164,16 @@ export default function DetailClient({
     provinsi: product.provinsi || null,
     latitude: product.latitude || null,
     longitude: product.longitude || null,
+    akses_terdekat: Array.isArray(product.akses_terdekat)
+      ? product.akses_terdekat
+      : [],
+    sekitar,
 
     harga,
     harga_promo: hargaPromo,
     jenis_transaksi: product.jenis_transaksi,
     kategori: product.kategori,
-    status_tayang: product.status_tayang || "TERSEDIA",
+    status_tayang: statusTayang,
     is_hot_deal: product.is_hot_deal || false,
     dilihat: product.dilihat || 0,
 
@@ -247,16 +274,12 @@ export default function DetailClient({
     kota_area: product.agent.kota_area || "",
   } : null;
 
-  const jenisLabel =
-    product.jenis_transaksi === "JUAL"
-      ? "Jual"
-      : product.jenis_transaksi === "SEWA"
-      ? "Sewa"
-      : "Lelang";
+  const isSold = statusTayang.toUpperCase() === "TERJUAL";
+  const soldLabel = product.jenis_transaksi === "SEWA" ? "Tersewa" : "Terjual";
 
   // ================== RENDER ==================
   return (
-    <div className="text-white font-sans bg-[#0F0F0F]">
+    <div className="text-white font-sans bg-[#070A11]">
       <div className="lg:hidden h-[60px]" />
       <div className="hidden lg:block h-24 w-full" />
 
@@ -271,7 +294,7 @@ export default function DetailClient({
             href="/Jual"
             className="hover:text-[#86efac] transition-colors"
           >
-            {jenisLabel}
+            Jual
           </Link>
           <Icon icon="solar:alt-arrow-right-linear" className="text-sm" />
           <span className="text-white truncate max-w-[150px] sm:max-w-xs">
@@ -281,24 +304,47 @@ export default function DetailClient({
       </div>
 
       {/* Image Gallery */}
-      <div className="container mx-auto lg:px-4 mb-8 px-4 mt-2 lg:mt-0">
+      <div className="container mx-auto lg:px-4 mb-8 px-4 mt-4 lg:mt-0">
         <ImageGallery
           images={
             product.foto_list && product.foto_list.length > 0
               ? product.foto_list
               : [product.gambar_utama_url || "/images/hero/banner.jpg"]
           }
+          judul={product.judul}
+          isSold={isSold}
+          soldLabel={soldLabel}
         />
       </div>
+
+      {/* Panel kontrol agent — hanya tampil untuk yang berwenang atas listing
+          ini (pemegangnya, Owner, atau Stoker untuk aset lelang). Ditaruh
+          tepat di atas kartu agent, bukan di atas galeri, supaya bukan hal
+          pertama yang dilihat pengunjung biasa. */}
+      <MarkSoldControl
+        className="mb-4 lg:mb-6"
+        idProperty={product.id_property}
+        ownerAgentId={product.id_agent}
+        jenisTransaksi={product.jenis_transaksi}
+        status={statusTayang}
+        onStatusChange={(s: ListingStatus) => setStatusTayang(s)}
+        judul={product.judul}
+        lokasi={shareLocation}
+        harga={hargaPromo || harga}
+        hargaLabel={hargaPromo ? "Harga promo" : "Harga"}
+        thumbnail={shareCoverImage}
+      />
 
       {/* Main Content */}
       <div className="container mx-auto px-4 relative">
         <div className="flex flex-col lg:flex-row gap-10 items-start">
+          {/* `currentAgentId` tidak dikirim: DetailInfo tidak menerimanya dan
+              tidak pernah memakainya — prop itu hanya membuat TypeScript
+              mengeluh tanpa ada yang membacanya di ujung sana. */}
           <DetailInfo
             data={propertyData as any}
             selectedRoom={selectedRoom}
             setSelectedRoom={setSelectedRoom}
-            currentAgentId={currentAgentId}
           />
           <BookingSidebar
             data={propertyData as any}

@@ -20,7 +20,7 @@ function TransaksiBadge({ type, size = "md" }: { type: string; size?: BadgeSize 
     PRIMARY:   { label: "Primary",   icon: "solar:home-2-bold-duotone",      cls: "text-blue-200 bg-blue-500/20 border-blue-400/40" },
     SECONDARY: { label: "Secondary", icon: "solar:buildings-2-bold-duotone", cls: "text-violet-200 bg-violet-500/20 border-violet-400/40" },
     SEWA:      { label: "Sewa",      icon: "solar:key-bold-duotone",         cls: "text-emerald-200 bg-emerald-500/20 border-emerald-400/40" },
-    LELANG:    { label: "Lelang",    icon: "solar:gavel-bold",               cls: "text-amber-100 bg-amber-500/25 border-amber-400/50" },
+    LELANG:    { label: "Lelang",    icon: "mdi:gavel",               cls: "text-amber-100 bg-amber-500/25 border-amber-400/50" },
   };
   const b = map[type?.toUpperCase()];
   if (!b) return null;

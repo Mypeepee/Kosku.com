@@ -16,7 +16,17 @@ const nextConfig = {
 
   // Exclude heavy Node-only packages from webpack bundling (runs only on server)
   experimental: {
-    serverComponentsExternalPackages: ["pdf-parse", "pdfjs-dist", "pdf-lib", "docxtemplater", "pizzip", "puppeteer", "ffmpeg-static"],
+    // @prisma/client WAJIB ada di daftar ini. Tanpa itu webpack MEMBUNDEL
+    // client Prisma ke dalam setiap berkas rute, lalu menyimpan bundel itu di
+    // .next/cache — sehingga `prisma generate` yang menambah model baru tidak
+    // pernah sampai ke proses yang berjalan, BAHKAN SETELAH dev server
+    // di-restart, karena start berikutnya memuat ulang cache yang sama.
+    // Gejalanya: "Model Prisma 'x' tidak ada di client yang sedang berjalan"
+    // yang tidak hilang meski sudah generate + restart, dan cuma sembuh
+    // setelah `rm -rf .next`. Dengan externalized, Prisma di-`require` saat
+    // runtime dari node_modules — selalu versi terbaru, dan bundel rutenya
+    // jauh lebih kecil.
+    serverComponentsExternalPackages: ["@prisma/client", ".prisma/client", "pdf-parse", "pdfjs-dist", "pdf-lib", "docxtemplater", "pizzip", "puppeteer", "ffmpeg-static"],
 
     // Tree-shake barrel imports dari library besar. Tanpa ini, `import { X }
     // from "lucide-react"` ikut menyeret SELURUH paket ke bundle browser.

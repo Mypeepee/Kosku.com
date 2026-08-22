@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
+import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
+import { createPortal } from "react-dom";
 import KlienFormModal from "./KlienFormModal";
 import {
   formatRupiah as fmtRup,
@@ -13,13 +15,18 @@ import {
   TUJUAN_OPTIONS,
 } from "./KlienFormModal";
 import { PremiumSelect, PremiumDateTimePicker, type PremiumOption } from "./CrmFormControls";
+import RingkasanCrm, { rupiahRingkas, RATE_KOMISI, type StatistikCrm } from "./RingkasanCrm";
 import TypePicker from "@/components/search/TypePicker";
 import LocationPicker from "@/components/search/LocationPicker";
+import KeywordField from "@/components/search/KeywordField";
 import { regionKey, type SelectedRegion } from "@/lib/regionSearch";
+import { rapikanAlamat, saringAlasan } from "@/lib/klienRingkas";
+import { pathListing } from "@/lib/klienPesan";
 import {
   Klien, KlienStatus, PreferensiKlien, PreferensiForm,
   TipeProperti, JenisTransaksi, TujuanBeli,
-  SUMBER_LABEL, JENIS_TRANSAKSI_LABEL, TIPE_PROPERTI_LABEL,
+  EMPTY_PREFERENSI, SUMBER_LABEL, JENIS_TRANSAKSI_LABEL, TIPE_PROPERTI_LABEL,
+  SERTIFIKAT_LABEL, type Sertifikat,
 } from "./types";
 
 /* Opsi jenis transaksi untuk inline edit preferensi */
@@ -101,6 +108,12 @@ const STATUS_THEME: Record<KlienStatus, StatusTheme> = {
   },
 };
 
+const SERTIFIKAT_OPTIONS: PremiumOption[] = [
+  { value: "", label: "Tidak masalah" },
+  ...(["SHM", "HGB", "HGU", "HP", "AJB", "PPJB", "LAINNYA"] as Sertifikat[])
+    .map(s => ({ value: s, label: SERTIFIKAT_LABEL[s] })),
+];
+
 const PIPELINE_ORDER: KlienStatus[] = [
   "lead_baru", "sudah_dikontak", "hot_buyer", "closing", "lost_iseng",
 ];
@@ -143,10 +156,6 @@ function initialsOf(name: string) {
   return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
 
-function klienValue(k: Klien) {
-  return k.preferensi.reduce((max, p) => Math.max(max, p.budget_max || 0), 0);
-}
-
 /** Sumber prospek yang spesifik — diturunkan dari catatan auto-import */
 const SOURCE_META: { test: RegExp; label: string; icon: string }[] = [
   { test: /Titip Jual/i,           label: "Titip Jual", icon: "solar:home-add-bold-duotone" },
@@ -177,6 +186,131 @@ function waHref(phone: string, nama?: string) {
   return `https://wa.me/${digits}${greet ? `?text=${encodeURIComponent(greet)}` : ""}`;
 }
 
+/** Budget satu klien = MAKS di antara preferensinya, bukan jumlahnya.
+    Satu kartu preferensi di UI dipecah jadi satu baris per (tipe × lokasi),
+    jadi orang yang mencari "rumah atau ruko di Gresik atau Driyorejo, maks
+    250 jt" tersimpan sebagai empat baris 250 jt. Menjumlahkannya melaporkan
+    1 M dari satu orang yang mau beli satu rumah. Rumus ini sengaja sama
+    persis dengan yang dipakai /api/dashboard/klien/statistik supaya angka di
+    baris daftar tidak pernah berselisih dengan angka di kartu ringkasan. */
+function budgetKlien(k: Klien): number {
+  let maks = 0;
+  for (const p of k.preferensi) {
+    const v = Number(p.budget_max ?? p.budget_min ?? 0);
+    if (v > maks) maks = v;
+  }
+  return maks;
+}
+
+/** Ringkasan preferensi untuk satu baris daftar: tipe unik, kota unik, dan
+    berapa niat berbeda yang tersimpan di baliknya. */
+function ringkasPreferensi(k: Klien) {
+  const tipe: string[] = [];
+  const kota: string[] = [];
+  const niat = new Set<string>();
+  for (const p of k.preferensi) {
+    /* tipe null = semua tipe. Ditulis apa adanya supaya baris klien di daftar
+       tidak terlihat seperti kehilangan data. */
+    const t = p.tipe_properti ? (TIPE_PROPERTI_LABEL[p.tipe_properti] ?? p.tipe_properti) : "Semua tipe";
+    if (!tipe.includes(t)) tipe.push(t);
+    if (p.loc_kota && !kota.includes(p.loc_kota)) kota.push(p.loc_kota);
+    niat.add(`${p.budget_min ?? ""}|${p.budget_max ?? ""}|${p.jenis_transaksi ?? ""}`);
+  }
+  return { tipe, kota, niat: niat.size };
+}
+
+const HARI_MS = 86_400_000;
+
+/** Selisih HARI KALENDER, bukan selisih 24 jam. Follow-up jam 23.00 hari ini
+    dan jam 01.00 besok cuma berjarak dua jam, tapi bagi agent yang satu
+    "hari ini" dan yang lain "besok" — itu yang harus terbaca. */
+function selisihHari(iso: string) {
+  const a = new Date(iso); a.setHours(0, 0, 0, 0);
+  const b = new Date();    b.setHours(0, 0, 0, 0);
+  return Math.round((a.getTime() - b.getTime()) / HARI_MS);
+}
+
+function waktuRelatif(iso: string | null): string {
+  if (!iso) return "—";
+  const d = -selisihHari(iso);
+  if (d <= 0) return "hari ini";
+  if (d === 1) return "kemarin";
+  if (d < 30) return `${d} hr lalu`;
+  if (d < 365) return `${Math.round(d / 30)} bln lalu`;
+  return `${Math.floor(d / 365)} thn lalu`;
+}
+
+type JadwalFU = { label: string; ikon: string; kelas: string; telat: boolean };
+
+function jadwalFollowUp(iso: string | null): JadwalFU | null {
+  if (!iso) return null;
+  const d = selisihHari(iso);
+  if (d < 0) {
+    return {
+      label: d === -1 ? "Telat 1 hari" : `Telat ${-d} hari`,
+      ikon: "solar:danger-triangle-bold-duotone",
+      kelas: "border-amber-400/30 bg-amber-500/[0.12] text-amber-200",
+      telat: true,
+    };
+  }
+  if (d === 0) return { label: "Hari ini", ikon: "solar:bell-bing-bold-duotone", kelas: "border-sky-400/30 bg-sky-500/[0.12] text-sky-200", telat: false };
+  if (d === 1) return { label: "Besok", ikon: "solar:calendar-mark-bold-duotone", kelas: "border-white/[0.08] bg-white/[0.04] text-slate-300", telat: false };
+  return {
+    label: d < 30 ? `${d} hari lagi` : `${Math.round(d / 30)} bln lagi`,
+    ikon: "solar:calendar-mark-bold-duotone",
+    kelas: "border-white/[0.08] bg-white/[0.04] text-slate-400",
+    telat: false,
+  };
+}
+
+/* ── Pengurutan daftar ────────────────────────────────────────
+   Diurutkan di browser, bukan di SQL: daftar dibatasi 50 baris yang sudah
+   ada di memori, jadi urutan berganti seketika tanpa memuat ulang. Kalau
+   suatu saat batasnya dinaikkan atau dipaginasi, pengurutan harus pindah ke
+   query — kalau tidak, "budget terbesar" cuma berarti terbesar di halaman
+   yang kebetulan termuat. */
+type UrutKlien = "prioritas" | "terbaru" | "budget" | "nama";
+
+const URUT_OPSI: { value: UrutKlien; label: string; icon: string; hint: string }[] = [
+  { value: "prioritas", label: "Prioritas",      icon: "solar:bolt-bold-duotone",          hint: "Follow-up telat lebih dulu" },
+  { value: "terbaru",   label: "Terbaru",        icon: "solar:clock-circle-bold-duotone",  hint: "Klien paling baru masuk" },
+  { value: "budget",    label: "Budget terbesar",icon: "solar:banknote-2-bold-duotone",    hint: "Nilai terbesar di atas" },
+  { value: "nama",      label: "Nama A–Z",       icon: "solar:sort-by-alphabet-bold-duotone", hint: "Urut abjad" },
+];
+
+function urutkanKlien(list: Klien[], urut: UrutKlien): Klien[] {
+  const salinan = [...list];
+  switch (urut) {
+    case "terbaru":
+      return salinan.sort((a, b) => +new Date(b.tanggal_masuk) - +new Date(a.tanggal_masuk));
+    case "budget":
+      return salinan.sort((a, b) => budgetKlien(b) - budgetKlien(a));
+    case "nama":
+      return salinan.sort((a, b) => a.nama.localeCompare(b.nama, "id"));
+    default: {
+      /* PRIORITAS — urutan bawaan, dan satu-satunya yang menjawab "siapa yang
+         harus saya hubungi sekarang". Janji yang sudah lewat naik ke puncak,
+         paling telat lebih dulu; lalu yang terjadwal ke depan menurut
+         kedekatannya; baru yang belum dijadwalkan sama sekali, diurut nilai
+         supaya yang paling mahal tidak tenggelam. Yang lost selalu di dasar —
+         mereka bukan pekerjaan. */
+      const skor = (k: Klien) => {
+        if (k.status === "lost_iseng") return 4;
+        if (!k.tanggal_follow_up) return 3;
+        return selisihHari(k.tanggal_follow_up) < 0 ? 0 : 1;
+      };
+      return salinan.sort((a, b) => {
+        const sa = skor(a), sb = skor(b);
+        if (sa !== sb) return sa - sb;
+        if (sa === 0 || sa === 1) {
+          return +new Date(a.tanggal_follow_up!) - +new Date(b.tanggal_follow_up!);
+        }
+        return budgetKlien(b) - budgetKlien(a);
+      });
+    }
+  }
+}
+
 /* ════════════════════════════════════════════════════════════
    MAIN
    ════════════════════════════════════════════════════════════ */
@@ -186,16 +320,97 @@ export default function CrmPageClient() {
   const [loading, setLoading] = useState(true);
   const [q, setQ]           = useState("");
   const [statusFilter, setStatusFilter] = useState<KlienStatus | "semua">("semua");
+  const [urut, setUrut] = useState<UrutKlien>("prioritas");
+  /* Asisten aset bisa dibuka TANPA melewati kartu klien maupun preferensi —
+     dari panel "siap kirim", dari tombol di baris daftar, dan dari tautan
+     dalam (?klien=KL00007) yang dipakai tugas & notifikasi otomatis. Yang
+     disimpan cuma id-nya; sisanya diambil sendiri oleh modalnya. */
+  const [asetUntuk, setAsetUntuk] = useState<{ id: string; nama: string; aset?: string[] } | null>(null);
+  /* Kabar hasil pencarian ulang sesudah kriteria diubah. Bukan sekadar
+     pemberitahuan: bisa diketuk untuk langsung membuka asetnya, karena
+     kalimat "24 aset cocok" yang tidak bisa ditindaklanjuti hanya memindahkan
+     pekerjaan membuka layar, tidak menghapusnya. */
+  const [kabarKriteria, setKabarKriteria] = useState<{ id: string; nama: string; jumlah: number } | null>(null);
+  const jedaKabar = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const jedaCari = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Satu pintu untuk "kriteria klien ini berubah". Dipanggil dari KETIGA
+   *  jalur yang bisa mengubahnya — edit preferensi, hapus preferensi, dan
+   *  formulir edit klien — supaya tidak ada satu pun yang lupa.
+   *
+   *  DIREDAM, dan itu bukan penghalusan: menghapus satu kartu preferensi yang
+   *  berisi tiga lokasi memanggil `onPrefDeleted` tiga kali berturut-turut,
+   *  dan tanpa peredam itu berarti TIGA pencarian penuh untuk satu tindakan —
+   *  dua di antaranya atas data yang sudah usang sebelum jawabannya tiba.
+   *  Simpanan tetap dibuang SEKETIKA; yang ditunda hanya pencarian ulangnya. */
+  const kriteriaBerubah = useCallback((id: string, nama: string) => {
+    buangSimpanan(id);
+    if (jedaCari.current) clearTimeout(jedaCari.current);
+    jedaCari.current = setTimeout(async () => {
+      const jumlah = await cariUlangDiamDiam(id);
+      if (jumlah === null) return;
+      if (jedaKabar.current) clearTimeout(jedaKabar.current);
+      setKabarKriteria({ id, nama, jumlah });
+      /* Delapan detik. Cukup lama untuk sempat dibaca dan diketuk sesudah agent
+         menutup formulirnya, cukup pendek supaya tidak menggantung di layar
+         sampai pekerjaan berikutnya. */
+      jedaKabar.current = setTimeout(() => setKabarKriteria(null), 8000);
+    }, 400);
+  }, []);
+
+  useEffect(() => () => {
+    if (jedaKabar.current) clearTimeout(jedaKabar.current);
+    if (jedaCari.current) clearTimeout(jedaCari.current);
+  }, []);
+  /* Baris mana yang laci hapusnya sedang tersingkap. Disimpan di induk, bukan
+     di tiap baris: dua laci merah menganga sekaligus terbaca seperti aplikasi
+     yang kehilangan kendali, dan membuka yang satu harus menutup yang lain. */
+  const [geserTerbuka, setGeserTerbuka] = useState<string | null>(null);
+  /* Apakah agent sudah pernah menggeser satu baris. Dimulai `true` (= jangan
+     beri petunjuk) supaya render server dan render pertama browser identik;
+     nilai sebenarnya dibaca dari localStorage sesudah pemasangan. Salah tebak
+     ke arah "tidak ada petunjuk" jauh lebih aman daripada kedipan hydration. */
+  const [pernahGeser, setPernahGeser] = useState(true);
+  useEffect(() => {
+    try { setPernahGeser(localStorage.getItem("crm-geser-hapus") === "1"); } catch {}
+  }, []);
+  /* Menggulir dengan laci terbuka menyisakan tombol merah menggantung di
+     tengah layar — perilaku yang sama dengan daftar bawaan iOS adalah
+     menutupnya. Didengarkan di window karena daftar ini ikut menggulir bersama
+     halaman, bukan di dalam kotak bergulir sendiri. */
+  useEffect(() => {
+    if (!geserTerbuka) return;
+    const tutup = () => setGeserTerbuka(null);
+    window.addEventListener("scroll", tutup, { passive: true });
+    return () => window.removeEventListener("scroll", tutup);
+  }, [geserTerbuka]);
+
+  const tandaiPernahGeser = useCallback(() => {
+    setPernahGeser(true);
+    try { localStorage.setItem("crm-geser-hapus", "1"); } catch {}
+  }, []);
   const [showForm, setShowForm]   = useState(false);
   const [editTarget, setEditTarget] = useState<Klien | undefined>(undefined);
   const [detailOpen, setDetailOpen] = useState<Klien | null>(null);
   const [deleting, setDeleting]   = useState<string | null>(null);
-  const [syncing, setSyncing]     = useState(false);
   const [syncMsg, setSyncMsg]     = useState<string | null>(null);
-  const syncedOnce = useRef(false);
+  const [stat, setStat]           = useState<StatistikCrm | null>(null);
+  const [statLoading, setStatLoading] = useState(true);
+  const syncTerakhirRef = useRef(0);
+  /* Spinner besar hanya berhak muncul SEKALI: saat halaman belum punya apa-apa
+     untuk ditampilkan. Sesudah itu daftarnya sudah ada di layar, dan
+     menggantinya dengan spinner pada tiap penyegaran — sinkron latar, kembali
+     dari modal, bahkan mengetik di pencarian — terbaca seperti halaman yang
+     me-refresh dirinya sendiri tanpa diminta, tepat saat agent sedang membaca.
+     Penyegaran berikutnya berjalan diam-diam; petunjuknya sebuah spinner kecil
+     di dalam kotak pencarian, yang tidak memindahkan satu piksel pun. */
+  const pernahMuatRef = useRef(false);
+  const [menyegarkan, setMenyegarkan] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (paksaDiam = false) => {
+    const diam = paksaDiam || pernahMuatRef.current;
+    if (diam) setMenyegarkan(true); else setLoading(true);
     try {
       const params = new URLSearchParams({ limit: "50" });
       if (q) params.set("q", q);
@@ -203,86 +418,142 @@ export default function CrmPageClient() {
       const json = await res.json();
       setItems(json.data || []);
       setTotal(json.total || 0);
+      pernahMuatRef.current = true;
     } finally {
-      setLoading(false);
+      if (diam) setMenyegarkan(false); else setLoading(false);
     }
   }, [q]);
+
+  /* Statistik dipanggil terpisah dari daftar karena menjawab pertanyaan yang
+     berbeda: daftar menunjukkan 50 klien yang sedang dilihat (dan menyusut saat
+     agent mengetik di pencarian), statistik menghitung SELURUH baris milik
+     agent. Menurunkan "total lead" dari daftar akan membuat angkanya berubah
+     tiap ketukan tombol — dan diam-diam salah begitu kliennya lebih dari 50. */
+  const muatStatistik = useCallback(async () => {
+    try {
+      const res  = await fetch("/api/dashboard/klien/statistik");
+      const json = await res.json();
+      if (json?.ok) setStat(json.data);
+    } catch {
+      /* Statistik gagal tidak boleh menjatuhkan halaman: papan pipeline di
+         bawahnya tetap berguna tanpa kartu ringkasan. */
+    } finally {
+      setStatLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { muatStatistik(); }, [muatStatistik]);
 
   // Ref so the mount-time auto-sync can call the latest load() without creating dep cycles
   const loadRef = useRef(load);
   useEffect(() => { loadRef.current = load; }, [load]);
+  const statRef = useRef(muatStatistik);
+  useEffect(() => { statRef.current = muatStatistik; }, [muatStatistik]);
 
   useEffect(() => {
     const t = setTimeout(() => load(), q ? 350 : 0);
     return () => clearTimeout(t);
   }, [q, load]);
 
-  const syncProspek = useCallback(async (silent = false) => {
-    setSyncing(true);
+  /* SINKRON PROSPEK TIDAK PUNYA TOMBOL LAGI.
+     Tombol "Sinkronkan" menyerahkan pekerjaan mesin kepada orang: agent harus
+     ingat menekannya, dan kalau lupa ia melihat pipeline yang tidak lengkap
+     tanpa pernah tahu. Sinkron sekarang berjalan sendiri — saat halaman
+     dibuka, tiap kali tab kembali aktif, dan tiap lima menit selama dibiarkan
+     terbuka. Peredam lima puluh detik menahan ledakan permintaan saat agent
+     berpindah-pindah tab (dan double-mount React Strict Mode di dev).
+
+     Diam kalau tidak ada yang berubah: pemberitahuan hanya muncul ketika ada
+     prospek yang benar-benar masuk — itu kabar, sisanya kebisingan. */
+  const syncProspek = useCallback(async () => {
+    /* Peredam lima menit, bukan lima puluh detik. Sinkron yang berjalan tiap
+       kali tab kembali aktif membuat daftar berkedip pada tindakan paling
+       sepele — pindah ke WhatsApp lalu kembali. Prospek baru yang telat
+       lima menit tidak merugikan siapa pun; daftar yang berkedip merugikan
+       tiap kali. */
+    if (Date.now() - syncTerakhirRef.current < 5 * 60_000) return;
+    syncTerakhirRef.current = Date.now();
     try {
       const res  = await fetch("/api/dashboard/klien/sync-prospek", { method: "POST" });
       const json = await res.json();
-      await load();
       const changed = (json.created || 0) + (json.updated || 0);
-      if (!silent || changed) {
-        setSyncMsg(
-          changed
-            ? `${json.created || 0} prospek baru diimpor · ${json.updated || 0} diperbarui`
-            : "Semua prospek sudah tersinkron"
-        );
+      if (changed > 0) {
+        loadRef.current(true);
+        statRef.current();
+        setSyncMsg(`${json.created || 0} prospek baru diimpor · ${json.updated || 0} diperbarui`);
         setTimeout(() => setSyncMsg(null), 4000);
       }
     } catch {
-      if (!silent) { setSyncMsg("Gagal sinkronisasi prospek"); setTimeout(() => setSyncMsg(null), 4000); }
-    } finally {
-      setSyncing(false);
+      /* Sinkron yang gagal tidak boleh mengganggu: daftar klien yang sudah ada
+         tetap benar, dan percobaan berikutnya datang sendiri. */
     }
-  }, [load]);
-
-  // Auto-import prospek saat halaman dibuka (sekali) — berjalan paralel dengan load() awal.
-  // Hanya re-fetch jika ada data baru, mencegah triple-request (GET→POST→GET) menjadi
-  // dua request paralel (GET + POST), dengan GET ketiga hanya jika ada prospek baru.
-  useEffect(() => {
-    if (syncedOnce.current) return;
-    syncedOnce.current = true;
-    fetch("/api/dashboard/klien/sync-prospek", { method: "POST" })
-      .then(r => r.json())
-      .then(json => {
-        const changed = (json.created || 0) + (json.updated || 0);
-        if (changed > 0) {
-          loadRef.current();
-          setSyncMsg(`${json.created || 0} prospek baru diimpor · ${json.updated || 0} diperbarui`);
-          setTimeout(() => setSyncMsg(null), 4000);
-        }
-      })
-      .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── metrics (derived) ── */
-  const metrics = useMemo(() => {
-    const byStatus = (s: KlienStatus) => items.filter(k => k.status === s).length;
-    const followUps = items.filter(k => {
-      const fu = followUpLabel(k.tanggal_follow_up);
-      return fu?.urgent;
-    }).length;
-    const pipelineValue = items
-      .filter(k => k.status !== "lost_iseng" && k.status !== "closing")
-      .reduce((sum, k) => sum + klienValue(k), 0);
-    return {
-      hot: byStatus("hot_buyer"),
-      closing: byStatus("closing"),
-      followUps,
-      pipelineValue,
+  useEffect(() => {
+    syncProspek();
+    const saatKembali = () => { if (document.visibilityState === "visible") syncProspek(); };
+    window.addEventListener("focus", saatKembali);
+    document.addEventListener("visibilitychange", saatKembali);
+    const denyut = setInterval(syncProspek, 10 * 60_000);
+    return () => {
+      window.removeEventListener("focus", saatKembali);
+      document.removeEventListener("visibilitychange", saatKembali);
+      clearInterval(denyut);
     };
-  }, [items]);
+  }, [syncProspek]);
 
-  const gridItems = useMemo(() => {
-    if (statusFilter === "semua") return items;
-    return items.filter(k => k.status === statusFilter);
-  }, [items, statusFilter]);
+  /* ?klien=KL00007 membuka asisten aset seketika. Inilah yang membuat tugas
+     otomatis "3 aset baru cocok untuk Budi" bisa diselesaikan dengan SATU
+     ketukan dari halaman Tugas, bukan dengan menelusuri CRM lagi. */
+  useEffect(() => {
+    const qs = new URLSearchParams(window.location.search);
+    const id = qs.get("klien");
+    if (!id) return;
+    /* &aset=12,13 datang dari email asisten: aset yang SUDAH ditampilkan di
+       email itulah yang tercentang, bukan tiga teratas versi server. Agent
+       yang mengetuk "kirim 3 aset ini" harus mengirim tiga aset yang sama
+       dengan yang barusan dilihatnya. */
+    const aset = (qs.get("aset") || "").split(",").map(x => x.trim()).filter(Boolean);
+    setAsetUntuk({ id, nama: "", aset: aset.length ? aset : undefined });
+  }, []);
+
+  const barisKlien = useMemo(() => {
+    const tersaring = statusFilter === "semua" ? items : items.filter(k => k.status === statusFilter);
+    return urutkanKlien(tersaring, urut);
+  }, [items, statusFilter, urut]);
+
+  /* Berapa yang menunggu di daftar YANG SEDANG DILIHAT. Dihitung dari baris
+     tersaring, bukan dari statistik global, karena inilah janji yang bisa
+     ditepati agent tanpa mengganti filter dulu. */
+  const telatTampil = useMemo(
+    () => barisKlien.filter(k => k.status !== "lost_iseng" && k.tanggal_follow_up && selisihHari(k.tanggal_follow_up) < 0).length,
+    [barisKlien],
+  );
 
   function handleSaved(k: Klien) {
+    muatStatistik();
+
+    /* JALUR KETIGA yang bisa mengubah kriteria, dan yang paling mudah
+       terlewat: formulir "Edit Klien" MENULIS ULANG seluruh preferensi
+       (hapus semua → buat baru), bukan hanya data kontaknya. Tanpa cabang ini,
+       agent yang mengubah plafon budget lewat formulir itu akan menerima
+       daftar aset lama — sudah tidak sesuai kriterianya, tanpa satu pun tanda
+       bahwa ada yang salah.
+
+       Dibandingkan ISI kriterianya, bukan id-nya: penulisan ulang selalu
+       menghasilkan id baru, jadi membandingkan id akan memicu pencarian ulang
+       setiap kali agent sekadar memperbaiki nomor telepon.
+
+       Diperiksa DI LUAR updater `setItems`. React boleh memanggil updater dua
+       kali (StrictMode di pengembangan), dan efek samping di dalamnya akan
+       ikut berjalan dua kali — dua pencarian penuh untuk satu penyimpanan. */
+    const lama = items.find(x => x.id_klien === k.id_klien) ?? null;
+    const berubah = !lama || !kriteriaSama(lama.preferensi, k.preferensi);
+    if (berubah) {
+      if (k.preferensi.length > 0) kriteriaBerubah(k.id_klien, k.nama);
+      else buangSimpanan(k.id_klien);
+    }
+
     setItems(prev => {
       const idx = prev.findIndex(x => x.id_klien === k.id_klien);
       if (idx >= 0) { const n = [...prev]; n[idx] = k; return n; }
@@ -291,13 +562,22 @@ export default function CrmPageClient() {
     });
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm("Hapus klien ini?")) return;
+  /* `sudahDikonfirmasi` dipakai jalur geser-hapus: laci merahnya sendiri
+     sudah meminta ketukan kedua ("Yakin?"), jadi menambahkan dialog bawaan
+     browser di atasnya cuma memaksa orang menyetujui hal yang sama dua kali —
+     dan dialog itulah satu-satunya bagian layar ini yang tidak bisa didandani. */
+  async function handleDelete(id: string, sudahDikonfirmasi = false) {
+    if (!sudahDikonfirmasi && !confirm("Hapus klien ini?")) return;
     setDeleting(id);
     try {
       await fetch(`/api/dashboard/klien/${id}`, { method: "DELETE" });
+      /* Simpanan klien yang sudah tidak ada tidak akan pernah dibaca lagi —
+         tapi id klien dipakai ulang tidaklah mustahil, dan simpanan yatim yang
+         kebetulan cocok akan menampilkan aset milik orang lain. */
+      buangSimpanan(id);
       setItems(prev => prev.filter(x => x.id_klien !== id));
       setTotal(t => t - 1);
+      muatStatistik();
       if (detailOpen?.id_klien === id) setDetailOpen(null);
     } finally {
       setDeleting(null);
@@ -307,93 +587,88 @@ export default function CrmPageClient() {
   async function moveStatus(id: string, status: KlienStatus) {
     setItems(prev => prev.map(k => k.id_klien === id ? { ...k, status } : k));
     setDetailOpen(d => d && d.id_klien === id ? { ...d, status } : d);
+    /* Pindah tahap menggeser uangnya antar kotak (pipeline ↔ closing ↔ hangus),
+       jadi kartu Potensi Komisi harus ikut dihitung ulang — TAPI baru setelah
+       tulisannya benar-benar mendarat. Memanggilnya lebih dulu berarti server
+       masih membaca status lama, dan kartunya menampilkan angka usang sampai
+       ada yang memuat ulang halaman. */
     try {
       await fetch(`/api/dashboard/klien/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
+      muatStatistik();
     } catch {
-      load(); // resync on failure
+      load(true);      // kembalikan baris ke keadaan server, tanpa berkedip
+      muatStatistik(); // …dan angkanya ikut, supaya keduanya tidak berselisih
     }
   }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#040608] text-white">
-      {/* ── Ambient backdrop — living aurora ── */}
+      {/* ── Latar ──
+          Dulu tiga aurora — emerald, indigo, cyan — beradu di belakang konten.
+          Warna latar yang bersaing dengan warna data membuat batang grafik
+          harus lebih menyala untuk menang, dan seluruh halaman jadi ribut.
+          Sekarang satu wash hijau sangat tipis; sisanya gelap netral. */}
       <div className="pointer-events-none fixed inset-0 z-0">
-        <div className="crm-aurora-1 absolute -top-44 left-[18%] h-[40rem] w-[40rem] -translate-x-1/2 rounded-full bg-emerald-500/20 blur-[80px]" />
-        <div className="crm-aurora-2 absolute -top-32 right-[6%] h-[34rem] w-[34rem] rounded-full bg-indigo-500/[0.18] blur-[80px]" />
-        <div className="crm-aurora-3 absolute top-10 left-1/2 h-[30rem] w-[44rem] -translate-x-1/2 rounded-full bg-cyan-500/[0.12] blur-[80px]" />
-        <div className="absolute inset-0 opacity-[0.03] [background-image:linear-gradient(rgba(255,255,255,0.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.6)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000_30%,transparent_75%)]" />
+        <div className="absolute -top-40 left-1/2 h-[34rem] w-[52rem] -translate-x-1/2 rounded-full bg-emerald-500/[0.07] blur-[90px]" />
+        <div className="absolute inset-0 opacity-[0.02] [background-image:linear-gradient(rgba(255,255,255,0.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.6)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000_30%,transparent_75%)]" />
       </div>
 
       <div className="relative z-10">
-        {/* ── HEADER ── */}
-        <div className="sticky top-0 z-30 overflow-hidden border-b border-white/[0.08] bg-gradient-to-br from-[#0a1410]/85 via-[#070b16]/85 to-[#0c0a1a]/85 px-4 pb-4 pt-5 shadow-[0_18px_60px_-30px_rgba(16,185,129,0.45)] backdrop-blur-2xl sm:px-6">
-          {/* animated top accent line */}
-          <div className="crm-line pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/80 to-transparent" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-cyan-400/0 via-cyan-300/40 to-fuchsia-400/0 blur-[2px]" />
+        {/* ── HEADER ──
+            Dulu SELURUH kepala halaman menempel di puncak layar. Setelah
+            grafik masuk, blok itu jadi setinggi ~380 px — di ponsel 667 px
+            artinya papan klien yang jadi isi halaman tinggal separuh layar dan
+            tidak pernah bisa lebih. Jadi dipecah menurut apa yang dipakai
+            berulang: RINGKASAN dibaca sekali lalu boleh menggulir pergi;
+            PENCARIAN & FILTER adalah kendali yang harus selalu terjangkau,
+            dan cuma itu yang tetap menempel. */}
+        <div className="px-4 pt-5 sm:px-6">
 
-          <div className="relative mb-4 flex items-start justify-between gap-3">
+          {/* Judul dan aksi SEBARIS di semua lebar. Menumpuknya di ponsel
+              memakan satu baris penuh untuk satu tombol, dan tiap piksel di
+              kepala halaman dibayar dengan piksel papan klien di bawahnya. */}
+          <div className="relative mb-3.5 flex items-start justify-between gap-3 sm:mb-4">
             <div className="min-w-0">
-              <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 py-1 pl-1.5 pr-2.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-200/90 backdrop-blur-sm">
-                <span className="grid h-4 w-4 place-items-center rounded-full bg-gradient-to-br from-emerald-400 to-cyan-400 text-[#04130d] shadow-[0_0_12px_rgba(16,185,129,0.6)]">
-                  <Icon icon="solar:users-group-two-rounded-bold" className="text-[9px]" />
+              {/* Lencana konteks. Titik hijau yang berdenyut dipertahankan —
+                  itu satu-satunya bagian yang benar-benar menyandi sesuatu
+                  (data hidup, kini juga tersinkron sendiri). */}
+              <div className="mb-1.5 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 </span>
                 Workspace · CRM
-                <span className="ml-0.5 inline-flex items-center gap-1 text-[9px] text-cyan-300/70">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  </span>
-                  Live
-                </span>
               </div>
-              <h1 className="bg-gradient-to-br from-white via-emerald-100 to-cyan-300 bg-clip-text text-2xl font-extrabold tracking-tight text-transparent drop-shadow-[0_2px_12px_rgba(16,185,129,0.25)] sm:text-[30px]">
+              <h1 className="text-[22px] font-semibold tracking-tight text-white sm:text-2xl lg:text-[30px]">
                 Pipeline Klien
               </h1>
-              <p className="mt-0.5 text-[12px] text-slate-300/80">
-                <span className="font-semibold text-emerald-300/90">{total} klien</span> · kelola perjalanan dari lead hingga closing
+              <p className="mt-0.5 truncate text-[12px] text-slate-500">
+                {(stat?.total ?? total).toLocaleString("id-ID")} klien · <span className="hidden sm:inline">kelola perjalanan dari lead hingga closing</span><span className="sm:hidden">lead hingga closing</span>
               </p>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                onClick={() => syncProspek(false)}
-                disabled={syncing}
-                title="Tarik prospek dari Titip Jual, WA, Penawaran & Site Visit"
-                className="flex items-center gap-2 rounded-2xl border border-white/[0.12] bg-white/[0.05] px-3.5 py-2.5 text-sm font-semibold text-slate-100 transition-all hover:border-cyan-400/40 hover:bg-cyan-400/[0.08] hover:text-cyan-100 active:scale-[0.97] disabled:opacity-60"
-              >
-                <Icon icon="solar:refresh-bold" className={`text-base ${syncing ? "animate-spin text-cyan-300" : "text-slate-300"}`} />
-                <span className="hidden md:inline">{syncing ? "Menyinkron…" : "Sinkronkan"}</span>
-              </button>
-
-              <button
-                onClick={() => { setEditTarget(undefined); setShowForm(true); }}
-                className="group relative flex items-center gap-2 overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-cyan-400 px-4 py-2.5 text-sm font-bold text-[#04130d] shadow-[0_10px_34px_-8px_rgba(16,185,129,0.8)] transition-all hover:shadow-[0_14px_46px_-6px_rgba(34,211,238,0.9)] active:scale-[0.97]"
-              >
-                <span className="crm-sheen pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-white/30 blur-md" />
-                <Icon icon="solar:user-plus-bold" className="relative text-base transition-transform group-hover:rotate-12" />
-                <span className="relative hidden sm:inline">Tambah Klien</span>
-                <span className="relative sm:hidden">Tambah</span>
-              </button>
-            </div>
+            <button
+              onClick={() => { setEditTarget(undefined); setShowForm(true); }}
+              className="mt-1 flex shrink-0 items-center gap-2 rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-500 px-3.5 py-2.5 text-sm font-semibold text-[#04130d] shadow-[0_10px_28px_-12px_rgba(16,185,129,0.9)] transition-all hover:from-emerald-300 hover:to-emerald-400 active:scale-[0.98] sm:px-4"
+            >
+              <Icon icon="solar:user-plus-bold" className="text-base" />
+              <span className="hidden sm:inline">Tambah Klien</span>
+              <span className="sm:hidden">Tambah</span>
+            </button>
           </div>
 
-          {/* Metrics */}
-          <div className="relative mb-4 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-            <MetricStat icon="solar:users-group-rounded-bold-duotone" label="Total Klien"
-              value={total} subtitle="dalam pipeline" scheme="emerald" />
-            <MetricStat icon="solar:fire-bold-duotone" label="Hot Buyer"
-              value={metrics.hot} subtitle="siap dikonversi" scheme="amber" />
-            <MetricStat icon="solar:cup-star-bold-duotone" label="Closing"
-              value={metrics.closing} subtitle="deal tercapai" scheme="violet" />
-            <MetricStat icon="solar:bell-bing-bold-duotone" label="Follow-up"
-              value={metrics.followUps} subtitle="perlu tindakan" scheme={metrics.followUps ? "rose" : "sky"} />
+          {/* Ringkasan */}
+          <div className="relative pb-4">
+            <RingkasanCrm stat={stat} memuat={statLoading} />
           </div>
+        </div>
 
-          {/* Toolbar: search | dropdown */}
+        {/* ── TOOLBAR (menempel) ── */}
+        <div className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#060810]/90 px-4 py-3 backdrop-blur-2xl sm:px-6">
           <div className="relative flex items-center gap-2.5">
             {/* Search */}
             <div className="relative min-w-0 flex-1">
@@ -405,15 +680,24 @@ export default function CrmPageClient() {
                 placeholder="Cari nama, WA, atau email…"
                 className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 pl-10 pr-9 text-sm text-white placeholder-slate-600 outline-none transition-colors focus:border-emerald-400/50 focus:bg-white/[0.05]"
               />
-              {q && (
+              {menyegarkan ? (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <Icon icon="svg-spinners:ring-resize" className="text-[15px] text-emerald-400/80" />
+                </span>
+              ) : q ? (
                 <button onClick={() => setQ("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
                   <Icon icon="solar:close-circle-bold" className="text-base" />
                 </button>
-              )}
+              ) : null}
             </div>
 
             {/* Status dropdown */}
             <StatusDropdown value={statusFilter} onChange={setStatusFilter} />
+
+            {/* Pengurutan. Bawaannya "Prioritas", bukan "Terbaru": daftar CRM
+                dibuka untuk memutuskan siapa yang dihubungi sekarang, dan
+                urutan waktu masuk tidak pernah menjawab itu. */}
+            <UrutDropdown value={urut} onChange={setUrut} />
           </div>
         </div>
 
@@ -428,7 +712,7 @@ export default function CrmPageClient() {
             </div>
           ) : items.length === 0 ? (
             <EmptyState onAdd={() => { setEditTarget(undefined); setShowForm(true); }} />
-          ) : gridItems.length === 0 ? (
+          ) : barisKlien.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <Icon icon="solar:magnifer-zoom-out-bold-duotone" className="text-4xl text-slate-700" />
               <p className="mt-3 text-sm font-semibold text-slate-300">Tidak ada klien pada status ini</p>
@@ -437,18 +721,65 @@ export default function CrmPageClient() {
               </button>
             </div>
           ) : (
-            <div className="grid auto-rows-fr grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 xl:grid-cols-4">
-              {gridItems.map(klien => (
-                <KlienCard
-                  key={klien.id_klien}
-                  klien={klien}
-                  deleting={deleting === klien.id_klien}
-                  onEdit={() => { setEditTarget(klien); setShowForm(true); }}
-                  onDelete={() => handleDelete(klien.id_klien)}
-                  onOpen={() => setDetailOpen(klien)}
-                />
-              ))}
-            </div>
+            <>
+              {/* Baris konteks di atas daftar: berapa yang tampil, dan — kalau
+                  ada — berapa janji yang sudah lewat di antaranya. */}
+              <PanelSiapKirim onPilih={(id, nama) => setAsetUntuk({ id, nama })} />
+
+              <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11.5px]">
+                <span className="text-slate-500">
+                  <b className="font-bold text-slate-300">{barisKlien.length}</b> klien
+                  {statusFilter !== "semua" && <> · {STATUS_THEME[statusFilter].label}</>}
+                </span>
+                {telatTampil > 0 && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/25 bg-amber-500/[0.1] px-2 py-0.5 font-semibold text-amber-200">
+                    <Icon icon="solar:danger-triangle-bold-duotone" className="text-[13px]" />
+                    {telatTampil} follow-up telat
+                  </span>
+                )}
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-gradient-to-b from-white/[0.035] to-white/[0.015] backdrop-blur-xl">
+                {/* Kepala kolom hanya di layar lebar. Di ponsel setiap baris
+                    membawa labelnya sendiri lewat bentuk, bukan lewat header
+                    yang menggulir pergi. */}
+                <div className={`hidden border-b border-white/[0.07] bg-white/[0.02] px-4 py-2.5 text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-slate-500 lg:grid ${KOLOM_DAFTAR} lg:items-center lg:gap-4`}>
+                  <span>Klien</span>
+                  <span>Yang dicari</span>
+                  <span>Budget &amp; komisi</span>
+                  <span>Follow-up</span>
+                  <span>Tahap</span>
+                  <span className="text-right">Aksi</span>
+                </div>
+
+                <motion.div layout className="divide-y divide-white/[0.05]">
+                  <AnimatePresence initial={false} mode="popLayout">
+                    {barisKlien.map((klien, i) => (
+                      <KlienRow
+                        key={klien.id_klien}
+                        klien={klien}
+                        indeks={i}
+                        deleting={deleting === klien.id_klien}
+                        terbuka={geserTerbuka === klien.id_klien}
+                        onGeser={(buka) => { setGeserTerbuka(buka ? klien.id_klien : null); if (buka) tandaiPernahGeser(); }}
+                        beriPetunjuk={!pernahGeser && i === 0}
+                        onEdit={() => { setEditTarget(klien); setShowForm(true); }}
+                        onDelete={() => handleDelete(klien.id_klien, true)}
+                        onOpen={() => setDetailOpen(klien)}
+                        onMove={(st) => moveStatus(klien.id_klien, st)}
+                        onAset={() => setAsetUntuk({ id: klien.id_klien, nama: klien.nama })}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </motion.div>
+              </div>
+
+              {total > barisKlien.length && statusFilter === "semua" && !q && (
+                <p className="mt-3 text-center text-[11.5px] text-slate-600">
+                  Menampilkan {barisKlien.length} klien terbaru dari {total.toLocaleString("id-ID")} · pakai pencarian untuk menemukan sisanya
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -463,11 +794,15 @@ export default function CrmPageClient() {
           onMove={(s) => moveStatus(detailOpen.id_klien, s)}
           onKlienUpdated={(updated) => { handleSaved(updated); setDetailOpen(updated); }}
           onPrefDeleted={(prefId) => {
+            /* Kriteria berubah → hasil yang tersimpan sudah bukan jawaban atas
+               pertanyaan yang sama lagi. Dibuang, lalu dicari ulang. */
+            kriteriaBerubah(detailOpen.id_klien, detailOpen.nama);
             const strip = (k: Klien) => ({ ...k, preferensi: k.preferensi.filter(p => p.id_preferensi !== prefId) });
             setDetailOpen(d => d ? strip(d) : null);
             setItems(prev => prev.map(k => k.id_klien === detailOpen.id_klien ? strip(k) : k));
           }}
           onPrefGroupUpdated={(oldIds, newPrefs) => {
+            kriteriaBerubah(detailOpen.id_klien, detailOpen.nama);
             const replace = (k: Klien) => ({
               ...k,
               preferensi: [
@@ -481,6 +816,59 @@ export default function CrmPageClient() {
         />
       )}
 
+      {/* ── Kabar hasil pencarian ulang sesudah kriteria diubah ──
+          Ditaruh di atas toast sinkron karena inilah yang sedang ditunggu
+          agent: ia baru saja mengubah kriteria dan ingin tahu apakah
+          perubahannya berhasil. Bisa diketuk — kalimat "24 aset cocok" yang
+          tidak bisa ditindaklanjuti cuma memindahkan pekerjaan membuka layar,
+          tidak menghapusnya. */}
+      <AnimatePresence>
+        {/* Disembunyikan saat layar Asisten Aset terbuka: toast ini berdiri di
+            z-85, di ATAS modal itu (z-80), dan panel melayang yang menutupi
+            layar yang sedang dipakai adalah gangguan, bukan kabar. Kalau agent
+            sudah membuka asetnya, kabarnya pun sudah tidak diperlukan. */}
+        {kabarKriteria && !asetUntuk && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed inset-x-0 bottom-6 z-[85] flex justify-center px-4"
+          >
+            <button
+              onClick={() => {
+                setAsetUntuk({ id: kabarKriteria.id, nama: kabarKriteria.nama });
+                setKabarKriteria(null);
+              }}
+              disabled={kabarKriteria.jumlah === 0}
+              className={`flex items-center gap-3 rounded-2xl border px-4 py-2.5 text-left shadow-[0_20px_50px_-15px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-colors ${
+                kabarKriteria.jumlah > 0
+                  ? "border-emerald-400/30 bg-[#0a0c12]/95 hover:border-emerald-400/60"
+                  : "border-white/[0.1] bg-[#0a0c12]/95"
+              }`}
+            >
+              <Icon
+                icon={kabarKriteria.jumlah > 0 ? "solar:magic-stick-3-bold-duotone" : "solar:info-circle-bold-duotone"}
+                className={`shrink-0 text-lg ${kabarKriteria.jumlah > 0 ? "text-emerald-400" : "text-slate-400"}`}
+              />
+              <span className="min-w-0">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Kriteria {kabarKriteria.nama} diperbarui
+                </span>
+                <span className={`block text-[13px] font-extrabold ${kabarKriteria.jumlah > 0 ? "text-emerald-100" : "text-slate-300"}`}>
+                  {kabarKriteria.jumlah > 0
+                    ? `${kabarKriteria.jumlah.toLocaleString("id-ID")} aset cocok — lihat sekarang`
+                    : "Belum ada aset yang cocok"}
+                </span>
+              </span>
+              {kabarKriteria.jumlah > 0 && (
+                <Icon icon="solar:alt-arrow-right-linear" className="shrink-0 text-base text-emerald-300" />
+              )}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sync toast */}
       {syncMsg && (
         <div className="fixed inset-x-0 bottom-6 z-[80] flex justify-center px-4">
@@ -491,6 +879,29 @@ export default function CrmPageClient() {
         </div>
       )}
 
+      {/* Asisten aset — dibuka dari panel, dari baris daftar, atau dari tautan
+          dalam. Prop `pref` sengaja null: daftarnya gabungan seluruh preferensi
+          klien, jadi tidak ada langkah "pilih preferensi" yang harus dilewati. */}
+      {asetUntuk && (
+        <MatchListingModal
+          klienId={asetUntuk.id}
+          klienNama={asetUntuk.nama}
+          punyaWa
+          klienEmail={null}
+          prefIds={null}
+          praPilih={asetUntuk.aset}
+          onClose={() => {
+            setAsetUntuk(null);
+            /* Bersihkan tautan dalam supaya menyegarkan halaman tidak membuka
+               layar yang sama lagi. */
+            if (new URLSearchParams(window.location.search).get("klien")) {
+              window.history.replaceState({}, "", window.location.pathname);
+            }
+            load(true); muatStatistik();
+          }}
+        />
+      )}
+
       {/* Form modal */}
       <KlienFormModal
         open={showForm}
@@ -498,73 +909,6 @@ export default function CrmPageClient() {
         onSaved={handleSaved}
         editTarget={editTarget}
       />
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════════════════════
-   METRIC STAT
-   ════════════════════════════════════════════════════════════ */
-const METRIC_SCHEME = {
-  emerald: {
-    fill: "from-emerald-500/[0.16] via-emerald-500/[0.04] to-transparent",
-    border: "border-emerald-400/20 group-hover:border-emerald-400/45",
-    glow: "bg-emerald-500/30", iconGrad: "from-emerald-400 to-teal-300", iconShadow: "shadow-[0_6px_20px_-4px_rgba(16,185,129,0.7)]",
-    num: "from-white to-emerald-200", bar: "from-emerald-400 to-teal-300", accent: "via-emerald-400",
-  },
-  amber: {
-    fill: "from-amber-500/[0.16] via-orange-500/[0.05] to-transparent",
-    border: "border-amber-400/25 group-hover:border-amber-400/50",
-    glow: "bg-amber-500/30", iconGrad: "from-amber-400 to-orange-400", iconShadow: "shadow-[0_6px_20px_-4px_rgba(245,158,11,0.7)]",
-    num: "from-white to-amber-200", bar: "from-amber-400 to-orange-400", accent: "via-amber-400",
-  },
-  violet: {
-    fill: "from-violet-500/[0.16] via-fuchsia-500/[0.05] to-transparent",
-    border: "border-violet-400/25 group-hover:border-violet-400/50",
-    glow: "bg-violet-500/30", iconGrad: "from-violet-400 to-fuchsia-400", iconShadow: "shadow-[0_6px_20px_-4px_rgba(139,92,246,0.7)]",
-    num: "from-white to-violet-200", bar: "from-violet-400 to-fuchsia-400", accent: "via-violet-400",
-  },
-  sky: {
-    fill: "from-sky-500/[0.16] via-cyan-500/[0.05] to-transparent",
-    border: "border-sky-400/25 group-hover:border-sky-400/50",
-    glow: "bg-sky-500/30", iconGrad: "from-sky-400 to-cyan-300", iconShadow: "shadow-[0_6px_20px_-4px_rgba(56,189,248,0.7)]",
-    num: "from-white to-sky-200", bar: "from-sky-400 to-cyan-300", accent: "via-sky-400",
-  },
-  rose: {
-    fill: "from-rose-500/[0.18] via-pink-500/[0.05] to-transparent",
-    border: "border-rose-400/30 group-hover:border-rose-400/55",
-    glow: "bg-rose-500/35", iconGrad: "from-rose-400 to-pink-400", iconShadow: "shadow-[0_6px_20px_-4px_rgba(244,63,94,0.75)]",
-    num: "from-white to-rose-200", bar: "from-rose-400 to-pink-400", accent: "via-rose-400",
-  },
-} as const;
-
-function MetricStat({ icon, label, value, subtitle, scheme }: {
-  icon: string; label: string; value: number | string; subtitle: string;
-  scheme: keyof typeof METRIC_SCHEME;
-}) {
-  const s = METRIC_SCHEME[scheme];
-  return (
-    <div className={`group relative overflow-hidden rounded-2xl border ${s.border} bg-[#0a0c12]/60 p-3.5 backdrop-blur-xl transition-all duration-500 hover:-translate-y-1 hover:bg-[#0c0f17]/70`}>
-      {/* colored gradient wash */}
-      <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${s.fill}`} />
-      {/* corner glow */}
-      <div className={`pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full ${s.glow} opacity-60 blur-2xl transition-all duration-500 group-hover:opacity-100 group-hover:blur-xl`} />
-      {/* top accent line */}
-      <div className={`pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent ${s.accent} to-transparent opacity-60 transition-opacity group-hover:opacity-100`} />
-      <div className="relative flex items-center gap-3">
-        <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ${s.iconGrad} ${s.iconShadow} transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-6`}>
-          <Icon icon={icon} className="text-xl text-[#06120c]" />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-300/70">{label}</p>
-          <p className={`bg-gradient-to-br ${s.num} bg-clip-text text-[26px] font-extrabold leading-tight tracking-tight text-transparent tabular-nums`}>{value}</p>
-        </div>
-      </div>
-      {/* micro progress sheen */}
-      <div className="relative mt-2 h-[3px] overflow-hidden rounded-full bg-white/[0.06]">
-        <div className={`h-full w-2/3 rounded-full bg-gradient-to-r ${s.bar} opacity-70 transition-all duration-500 group-hover:w-full group-hover:opacity-100`} />
-      </div>
-      <p className="relative mt-1.5 truncate text-[11px] text-slate-400/80">{subtitle}</p>
     </div>
   );
 }
@@ -594,7 +938,7 @@ function StatusDropdown({ value, onChange }: {
   const isFiltered = value !== "semua";
 
   return (
-    <div ref={ref} className="relative w-[150px] shrink-0 sm:w-[185px]">
+    <div ref={ref} className="relative w-[132px] shrink-0 sm:w-[172px]">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -654,180 +998,936 @@ function StatusDropdown({ value, onChange }: {
 /* ════════════════════════════════════════════════════════════
    GRID CARD
    ════════════════════════════════════════════════════════════ */
-function KlienCard({ klien, deleting, onEdit, onDelete, onOpen }: {
-  klien: Klien; deleting: boolean; onEdit: () => void; onDelete: () => void; onOpen: () => void;
-}) {
-  const theme = STATUS_THEME[klien.status];
-  const prov = provenanceOf(klien);
+/* ════════════════════════════════════════════════════════════
+   PANEL "SIAP KIRIM"
+   ------------------------------------------------------------
+   Perubahan paling penting di seluruh fitur ini, dan yang paling sedikit
+   kodenya. Sebelumnya rekomendasi adalah sesuatu yang harus DICARI agent:
+   buka CRM → cari klien → buka kartunya → pilih preferensi → tekan cari.
+   Empat dari lima ketukan itu adalah pekerjaan mencari, bukan pekerjaan
+   menjual — dan pekerjaan yang butuh lima ketukan untuk dimulai tidak pernah
+   jadi kebiasaan harian.
 
-  // Grup preferensi berdasarkan (budget + jenis transaksi) → tiap grup = satu "niat" berbeda
-  const prefGroups = (() => {
-    type Group = { types: string[]; kota: string[]; budgetLabel: string | null };
-    const map = new Map<string, Group>();
-    for (const p of klien.preferensi) {
-      const sig = `${p.budget_min ?? ""}|${p.budget_max ?? ""}|${p.jenis_transaksi ?? ""}`;
-      let g = map.get(sig);
-      if (!g) {
-        const lo = p.budget_min ? Number(p.budget_min) : 0;
-        const hi = p.budget_max ? Number(p.budget_max) : 0;
-        let bl: string | null = null;
-        if (lo && hi) bl = `${formatRp(lo)} – ${formatRp(hi)}`;
-        else if (hi)  bl = `≤ ${formatRp(hi)}`;
-        else if (lo)  bl = `≥ ${formatRp(lo)}`;
-        g = { types: [], kota: [], budgetLabel: bl };
-        map.set(sig, g);
-      }
-      const tl = p.tipe_properti.charAt(0) + p.tipe_properti.slice(1).toLowerCase().replace(/_dan_/g, " & ");
-      if (!g.types.includes(tl)) g.types.push(tl);
-      if (p.loc_kota && !g.kota.includes(p.loc_kota)) g.kota.push(p.loc_kota);
-    }
-    return Array.from(map.values());
-  })();
+   Panel ini membalik arahnya: begitu halaman terbuka, agent sudah melihat
+   siapa yang bisa dikirimi aset hari ini. Satu ketukan membuka asisten dengan
+   tiga aset terbaik SUDAH tercentang; ketukan kedua membuka WhatsApp.
+
+   Ia sengaja diam kalau tidak ada apa-apa — panel kosong yang selalu nongol
+   akan mengajari mata untuk melewatinya.
+   ════════════════════════════════════════════════════════════ */
+
+type SiapKirim = { id_klien: string; nama: string; status: string; jumlah: number; punyaWa: boolean; telat: boolean };
+
+function PanelSiapKirim({ onPilih }: { onPilih: (id: string, nama: string) => void }) {
+  const [items, setItems] = useState<SiapKirim[]>([]);
+  const [memuat, setMemuat] = useState(true);
+
+  useEffect(() => {
+    let hidup = true;
+    fetch("/api/dashboard/klien/rekomendasi-ringkasan")
+      .then(r => r.json())
+      .then(j => { if (hidup && j.ok) setItems(j.items || []); })
+      .catch(() => {})
+      .finally(() => { if (hidup) setMemuat(false); });
+    return () => { hidup = false; };
+  }, []);
+
+  /* Sunyi saat memuat DAN saat kosong. Pencarian ini berjalan sungguhan di
+     server, jadi ia tiba beberapa ratus milidetik setelah daftar klien —
+     kerangka abu-abu yang berkedip lalu hilang lebih mengganggu daripada
+     panel yang muncul begitu isinya siap. */
+  if (memuat || items.length === 0) return null;
+
+  const total = items.reduce((n, i) => n + i.jumlah, 0);
 
   return (
-    <div
-      onClick={onOpen}
-      className={`group relative h-full cursor-pointer rounded-[20px] bg-gradient-to-b from-white/[0.12] via-white/[0.05] to-white/[0.02] p-px transition-all duration-500 hover:-translate-y-1 ${theme.shadow} active:scale-[0.99]`}
+    <div className="mb-3 overflow-hidden rounded-2xl border border-emerald-400/20 bg-gradient-to-br from-emerald-500/[0.08] to-emerald-500/[0.02] p-3 backdrop-blur-xl">
+      <div className="mb-2.5 flex items-center gap-2">
+        <span className="grid h-6 w-6 place-items-center rounded-lg border border-emerald-400/25 bg-emerald-400/10">
+          <Icon icon="solar:magic-stick-3-bold-duotone" className="text-[13px] text-emerald-300" />
+        </span>
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-emerald-200/90">
+          Siap dikirim
+        </span>
+        <span className="text-[11.5px] text-slate-400">
+          {total} aset untuk {items.length} klien
+        </span>
+      </div>
+
+      {/* Menggulir mendatar di ponsel, membungkus di layar lebar. Daftar ini
+          pendek menurut rancangan (maksimal delapan), jadi tidak perlu
+          kendali gulir apa pun. */}
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible">
+        {items.map(k => {
+          const t = STATUS_THEME[k.status as KlienStatus] ?? STATUS_THEME.lead_baru;
+          return (
+            <button
+              key={k.id_klien}
+              onClick={() => onPilih(k.id_klien, k.nama)}
+              className="group flex shrink-0 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] py-1.5 pl-2 pr-2.5 transition-all hover:border-emerald-400/40 hover:bg-emerald-500/[0.12] active:scale-[0.98]"
+            >
+              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-gradient-to-br text-[10px] font-bold ring-1 ${t.grad}`}>
+                {initialsOf(k.nama)}
+              </span>
+              <span className="max-w-[120px] truncate text-[12px] font-bold text-white">{k.nama}</span>
+              <span className="rounded-md bg-emerald-400/15 px-1.5 py-0.5 text-[10.5px] font-extrabold text-emerald-300">
+                {k.jumlah}
+              </span>
+              {/* Titik amber = follow-up-nya sudah lewat. Aset baru adalah
+                  alasan terbaik untuk menghubungi orang yang terlanjur
+                  didiamkan, jadi mereka pantas ditandai. */}
+              {k.telat && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 shadow-[0_0_6px_currentColor]" />}
+              {!k.punyaWa && (
+                <span title="Belum ada nomor WhatsApp" className="shrink-0 leading-none">
+                  <Icon icon="solar:phone-calling-rounded-bold-duotone" className="text-[13px] text-slate-600" />
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   PEMILIH URUTAN
+   ════════════════════════════════════════════════════════════ */
+function UrutDropdown({ value, onChange }: {
+  value: UrutKlien; onChange: (v: UrutKlien) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const fn = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, [open]);
+
+  const dipilih = URUT_OPSI.find(o => o.value === value)!;
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      {/* Di ponsel hanya ikon: pencarian yang berhak atas lebar layar, dan
+          urutan adalah kendali yang dipakai sesekali, bukan tiap ketukan. */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={`Urutkan: ${dipilih.label}`}
+        className={`flex h-[42px] items-center gap-2 rounded-xl border px-3 text-sm transition-all duration-300 sm:px-3.5 ${
+          value !== "prioritas"
+            ? "border-emerald-400/40 bg-emerald-400/[0.06] text-white"
+            : "border-white/[0.08] bg-white/[0.03] text-slate-200 hover:border-white/[0.16]"
+        } ${open ? "ring-2 ring-emerald-400/40" : ""}`}
+      >
+        <Icon icon={dipilih.icon} className="shrink-0 text-base text-emerald-300/80" />
+        <span className="hidden truncate font-medium md:inline">{dipilih.label}</span>
+        <Icon icon="solar:alt-arrow-down-line-duotone"
+          className={`hidden shrink-0 text-base text-slate-400 transition-transform duration-300 md:inline ${open ? "rotate-180 text-emerald-300" : ""}`} />
+      </button>
+
+      <div
+        role="listbox"
+        className={`absolute right-0 z-50 mt-2 w-[240px] origin-top-right overflow-hidden rounded-xl border border-white/10 bg-[#0a0c12]/95 p-1.5 shadow-[0_24px_60px_-15px_rgba(0,0,0,0.85)] backdrop-blur-2xl transition-all duration-200 ease-out ${
+          open ? "pointer-events-auto translate-y-0 scale-100 opacity-100" : "pointer-events-none -translate-y-1 scale-[0.98] opacity-0"
+        }`}
+      >
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/60 to-transparent" />
+        <p className="px-2 pb-1.5 pt-1 text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-slate-500">Urutkan</p>
+        <div className="space-y-0.5">
+          {URUT_OPSI.map(opt => {
+            const sel = opt.value === value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={sel}
+                onClick={() => { onChange(opt.value); setOpen(false); }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                  sel ? "bg-emerald-400/10 text-white" : "text-slate-300 hover:bg-white/[0.05]"
+                }`}
+              >
+                <Icon icon={opt.icon} className={`shrink-0 text-base ${sel ? "text-emerald-300" : "text-slate-500"}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px] font-semibold">{opt.label}</span>
+                  <span className="block truncate text-[10.5px] text-slate-500">{opt.hint}</span>
+                </span>
+                {sel && <Icon icon="solar:check-circle-bold" className="shrink-0 text-[15px] text-emerald-400" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   BARIS KLIEN
+   ------------------------------------------------------------
+   Dulu setiap klien adalah kartu di grid empat kolom. Kartu memaksa tiap
+   klien memakai ruang yang sama besarnya — jadi hanya muat nama, satu baris
+   preferensi, dan sebuah tombol; sisanya harus dibuka satu per satu. Enam
+   klien saja sudah memenuhi layar, dan agent kehilangan kemampuan yang paling
+   dibutuhkan dari sebuah CRM: memindai.
+
+   Baris memuat lebih banyak dalam ruang lebih sedikit karena kolomnya SEJAJAR
+   ke bawah — budget bisa dibandingkan antar klien tanpa membaca satu pun
+   label. Yang ditambahkan di sini dan tidak pernah ada di kartu: nilai
+   komisi, jadwal follow-up berikut keterlambatannya, kontak terakhir, dan
+   pemindah tahap satu klik.
+   ════════════════════════════════════════════════════════════ */
+
+/* Satu sumber lebar kolom, dipakai bersama oleh kepala tabel dan tiap baris.
+   ENAM kolom, dan dua yang terakhir LEBARNYA TETAP — bukan `auto`.
+
+   Kepala tabel dan baris adalah dua grid yang TERPISAH; keduanya hanya
+   sejajar bila setiap track menghitung lebarnya tanpa melihat isi. Versi
+   sebelumnya memakai `minmax(150px,auto)` di kolom aksi: di header isinya cuma
+   kata "AKSI", di baris ada tiga tombol. Track auto itu melar berbeda di
+   masing-masing grid, dan sisa lebarnya — yang dibagi track `fr` — jadi
+   berbeda pula. Akibatnya seluruh kolom di tengah bergeser: judulnya tidak
+   pernah berdiri di atas nilainya. Lebar tetap menghapus seluruh persoalan. */
+const KOLOM_DAFTAR =
+  "lg:grid-cols-[minmax(0,2.2fr)_minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,1.05fr)_148px_196px]";
+
+/** Lebar laci hapus yang tersingkap saat baris digeser. */
+const LEBAR_HAPUS = 92;
+
+function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onEdit, onDelete, onOpen, onMove, onAset }: {
+  klien: Klien; indeks: number; deleting: boolean;
+  /** Sekali seumur pemakaian: baris paling atas menggeser dirinya sendiri
+   *  sedikit lalu kembali, memperlihatkan sesobek merah di baliknya. Gerakan
+   *  mengajarkan gestur; kalimat "geser untuk hapus" yang menempel permanen
+   *  akan berubah jadi hiasan yang tak seorang pun baca lagi. */
+  beriPetunjuk?: boolean;
+  /** Laci hapus baris ini sedang tersingkap. Dikendalikan induk supaya hanya
+   *  SATU baris yang pernah terbuka — dua laci merah menganga sekaligus
+   *  terbaca seperti aplikasi yang kehilangan kendali. */
+  terbuka: boolean;
+  onGeser: (buka: boolean) => void;
+  onEdit: () => void; onDelete: () => void; onOpen: () => void;
+  onMove: (s: KlienStatus) => void;
+  onAset: () => void;
+}) {
+  const theme = STATUS_THEME[klien.status];
+  const prov  = provenanceOf(klien);
+  const pref  = ringkasPreferensi(klien);
+  const budget = budgetKlien(klien);
+  const fu    = jadwalFollowUp(klien.tanggal_follow_up);
+
+  /* Penanda "baru saja digeser". Framer tetap melepas klik setelah pointer
+     diangkat, jadi tanpa ini setiap geseran akan sekalian membuka detail
+     klien — persis hal yang tidak diinginkan orang yang sedang menggeser. */
+  const baruGeser = useRef(false);
+
+  /* Dua ketukan di dalam laci, bukan satu ketukan + dialog browser. Jempol
+     yang meleset saat menggeser tidak boleh langsung menghapus seorang klien,
+     tapi konfirmasinya harus tetap berada di dalam layar yang sedang disentuh. */
+  const [yakin, setYakin] = useState(false);
+  useEffect(() => {
+    if (!yakin) return;
+    const t = setTimeout(() => setYakin(false), 3000);
+    return () => clearTimeout(t);
+  }, [yakin]);
+  useEffect(() => { if (!terbuka) setYakin(false); }, [terbuka]);
+
+  const [mengintip, setMengintip] = useState(!!beriPetunjuk);
+  useEffect(() => {
+    if (!mengintip) return;
+    const t = setTimeout(() => setMengintip(false), 1800);
+    return () => clearTimeout(t);
+  }, [mengintip]);
+
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
+  const bukaDetail = () => {
+    if (baruGeser.current) return;
+    if (terbuka) { onGeser(false); return; }  // geseran terbuka: ketukan pertama menutupnya
+    onOpen();
+  };
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.15 } }}
+      transition={{ duration: 0.32, delay: Math.min(indeks, 12) * 0.025, ease: [0.22, 1, 0.36, 1] }}
+      className={`relative overflow-hidden ${deleting ? "pointer-events-none opacity-40" : ""}`}
     >
-      {/* Glow halus status saat hover (di belakang kartu) */}
-      <div className={`pointer-events-none absolute -inset-2 -z-10 rounded-[26px] ${theme.glow} opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-40`} />
+      {/* ── Laci hapus, di belakang baris ──
+          Digambar lebih dulu dan diam di tempat; barisnyalah yang bergeser di
+          atasnya. Ikonnya membesar mengikuti terbukanya laci supaya geseran
+          setengah jalan terasa seperti sesuatu yang sedang terjadi, bukan
+          seperti lapisan yang tiba-tiba ada. */}
+      <div className={`absolute inset-y-0 right-0 flex items-stretch ${terbuka ? "" : "pointer-events-none"}`}>
+        <button
+          onClick={(e) => { e.stopPropagation(); if (yakin) onDelete(); else setYakin(true); }}
+          aria-label={yakin ? `Konfirmasi hapus ${klien.nama}` : `Hapus ${klien.nama}`}
+          tabIndex={terbuka ? 0 : -1}
+          style={{ width: LEBAR_HAPUS }}
+          className={`flex flex-col items-center justify-center gap-0.5 text-white transition-colors ${
+            yakin
+              ? "bg-gradient-to-l from-rose-500 to-rose-400"
+              : "bg-gradient-to-l from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400"
+          }`}
+        >
+          <motion.span
+            animate={{ scale: terbuka ? 1 : 0.6, opacity: terbuka || mengintip ? 1 : 0.35 }}
+            transition={{ type: "spring", stiffness: 420, damping: 28 }}
+            className="flex flex-col items-center gap-0.5"
+          >
+            <Icon
+              icon={deleting ? "svg-spinners:ring-resize" : yakin ? "solar:danger-triangle-bold" : "solar:trash-bin-trash-bold"}
+              className="text-[19px]"
+            />
+            <span className="text-[10px] font-extrabold uppercase tracking-wide">
+              {deleting ? "…" : yakin ? "Yakin?" : "Hapus"}
+            </span>
+          </motion.span>
+        </button>
+      </div>
 
-      {/* Surface kaca */}
-      <div className="relative flex h-full flex-col overflow-hidden rounded-[19px] bg-[#0a0c11]/90 p-3.5 backdrop-blur-xl sm:p-4">
-        {/* Wash warna status yang sangat halus */}
-        <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${theme.tint} via-transparent to-transparent opacity-70`} />
-        {/* Sheen atas + rail status kiri */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-        <span className={`pointer-events-none absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-gradient-to-b ${theme.bar} opacity-80 transition-opacity duration-500 group-hover:opacity-100`} />
-        {/* Corner glow */}
-        <div className={`pointer-events-none absolute -right-12 -top-12 h-28 w-28 rounded-full ${theme.glow} opacity-0 blur-3xl transition-opacity duration-500 group-hover:opacity-60`} />
+      {/* ── Baris ── */}
+      <motion.div
+        drag="x"
+        dragDirectionLock
+        dragConstraints={{ left: -LEBAR_HAPUS, right: 0 }}
+        /* Elastis hanya ke kiri. Menarik ke kanan tidak menyingkap apa pun,
+           jadi memberinya karet cuma membuat baris terasa longgar. */
+        dragElastic={{ left: 0.06, right: 0 }}
+        dragMomentum={false}
+        animate={mengintip ? { x: [0, -30, 0] } : { x: terbuka ? -LEBAR_HAPUS : 0 }}
+        transition={
+          mengintip
+            ? { delay: 0.75, duration: 1, times: [0, 0.4, 1], ease: [0.4, 0, 0.2, 1] }
+            : { type: "spring", stiffness: 520, damping: 44, mass: 0.6 }
+        }
+        onDragStart={() => { baruGeser.current = true; }}
+        onDragEnd={(_, info) => {
+          /* Dua jalan membukanya: ditarik melewati separuh laci, ATAU
+             disentak cepat. Yang kedua penting di ponsel — jempol yang cekatan
+             jarang menempuh jarak penuh, dan gerakan cepat yang tidak
+             menghasilkan apa-apa terasa seperti aplikasi yang tidak menangkap. */
+          const buka = info.offset.x < -LEBAR_HAPUS / 2 || info.velocity.x < -420;
+          onGeser(buka);
+          setTimeout(() => { baruGeser.current = false; }, 60);
+        }}
+        onClick={bukaDetail}
+        role="button"
+        tabIndex={0}
+        onKeyDown={e => { if (e.key === "Enter") onOpen(); }}
+        /* LATAR BARIS HARUS PADAT DI SEMUA KEADAAN — termasuk saat hover.
+           Sebelumnya hover memakai `bg-white/[0.035]`, yang bukan menumpuk di
+           atas warna dasar melainkan MENGGANTINYA: satu properti
+           `background-color`, deklarasi terakhir menang. Hasilnya barisnya jadi
+           putih 3,5% alias nyaris tembus pandang, dan laci hapus merah di
+           belakangnya muncul begitu kursor lewat — tanpa ada yang menggeser
+           apa pun. Warna hover-nya kini padat juga. */
+        className={`group relative cursor-pointer touch-pan-y select-none bg-[#0a0c0e] px-3 py-3 outline-none transition-colors duration-200 hover:bg-[#101318] focus-visible:bg-[#12151b] lg:grid ${KOLOM_DAFTAR} lg:items-center lg:gap-4 lg:px-4`}
+      >
+        {/* Rel status di tepi kiri: satu-satunya cara membaca tahap seluruh
+            daftar dalam satu sapuan mata. */}
+        <span className={`pointer-events-none absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-gradient-to-b ${theme.bar} opacity-60 transition-opacity duration-300 group-hover:opacity-100`} />
+        {fu?.telat && klien.status !== "lost_iseng" && (
+          <span className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-amber-500/[0.07] to-transparent" />
+        )}
 
-        {/* Header — avatar, nama, nomor; stage pill di kanan atas */}
-        <div className="relative flex items-start gap-2.5">
+        {/* ── 1. Klien ── */}
+        <div className="relative flex min-w-0 items-center gap-3">
           <div className="relative shrink-0">
-            <div className={`grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-gradient-to-br text-[14px] font-bold ring-1 transition-transform duration-500 group-hover:scale-105 ${theme.grad}`}>
+            <div className={`relative grid h-10 w-10 place-items-center overflow-hidden rounded-xl bg-gradient-to-br text-[13px] font-bold ring-1 transition-transform duration-300 group-hover:scale-105 ${theme.grad}`}>
               <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent" />
               <span className="relative">{initialsOf(klien.nama)}</span>
             </div>
-            {/* status indikator di pojok avatar */}
-            <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ${theme.dot} ring-2 ring-[#0a0c11] shadow-[0_0_8px_currentColor]`} />
+            <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ${theme.dot} ring-2 ring-[#0a0c0e]`} />
           </div>
-          <div className="min-w-0 flex-1 pt-0.5">
-            <p className="truncate text-[14px] font-bold leading-tight tracking-tight text-white">{klien.nama}</p>
-            {klien.nomor_whatsapp
-              ? <p className="mt-0.5 truncate text-[11px] font-medium text-slate-400">+{klien.nomor_whatsapp}</p>
-              : <p className="mt-0.5 text-[11px] italic text-slate-600">Belum ada nomor</p>}
+
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13.5px] font-bold leading-tight tracking-tight text-white">{klien.nama}</p>
+            <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+              {klien.nomor_whatsapp
+                ? <span className="truncate font-medium text-slate-400">+{klien.nomor_whatsapp}</span>
+                : <span className="italic text-slate-600">Tanpa nomor</span>}
+              <span className="text-slate-700">·</span>
+              <Icon icon={prov.icon} className="shrink-0 text-[12px]" />
+              <span className="truncate">{prov.label}</span>
+            </p>
           </div>
-          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${theme.badge}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${theme.dot} shadow-[0_0_6px_currentColor]`} />
+
+          {/* Tahap ikut di baris nama HANYA di layar kecil; di desktop ia punya
+              kolomnya sendiri, tempat ia bisa diklik untuk memindah tahap. */}
+          <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wide lg:hidden ${theme.badge}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />
             {theme.label}
           </span>
         </div>
 
-        {/* Objektif — blok utama yg mengisi sisa tinggi: hilangkan ruang kosong & beri konteks jelas */}
-        <div className="relative mt-3 flex flex-1 flex-col justify-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-3 py-2.5">
+        {/* ── 2. Yang dicari ──
+            Di layar kecil TIDAK lagi menjorok 52 px mengikuti avatar. Indentasi
+            itu membakar seperlima lebar ponsel demi kerapian yang cuma terlihat
+            saat layarnya lebar. */}
+        <div className="relative mt-2 min-w-0 lg:mt-0">
           {klien.propertiAsal ? (
-            /* ── Seller / Titip Jual: tampilkan listing asal ── */
-            <>
-              <p className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-slate-500">Listing asal</p>
-              <div className="flex items-start gap-2">
-                <Icon icon="solar:map-point-bold-duotone" className={`mt-px shrink-0 text-[16px] ${theme.text}`} />
-                <span className="line-clamp-2 text-[11.5px] font-semibold leading-snug text-slate-100">
-                  {klien.propertiAsal.alamat_lengkap || klien.propertiAsal.kota || klien.propertiAsal.judul}
-                </span>
-              </div>
-            </>
-          ) : prefGroups.length === 0 ? (
-            /* ── Kosong ── */
-            <div className="flex items-center gap-2 text-slate-600">
-              <Icon icon="solar:clipboard-list-bold-duotone" className="shrink-0 text-[16px]" />
-              <span className="text-[11px] italic">Belum ada preferensi</span>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Icon icon="solar:map-point-bold-duotone" className={`shrink-0 text-[15px] ${theme.text}`} />
+              <span className="truncate text-[11.5px] font-semibold text-slate-200">
+                {klien.propertiAsal.alamat_lengkap || klien.propertiAsal.kota || klien.propertiAsal.judul}
+              </span>
+              <span className="shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide text-slate-400">
+                Titip jual
+              </span>
             </div>
-          ) : prefGroups.length === 1 ? (
-            /* ── 1 grup: tampilan penuh dengan budget besar ── */
-            <>
-              <p className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-slate-500">Mencari</p>
-              <div className="flex items-center gap-2">
-                <Icon icon="solar:home-smile-angle-bold-duotone" className={`shrink-0 text-[16px] ${theme.text}`} />
-                <span className="truncate text-[12px] font-semibold text-slate-100">
-                  {prefGroups[0].types.join(" · ") || "Properti"}
-                </span>
-                {prefGroups[0].kota.length > 0 && (
-                  <span className="truncate text-[10px] text-slate-500">{prefGroups[0].kota[0]}</span>
-                )}
-              </div>
-              {prefGroups[0].budgetLabel && (
-                <div className="flex items-baseline gap-1.5 border-t border-white/[0.05] pt-1.5">
-                  <span className="text-[9.5px] font-medium uppercase tracking-wide text-slate-500">Budget</span>
-                  <span className={`text-[13px] font-extrabold tracking-tight ${theme.text}`}>{prefGroups[0].budgetLabel}</span>
-                </div>
-              )}
-            </>
+          ) : pref.tipe.length === 0 ? (
+            <span className="text-[11.5px] italic text-slate-600">Belum ada preferensi</span>
           ) : (
-            /* ── 2+ grup: satu baris ringkas per grup ── */
-            <>
-              <div className="flex items-center justify-between gap-1">
-                <p className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-slate-500">Mencari</p>
-                <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${theme.badge}`}>
-                  {prefGroups.length} preferensi
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {pref.tipe.slice(0, 2).map(t => (
+                <span key={t} className="rounded-md border border-white/[0.08] bg-white/[0.04] px-1.5 py-0.5 text-[10.5px] font-semibold text-slate-200">
+                  {t}
                 </span>
-              </div>
-              <div className="space-y-1.5">
-                {prefGroups.slice(0, 2).map((g, i) => (
-                  <div key={i} className="flex items-center gap-1.5 rounded-lg bg-white/[0.03] px-2 py-1">
-                    <Icon icon="solar:home-smile-angle-bold-duotone" className={`shrink-0 text-[12px] ${theme.text}`} />
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-200">
-                      {g.types.join(" · ") || "Properti"}
-                      {g.kota.length > 0 && (
-                        <span className="font-normal text-slate-500"> · {g.kota[0]}</span>
-                      )}
-                    </span>
-                    {g.budgetLabel && (
-                      <span className={`shrink-0 text-[10.5px] font-bold ${theme.text}`}>{g.budgetLabel}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
+              ))}
+              {pref.tipe.length > 2 && (
+                <span className="text-[10.5px] font-semibold text-slate-500">+{pref.tipe.length - 2}</span>
+              )}
+              {pref.kota.length > 0 && (
+                <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-slate-500">
+                  <Icon icon="solar:map-point-linear" className="shrink-0 text-[12px]" />
+                  <span className="truncate">
+                    {pref.kota[0]}{pref.kota.length > 1 && ` +${pref.kota.length - 1}`}
+                  </span>
+                </span>
+              )}
+              {pref.niat > 1 && (
+                <span className={`rounded-md px-1.5 py-0.5 text-[9.5px] font-bold ${theme.badge}`}>{pref.niat} niat</span>
+              )}
+            </div>
           )}
         </div>
 
-        {/* Sumber prospek — caption tenang */}
-        <div className="relative mt-2 flex items-center gap-1.5 text-[10.5px] text-slate-500">
-          <Icon icon={prov.icon} className="shrink-0 text-[12px]" />
-          <span className="truncate">{prov.label}</span>
+        {/* Pembungkus `lg:contents`: di ponsel ia baris flex yang menaruh uang
+            di kiri dan jadwal di kanan; di desktop ia menghilang sebagai kotak
+            dan kedua anaknya langsung jadi sel grid ke-3 dan ke-4. Satu markup,
+            dua tata letak, tanpa satu pun elemen digandakan. */}
+        <div className="relative mt-2 flex items-start justify-between gap-3 lg:contents">
+          {/* ── 3. Budget & komisi ── */}
+          <div className="min-w-0">
+            {budget > 0 ? (
+              <>
+                <div className={`truncate text-[13.5px] font-extrabold leading-tight tracking-tight ${theme.text}`} title={`Rp ${budget.toLocaleString("id-ID")}`}>
+                  {rupiahRingkas(budget)}
+                </div>
+                <div className="truncate text-[10.5px] text-slate-500" title={`Estimasi ${(RATE_KOMISI * 100).toString().replace(".", ",")}% dari Rp ${budget.toLocaleString("id-ID")}`}>
+                  ≈ {rupiahRingkas(budget * RATE_KOMISI)} komisi
+                </div>
+              </>
+            ) : (
+              <span className="text-[11.5px] italic text-slate-600">Budget belum diisi</span>
+            )}
+          </div>
+
+          {/* ── 4. Follow-up ── */}
+          <div className="min-w-0 shrink-0 text-right lg:text-left">
+            {fu ? (
+              <span className={`inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold ${fu.kelas}`}>
+                <Icon icon={fu.ikon} className="shrink-0 text-[13px]" />
+                <span className="truncate">{fu.label}</span>
+              </span>
+            ) : (
+              <span className="text-[11.5px] text-slate-600">Belum dijadwalkan</span>
+            )}
+            <div className="mt-1 truncate text-[10.5px] text-slate-600">
+              {klien.tanggal_kontak_terakhir
+                ? `Kontak ${waktuRelatif(klien.tanggal_kontak_terakhir)}`
+                : `Masuk ${waktuRelatif(klien.tanggal_masuk)}`}
+            </div>
+          </div>
         </div>
 
-        {/* Footer — shortcut aksi */}
-        <div className="relative mt-2.5 flex items-center gap-1.5 border-t border-white/[0.06] pt-2.5" onClick={e => e.stopPropagation()}>
+        {/* ── 5. Tahap (desktop) ──
+            Komponen yang SAMA dengan yang dipakai kartu klien. */}
+        <div className="hidden lg:block" onClick={stop}>
+          <DropdownTahap nilai={klien.status} onPilih={onMove} gaya="pil" />
+        </div>
+
+        {/* ── 6. Aksi ── */}
+        <div className="relative mt-2.5 flex items-center gap-1.5 lg:mt-0 lg:justify-end" onClick={stop}>
+          {/* Aksi utama, dan ia BERTULISAN. Ikon tongkat sihir sendirian tidak
+              memberi tahu siapa pun bahwa di baliknya ada pencarian aset —
+              agent yang tidak tahu sebuah tombol untuk apa tidak akan pernah
+              menekannya, dan seluruh fitur ini mati di situ. */}
+          <button
+            onClick={onAset}
+            title="Cari aset yang cocok & kirim ke klien ini"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.12] px-3 py-2 text-[12px] font-bold text-emerald-200 transition-all hover:border-emerald-400/50 hover:bg-emerald-500/20 hover:text-emerald-100 active:scale-[0.97] lg:flex-none"
+          >
+            <Icon icon="solar:magic-stick-3-bold-duotone" className="shrink-0 text-[15px]" />
+            <span>Cari aset</span>
+          </button>
+
           {klien.nomor_whatsapp ? (
             <a
               href={waHref(klien.nomor_whatsapp, klien.nama)}
               target="_blank"
               rel="noopener noreferrer"
               title="Chat WhatsApp"
-              className="flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-emerald-400/30 bg-emerald-500/15 text-[12px] font-semibold text-emerald-300 transition-all hover:bg-emerald-500/25 hover:text-emerald-200 hover:shadow-[0_0_18px_-4px_rgba(16,185,129,0.85)] active:scale-[0.97]"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-emerald-300/80 transition-all hover:border-emerald-400/40 hover:bg-emerald-500/15 hover:text-emerald-200 active:scale-95 lg:h-8 lg:w-8"
             >
-              <Icon icon="ic:baseline-whatsapp" className="text-base" />
-              WhatsApp
+              <Icon icon="ic:baseline-whatsapp" className="text-[17px]" />
             </a>
           ) : (
-            <span className="flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-white/[0.06] bg-white/[0.02] text-[12px] font-medium text-slate-600">
-              <Icon icon="ic:baseline-whatsapp" className="text-base" />
-              Tanpa nomor
+            <span title="Belum ada nomor" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/[0.06] bg-white/[0.02] text-slate-700 lg:h-8 lg:w-8">
+              <Icon icon="ic:baseline-whatsapp" className="text-[17px]" />
             </span>
           )}
-          <button onClick={onEdit} title="Edit"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-400 transition-all hover:border-white/20 hover:bg-white/[0.08] hover:text-white active:scale-[0.95]">
-            <Icon icon="solar:pen-2-bold-duotone" className="text-base" />
-          </button>
-          <button onClick={onDelete} disabled={deleting} title="Hapus"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-400 transition-all hover:border-rose-400/40 hover:bg-rose-500/15 hover:text-rose-300 active:scale-[0.95] disabled:opacity-50">
-            <Icon icon={deleting ? "solar:refresh-circle-bold-duotone" : "solar:trash-bin-2-bold-duotone"} className={`text-base ${deleting ? "animate-spin" : ""}`} />
+
+          <button onClick={onEdit} title="Edit klien"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-400 transition-all hover:border-white/20 hover:bg-white/[0.08] hover:text-white active:scale-95 lg:h-8 lg:w-8">
+            <Icon icon="solar:pen-2-bold-duotone" className="text-[15px]" />
           </button>
         </div>
-      </div>
+
+      </motion.div>
+    </motion.div>
+  );
+}
+
+
+
+/* ════════════════════════════════════════════════════════════
+   DROPDOWN TAHAP — dipakai baris daftar DAN kartu klien
+   ------------------------------------------------------------
+   Panelnya digambar lewat PORTAL ke <body>, bukan di tempatnya berdiri.
+
+   Kedua pemakainya duduk di dalam wadah ber-`overflow-hidden`: baris daftar
+   (laci merah geser-hapus bersembunyi di baliknya) dan kartu klien (panel
+   melayang dengan sudut membulat). Menu yang menggantung ke bawah akan
+   TERPOTONG di garis wadahnya — yang terlihat agent: menunya terbuka tapi
+   hanya pilihan teratas tersembul separuh, sisanya tidak bisa diketuk. Terbaca
+   sebagai "dropdown rusak", dan memang begitu akibatnya.
+
+   Diekstrak jadi satu komponen, bukan disalin: jebakan itu sudah menggigit
+   sekali, dan salinan kedua pasti melupakan salah satu dari tiga penjaganya —
+   posisi dihitung sendiri, membuka ke atas bila ruang bawah kurang, dan
+   klik-di-luar yang memeriksa DUA simpul (tombol + panel). Memeriksa tombolnya
+   saja akan menutup menu pada klik pertama ke pilihannya, dengan gejala yang
+   sama persis: "tidak bisa memilih".
+   ════════════════════════════════════════════════════════════ */
+function DropdownTahap({ nilai, onPilih, gaya, tinggiPanel = 232 }: {
+  nilai: KlienStatus;
+  onPilih: (s: KlienStatus) => void;
+  /** Bentuk tombolnya berbeda di daftar (pil kecil) dan di kartu klien (baris
+   *  penuh); isinya sama. */
+  gaya: "pil" | "baris";
+  tinggiPanel?: number;
+}) {
+  const [buka, setBuka] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const acuan = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const t = STATUS_THEME[nilai];
+
+  const bukaMenu = useCallback(() => {
+    const el = acuan.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    /* Membuka ke ATAS bila ruang di bawah tidak cukup. Tanpa ini, kartu klien
+       di dasar layar membuka menu yang separuhnya di luar viewport. */
+    const keAtas = r.bottom + tinggiPanel > window.innerHeight && r.top > tinggiPanel;
+    setPos({
+      top: keAtas ? r.top - tinggiPanel - 6 : r.bottom + 6,
+      left: r.left,
+      width: Math.max(r.width, 190),
+    });
+    setBuka(true);
+  }, [tinggiPanel]);
+
+  useEffect(() => {
+    if (!buka) return;
+    const klik = (e: MouseEvent) => {
+      const n = e.target as Node;
+      if (acuan.current?.contains(n) || panel.current?.contains(n)) return;
+      setBuka(false);
+    };
+    const tutup = () => setBuka(false);
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setBuka(false); } };
+    document.addEventListener("mousedown", klik);
+    document.addEventListener("keydown", esc);
+    window.addEventListener("scroll", tutup, true);
+    window.addEventListener("resize", tutup);
+    return () => {
+      document.removeEventListener("mousedown", klik);
+      document.removeEventListener("keydown", esc);
+      window.removeEventListener("scroll", tutup, true);
+      window.removeEventListener("resize", tutup);
+    };
+  }, [buka]);
+
+  const kelasTombol = gaya === "pil"
+    ? `inline-flex w-full items-center gap-1 rounded-full border px-2 py-1 text-[9.5px] font-bold uppercase tracking-wide transition-all hover:brightness-125 ${t.badge}`
+    : `flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-[12px] font-bold transition-all hover:brightness-110 ${t.badge}`;
+
+  return (
+    <div ref={acuan} className="relative" onClick={e => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => (buka ? setBuka(false) : bukaMenu())}
+        aria-haspopup="listbox"
+        aria-expanded={buka}
+        title="Pindahkan tahap"
+        className={kelasTombol}
+      >
+        {gaya === "baris"
+          ? <Icon icon={t.icon} className="shrink-0 text-sm" />
+          : <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.dot}`} />}
+        <span className="min-w-0 flex-1 truncate text-left">{t.label}</span>
+        <Icon
+          icon="solar:alt-arrow-down-line-duotone"
+          className={`shrink-0 transition-transform ${gaya === "baris" ? "text-sm" : "text-[11px]"} ${buka ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {buka && pos && typeof document !== "undefined" && createPortal(
+        <div
+          ref={panel}
+          role="listbox"
+          onClick={e => e.stopPropagation()}
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+          className="z-[95] overflow-hidden rounded-xl border border-white/10 bg-[#0a0c12]/95 p-1.5 shadow-[0_24px_60px_-15px_rgba(0,0,0,0.85)] backdrop-blur-2xl"
+        >
+          {PIPELINE_ORDER.map(st => {
+            const m = STATUS_THEME[st];
+            const aktif = st === nilai;
+            return (
+              <button
+                key={st}
+                type="button"
+                role="option"
+                aria-selected={aktif}
+                disabled={aktif}
+                onClick={() => { setBuka(false); onPilih(st); }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] font-semibold transition-colors ${
+                  aktif ? "cursor-default bg-white/[0.05] text-white" : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
+                }`}
+              >
+                <span className={`h-2 w-2 shrink-0 rounded-full ${m.dot}`} />
+                <span className="min-w-0 flex-1 truncate">{m.label}</span>
+                {aktif && <Icon icon="solar:check-circle-bold" className="shrink-0 text-[14px] text-emerald-400" />}
+              </button>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
     </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   FORMULIR PREFERENSI — dipakai TAMBAH dan EDIT
+   ------------------------------------------------------------
+   Diekstrak, bukan disalin. Formulir ini punya sembilan medan yang saling
+   berkaitan (tipe menentukan apakah luas tanah relevan, jenis transaksi
+   menentukan makna budget), dan dua salinan akan menyimpang pada perubahan
+   pertama — lalu "tambah" dan "edit" menerima kriteria yang berbeda untuk
+   klien yang sama, tanpa satu pun galat yang memberi tahu.
+   ════════════════════════════════════════════════════════════ */
+const KELAS_INPUT =
+  "w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-[12.5px] text-white placeholder-slate-600 outline-none transition-all focus:border-emerald-400/50 focus:bg-white/[0.05]";
+
+function FormPreferensi({
+  form, setForm, pickerTerbuka, setPicker, judul, ikon, labelSimpan, menyimpan, onBatal, onSimpan, className,
+}: {
+  form: PreferensiForm;
+  setForm: (f: (p: PreferensiForm | null) => PreferensiForm | null) => void;
+  pickerTerbuka: "type" | "transaksi" | "location" | "tujuan" | "legalitas" | null;
+  setPicker: (v: "type" | "transaksi" | "location" | "tujuan" | "legalitas" | null) => void;
+  judul: string;
+  ikon: string;
+  labelSimpan: string;
+  menyimpan: boolean;
+  onBatal: () => void;
+  onSimpan: () => void;
+  /** Pembungkus opsional. Ada supaya komponen ini bisa jadi anak LANGSUNG
+   *  <AnimatePresence>: membungkusnya dengan <div> biasa membuat animasi keluar
+   *  tidak pernah berjalan — AnimatePresence hanya melihat anak langsungnya. */
+  className?: string;
+}) {
+  /* Teks yang sedang diketik di kolom patokan.
+     WAJIB ada keadaannya sendiri. `KeywordField` adalah input TERKENDALI: ia
+     menggambar apa pun yang diberikan lewat `value` dan menyerahkan tiap
+     ketikan ke `onChange`. Diberi `value=""` tetap dan `onChange` kosong —
+     seperti versi pertama saya — hurufnya memang masuk, tapi langsung dibuang
+     dan React menggambar ulang string kosong. Yang terlihat agent: kolomnya
+     tidak bisa diketik sama sekali.
+
+     Teksnya TIDAK ikut disimpan ke preferensi: yang disimpan hasil pilihannya
+     (`form.dekat`), bukan kata kunci yang dipakai mencarinya. */
+  const [teksDekat, setTeksDekat] = useState("");
+
+  /* ── YANG WAJIB ADALAH LOKASI, BUKAN TIPE ────────────────────────────────
+     Dulu terbalik, dan salah di kedua sisinya:
+
+       • Klien yang bilang "apa saja di Wiyung, budget 500 jt" tidak bisa
+         dicatat — agent terpaksa mencentang sembilan tipe satu per satu.
+       • Preferensi tanpa lokasi menyaring 120 ribu aset se-Indonesia; daftar
+         seperti itu tidak pernah berguna bagi siapa pun.
+
+     Tipe kosong sekarang berarti SEMUA TIPE, dan itu bawaan yang paling sering
+     benar: klien menyebut daerah dan anggaran jauh lebih dulu daripada
+     menyebut ia mau rumah atau ruko. */
+  const sah = form.locations.length > 0;
+
+  return (
+    <motion.div
+      key={judul}
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+      className={`space-y-3 p-3 ${className ?? ""}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500/20">
+            <Icon icon={ikon} className="text-[10px] text-emerald-300" />
+          </div>
+          <p className="text-[11px] font-bold text-emerald-300">{judul}</p>
+        </div>
+        <button onClick={onBatal} className="text-[10px] font-semibold text-slate-400 transition-colors hover:text-white">
+          Batal
+        </button>
+      </div>
+
+      {/* Tipe Properti */}
+      <div>
+        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+          Tipe Properti
+          <span className="ml-1 font-semibold normal-case tracking-normal text-slate-600">
+            — kosongkan = semua tipe
+          </span>
+        </label>
+        <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] transition-all hover:border-white/20">
+          <TypePicker
+            theme="dark"
+            label=""
+            value={form.tipe_properti.map(t => TIPE_PROPERTI_LABEL[t])}
+            onChange={labels =>
+              setForm(f => f ? { ...f, tipe_properti: labels.map(l => Object.entries(TIPE_PROPERTI_LABEL).find(([, v]) => v === l)?.[0] as TipeProperti).filter(Boolean) } : f)
+            }
+            options={TIPE_LABELS}
+            icons={TIPE_ICONS}
+            open={pickerTerbuka === "type"}
+            onOpenChange={v => setPicker(v ? "type" : null)}
+          />
+        </div>
+      </div>
+
+      {/* Jenis Transaksi */}
+      <div>
+        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Jenis Transaksi</label>
+        <PremiumSelect
+          value={form.jenis_transaksi}
+          onChange={v => setForm(f => f ? { ...f, jenis_transaksi: v as JenisTransaksi | "" } : f)}
+          placeholder="-- Semua --"
+          options={JENIS_EDIT_OPTIONS}
+          open={pickerTerbuka === "transaksi"}
+          onOpenChange={v => setPicker(v ? "transaksi" : null)}
+        />
+      </div>
+
+      {/* Lokasi */}
+      <div>
+        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+          Lokasi <span className="text-rose-400">*</span>
+          <span className="ml-1 font-semibold normal-case tracking-normal text-slate-600">
+            — provinsi sampai kelurahan
+          </span>
+        </label>
+        <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] px-1 transition-all hover:border-white/20">
+          <LocationPicker
+            theme="dark"
+            label=""
+            value={form.locations}
+            onChange={locs => setForm(f => f ? { ...f, locations: locs } : f)}
+            open={pickerTerbuka === "location"}
+            onOpenChange={v => setPicker(v ? "location" : null)}
+          />
+        </div>
+      </div>
+
+      {/* ── Dekat tempat ──
+          Memakai KeywordField yang SAMA dengan searchbar publik. Bukan demi
+          hemat kode: kalau preferensi punya pemilih tempatnya sendiri, agent
+          bisa memilih patokan yang tidak ada di kamus pencarian, dan hasil
+          "cari aset" akan berbeda dari hasil pencarian untuk kriteria yang
+          terlihat sama. */}
+      <div>
+        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+          Patokan
+          <span className="ml-1 font-semibold normal-case tracking-normal text-slate-600">
+            — opsional · landmark atau nama jalan
+          </span>
+        </label>
+        <KeywordField
+          id="pref-dekat"
+          label=""
+          placeholder="mis. UNESA, hotel, atau Jalan Raya Darmo"
+          value={teksDekat}
+          onChange={setTeksDekat}
+          /* DI SINILAH nama jalan ditangani. Panel saran menawarkan dua hal:
+             daftar tempat dari kamus (landmark) dan satu baris "cari sebagai
+             alamat" untuk teks yang bukan tempat. Baris kedua memanggil
+             `onSubmit` — jadi di formulir ini onSubmit berarti "pakai teks ini
+             sebagai patokan alamat", bukan "kirim formulir".
+
+             Satu kolom melayani keduanya, dan itu disengaja: agent tidak perlu
+             tahu lebih dulu apakah "Graha Family" itu terdaftar sebagai tempat
+             atau cuma tertulis di alamat. Ia mengetik, lalu memilih. */
+          onSubmit={() => {
+            const t = teksDekat.trim();
+            if (t.length < 3) return;
+            setForm(f => f ? { ...f, alamat_teks: t, dekat: null } : f);
+            setTeksDekat("");
+          }}
+          theme="dark"
+          width="w-full"
+          dekat={form.dekat}
+          onPilihTempat={t => {
+            /* Keduanya saling meniadakan. Menyimpan landmark DAN teks alamat
+               sekaligus menghasilkan dua penyaring yang dipasang bersamaan —
+               hampir selalu nol hasil, dan agent tidak akan menduga sebabnya. */
+            setForm(f => f ? { ...f, dekat: t, alamat_teks: t ? "" : f.alamat_teks } : f);
+            /* Kotak teks dikosongkan begitu tempatnya terpilih: chip-nya sudah
+               mewakili pilihan itu, dan menyisakan "unesa" di kotak membuat
+               agent mengira ada dua kriteria yang aktif. */
+            if (t) setTeksDekat("");
+          }}
+        />
+        {form.dekat && (
+          <p className="mt-1 text-[10.5px] text-slate-500">
+            Radius {(form.dekat.radius / 1000).toFixed(1).replace(".", ",")} km dari {form.dekat.nama}
+          </p>
+        )}
+        {form.alamat_teks && (
+          <button
+            type="button"
+            onClick={() => setForm(f => f ? { ...f, alamat_teks: "" } : f)}
+            className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-sky-400/30 bg-sky-500/10 py-1 pl-2 pr-1.5 text-[11px] font-bold text-sky-200 transition-colors hover:bg-sky-500/20"
+          >
+            <Icon icon="solar:signpost-2-bold-duotone" className="shrink-0 text-xs" />
+            <span className="truncate">Alamat memuat “{form.alamat_teks}”</span>
+            <Icon icon="solar:close-circle-bold" className="shrink-0 text-sm opacity-70" />
+          </button>
+        )}
+      </div>
+
+      {/* Budget */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Budget Min (Rp)</label>
+          <input type="text" inputMode="numeric" placeholder="500.000.000"
+            value={form.budget_min}
+            onChange={e => setForm(f => f ? { ...f, budget_min: fmtRup(e.target.value) } : f)}
+            className={KELAS_INPUT} />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Budget Max (Rp)</label>
+          <input type="text" inputMode="numeric" placeholder="2.000.000.000"
+            value={form.budget_max}
+            onChange={e => setForm(f => f ? { ...f, budget_max: fmtRup(e.target.value) } : f)}
+            className={KELAS_INPUT} />
+        </div>
+      </div>
+
+      {/* Luas */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Min (m²)</label>
+          <input type="text" inputMode="numeric" placeholder="60"
+            value={form.luas_min}
+            onChange={e => setForm(f => f ? { ...f, luas_min: fmtRup(e.target.value) } : f)}
+            className={KELAS_INPUT} />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Max (m²)</label>
+          <input type="text" inputMode="numeric" placeholder="500"
+            value={form.luas_max}
+            onChange={e => setForm(f => f ? { ...f, luas_max: fmtRup(e.target.value) } : f)}
+            className={KELAS_INPUT} />
+        </div>
+      </div>
+
+      {/* Sertifikat + Tujuan */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          {/* Satu-satunya kriteria tambahan yang bisa dijawab data listing
+              (99,9% terisi; kamar tidur hanya 4 baris dari 120 ribu). Kosong =
+              tidak mempermasalahkan — keadaan bawaan yang paling sering benar,
+              dan memaksa agent memilih hanya membuatnya mengarang jawaban. */}
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Sertifikat</label>
+          <PremiumSelect
+            value={form.legalitas}
+            onChange={v => setForm(f => f ? { ...f, legalitas: v as Sertifikat | "" } : f)}
+            placeholder="-- Tidak masalah --"
+            options={SERTIFIKAT_OPTIONS}
+            open={pickerTerbuka === "legalitas"}
+            onOpenChange={v => setPicker(v ? "legalitas" : null)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Tujuan Beli</label>
+          <PremiumSelect
+            value={form.tujuan_beli}
+            onChange={v => setForm(f => f ? { ...f, tujuan_beli: v as TujuanBeli | "" } : f)}
+            placeholder="-- Belum tahu --"
+            options={TUJUAN_OPTIONS}
+            open={pickerTerbuka === "tujuan"}
+            onOpenChange={v => setPicker(v ? "tujuan" : null)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Catatan</label>
+          <input type="text" placeholder="Hal lain..."
+            value={form.catatan}
+            onChange={e => setForm(f => f ? { ...f, catatan: e.target.value } : f)}
+            className={KELAS_INPUT} />
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={onBatal}
+          className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 text-[12px] font-bold text-slate-300 transition-all hover:border-white/20 hover:text-white"
+        >
+          Batal
+        </button>
+        <button
+          onClick={onSimpan}
+          disabled={menyimpan || !sah}
+          title={sah ? undefined : "Pilih lokasi dulu"}
+          className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 py-2.5 text-[12px] font-extrabold text-[#04130d] transition-all hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50"
+        >
+          {menyimpan
+            ? <><Icon icon="solar:refresh-circle-bold-duotone" className="animate-spin text-sm" /> Menyimpan…</>
+            : <><Icon icon="solar:check-circle-bold" className="text-sm" /> {labelSimpan}</>}
+        </button>
+      </div>
+
+      {/* Tombol yang mati tanpa penjelasan membuat agent mengira formulirnya
+          rusak. Satu kalimat menghapus seluruh tebakan itu. */}
+      {!sah && (
+        <p className="text-center text-[10.5px] text-slate-500">
+          Pilih <span className="font-bold text-slate-300">lokasi</span> dulu — sisanya boleh dikosongkan.
+        </p>
+      )}
+    </motion.div>
   );
 }
 
@@ -844,6 +1944,10 @@ type PrefGroup = {
   budget_max: number | null;
   luas_min: number | null;
   luas_max: number | null;
+  legalitas: string | null;
+  dekat_nilai: string | null;
+  dekat_radius: number | null;
+  alamat_teks: string | null;
   tujuan_beli: string | null;
   catatan: string | null;
 };
@@ -856,11 +1960,21 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
   onPrefGroupUpdated: (oldIds: string[], newPrefs: PreferensiKlien[]) => void;
 }) {
   const [shown, setShown] = useState(false);
-  const [matchPref, setMatchPref] = useState<PreferensiKlien | null>(null);
+  /* DAFTAR id, bukan satu preferensi. Satu kartu preferensi di layar adalah
+     beberapa baris di database — satu per tipe properti — jadi "Rumah atau
+     Ruko di Gresik" tersimpan sebagai dua baris. Versi sebelumnya mengirim
+     `g.rows[0]` saja, sehingga separuh kriteria klien tidak pernah ikut
+     dicari dan tidak ada satu pun galat yang memberi tahu. */
+  const [matchPrefIds, setMatchPrefIds] = useState<string[] | null>(null);
   const [deletingPrefs, setDeletingPrefs] = useState<Set<string>>(new Set());
   const [editingGroupIdx, setEditingGroupIdx] = useState<number | null>(null);
+  /* Mode TAMBAH berdiri terpisah dari mode edit, dan keduanya saling menutup.
+     Dua formulir terbuka sekaligus di satu panel sempit membuat agent
+     kehilangan jejak mana yang sedang diisinya. */
+  const [menambahPref, setMenambahPref] = useState(false);
+  const [savingTambah, setSavingTambah] = useState(false);
   const [editForm, setEditForm] = useState<PreferensiForm | null>(null);
-  const [openEditPicker, setOpenEditPicker] = useState<"type" | "transaksi" | "location" | "tujuan" | null>(null);
+  const [openEditPicker, setOpenEditPicker] = useState<"type" | "transaksi" | "location" | "tujuan" | "legalitas" | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Inline CRM edit (catatan & follow-up) ──
@@ -919,13 +2033,22 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
       if (r) { const k = regionKey(r); if (!seen.has(k)) { seen.add(k); locations.push(r); } }
     }
     setEditForm({
-      tipe_properti: Array.from(new Set(g.rows.map(r => r.tipe_properti))),
+      /* Baris ber-tipe null dibuang dari daftar centang: "semua tipe" adalah
+         KETIADAAN pilihan, bukan salah satu pilihan. */
+      tipe_properti: Array.from(new Set(g.rows.map(r => r.tipe_properti).filter(Boolean))) as TipeProperti[],
       jenis_transaksi: (g.jenis_transaksi as JenisTransaksi | null) || "",
       locations,
       budget_min: g.budget_min ? fmtRup(String(g.budget_min)) : "",
       budget_max: g.budget_max ? fmtRup(String(g.budget_max)) : "",
       luas_min:   g.luas_min   ? fmtRup(String(g.luas_min))   : "",
       luas_max:   g.luas_max   ? fmtRup(String(g.luas_max))   : "",
+      legalitas:  (g.legalitas as Sertifikat | null) || "",
+      alamat_teks: g.alamat_teks || "",
+      dekat: g.dekat_nilai
+        ? { nilai: g.dekat_nilai, nama: g.dekat_nilai, label: "Tempat",
+            icon: "solar:map-point-bold-duotone", warna: "emerald",
+            radius: g.dekat_radius ?? 1500 }
+        : null,
       tujuan_beli: (g.tujuan_beli as TujuanBeli | null) || "",
       catatan: g.catatan || "",
     });
@@ -937,6 +2060,60 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
     setEditingGroupIdx(null);
     setEditForm(null);
     setOpenEditPicker(null);
+  }
+
+  function mulaiTambah() {
+    setEditingGroupIdx(null);          // tutup edit yang mungkin sedang terbuka
+    setEditForm({ ...EMPTY_PREFERENSI });
+    setOpenEditPicker(null);
+    setMenambahPref(true);
+  }
+
+  function batalTambah() {
+    setMenambahPref(false);
+    setEditForm(null);
+    setOpenEditPicker(null);
+  }
+
+  /**
+   * Simpan preferensi BARU dari dalam kartu klien.
+   *
+   * Sebelumnya satu-satunya jalan adalah "Edit Klien" — formulir penuh yang
+   * MENULIS ULANG seluruh preferensi (hapus semua → buat baru) hanya untuk
+   * menambah satu kriteria. Selain berputar jauh, itu juga berisiko: kegagalan
+   * di tengah penulisan ulang meninggalkan klien dengan preferensi yang hilang
+   * sebagian. Di sini hanya baris baru yang ditulis; yang lama tidak disentuh.
+   */
+  async function handleSaveTambah() {
+    if (!editForm || editForm.locations.length === 0) return;
+    setSavingTambah(true);
+    try {
+      /* Satu kartu formulir mekar jadi beberapa baris — satu per kombinasi
+         tipe × lokasi. Fungsi yang sama dipakai formulir klien, jadi bentuk
+         barisnya tidak bisa menyimpang antar jalur. */
+      const payloads = buildPrefPayloads(editForm);
+      const hasil = await Promise.all(
+        payloads.map(p =>
+          fetch(`/api/dashboard/klien/${klien.id_klien}/preferensi`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(p),
+          }).then(r => r.json()).catch(() => ({ ok: false })),
+        ),
+      );
+      const baru: PreferensiKlien[] = hasil.filter(r => r.ok).map(r => r.data);
+      /* Ditutup hanya kalau ADA yang benar-benar tersimpan. Menutup formulir
+         setelah kegagalan total akan membuang isian agent tanpa satu pun
+         penjelasan. */
+      if (baru.length === 0) return;
+      /* oldIds kosong = tidak ada yang diganti, hanya ditambah. Lewat jalur
+         yang sama dengan edit, jadi pencarian ulang otomatis & pembuangan
+         simpanan ikut berjalan tanpa perlu diingat lagi di sini. */
+      onPrefGroupUpdated([], baru);
+      batalTambah();
+    } finally {
+      setSavingTambah(false);
+    }
   }
 
   async function handleSaveEdit(g: PrefGroup) {
@@ -1017,27 +2194,15 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
             </div>
           </div>
 
-          {/* Quick status changer */}
+          {/* ── Tahap pipeline ──
+              Dulu lima chip yang membungkus jadi dua baris — sekitar 70px
+              tinggi di puncak kartu, untuk sesuatu yang jarang diubah. Sebagai
+              dropdown ia jadi satu baris, dan ruang yang dihemat langsung
+              terpakai: nama klien, kriteria, dan tombol aksi naik ke atas
+              lipatan layar ponsel. */}
           <div className="mt-4">
             <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Tahap Pipeline</p>
-            <div className="flex flex-wrap gap-1.5">
-              {PIPELINE_ORDER.map(s => {
-                const t = STATUS_THEME[s];
-                const active = klien.status === s;
-                return (
-                  <button
-                    key={s}
-                    onClick={() => !active && onMove(s)}
-                    className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold transition-all ${
-                      active ? t.badge : "border-white/[0.06] text-slate-500 hover:border-white/[0.14] hover:text-slate-300"
-                    }`}
-                  >
-                    <Icon icon={t.icon} className="text-[10px]" />
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
+            <DropdownTahap nilai={klien.status} onPilih={onMove} gaya="baris" />
           </div>
         </header>
 
@@ -1089,18 +2254,35 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
             )}
           </InfoSection>
 
-          {klien.preferensi.length > 0 && (() => {
+          {/* SELALU dirender, termasuk saat kosong. Versi lama menyembunyikan
+              seluruh bagian ini kalau klien belum punya preferensi — dan
+              karena menambah preferensi hanya bisa dari dalamnya, klien baru
+              terkunci dalam lingkaran: tidak ada pintu masuk sama sekali,
+              satu-satunya jalan adalah membuka "Edit Klien" dan menebak.
+              Justru klien yang belum punya kriteria yang PALING butuh tombol
+              ini — seluruh asisten aset tidak bisa bekerja untuk mereka. */}
+          {(() => {
             const map = new Map<string, PrefGroup>();
             for (const p of klien.preferensi) {
               const sig = JSON.stringify([
                 p.jenis_transaksi ?? "", p.budget_min ?? "", p.budget_max ?? "",
-                p.luas_min ?? "", p.luas_max ?? "", p.tujuan_beli ?? "", p.catatan ?? "",
+                p.luas_min ?? "", p.luas_max ?? "",
+                /* legalitas WAJIB ikut: tanpanya "Rumah SHM" dan "Rumah HGB"
+                   menyatu jadi satu kartu, dan salah satu sertifikatnya hilang
+                   saat kartu itu disunting lalu disimpan. */
+                p.legalitas ?? "",
+                p.dekat_nilai ?? "", p.dekat_radius ?? "", p.alamat_teks ?? "",
+                p.tujuan_beli ?? "", p.catatan ?? "",
               ]);
               let g = map.get(sig);
               if (!g) {
                 g = {
                   ids: [], rows: [], types: [], lokasi: [],
                   jenis_transaksi: p.jenis_transaksi ?? null,
+                  legalitas: p.legalitas ?? null,
+                  dekat_nilai: p.dekat_nilai ?? null,
+                  dekat_radius: p.dekat_radius ?? null,
+                  alamat_teks: p.alamat_teks ?? null,
                   budget_min: p.budget_min ? Number(p.budget_min) : null,
                   budget_max: p.budget_max ? Number(p.budget_max) : null,
                   luas_min:   p.luas_min   ? Number(p.luas_min)   : null,
@@ -1112,14 +2294,44 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
               }
               g.ids.push(p.id_preferensi);
               g.rows.push(p);
-              const tl = p.tipe_properti.charAt(0) + p.tipe_properti.slice(1).toLowerCase().replace(/_/g, " ");
+              const tl = p.tipe_properti
+                ? p.tipe_properti.charAt(0) + p.tipe_properti.slice(1).toLowerCase().replace(/_/g, " ")
+                : "Semua tipe";
               if (!g.types.includes(tl)) g.types.push(tl);
               if (p.lokasi_dicari && !g.lokasi.includes(p.lokasi_dicari)) g.lokasi.push(p.lokasi_dicari);
             }
             const groups = Array.from(map.values());
 
+            const adaFormTambah = menambahPref && editForm;
+
             return (
               <InfoSection title="Preferensi Properti" icon="solar:home-bold-duotone">
+                {/* ── Keadaan kosong ──
+                    Bukan sekadar "belum ada data". Kalimatnya menjelaskan APA
+                    yang hilang kalau dibiarkan kosong, karena preferensi bukan
+                    kolom pelengkap: ia satu-satunya bahan bakar pencarian aset,
+                    email pengingat, dan tugas otomatis. Klien tanpa preferensi
+                    tidak akan pernah muncul di mana pun. */}
+                {groups.length === 0 && !adaFormTambah && (
+                  <div className="rounded-2xl border border-dashed border-white/[0.1] bg-white/[0.02] px-4 py-5 text-center">
+                    <div className="mx-auto grid h-11 w-11 place-items-center rounded-2xl border border-emerald-400/20 bg-emerald-500/10">
+                      <Icon icon="solar:magic-stick-3-bold-duotone" className="text-xl text-emerald-300" />
+                    </div>
+                    <p className="mt-2.5 text-[13px] font-bold text-white">Belum ada kriteria</p>
+                    <p className="mx-auto mt-1 max-w-[15rem] text-[11.5px] leading-relaxed text-slate-500">
+                      Isi tipe, lokasi, dan budget yang dicari — asisten langsung mencarikan asetnya,
+                      dan mengabari Anda saat ada yang baru masuk.
+                    </p>
+                    <button
+                      onClick={mulaiTambah}
+                      className="mt-3.5 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 px-4 py-2.5 text-[12.5px] font-extrabold text-[#04130d] transition-all hover:from-emerald-400 hover:to-emerald-300"
+                    >
+                      <Icon icon="solar:add-circle-bold" className="text-sm" />
+                      Tambah Kriteria Pertama
+                    </button>
+                  </div>
+                )}
+
                 {groups.map((g, i) => {
                   const isDel = g.ids.some(id => deletingPrefs.has(id));
                   const isEditing = editingGroupIdx === i;
@@ -1135,151 +2347,20 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {isEditing && editForm ? (
-                          /* ── MODE EDIT INLINE ── */
-                          <motion.div
-                            key="edit"
-                            initial={{ opacity: 0, y: -6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -6 }}
-                            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                            className="space-y-3 p-3"
-                          >
-                            {/* Header edit */}
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <div className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500/20">
-                                  <Icon icon="solar:pen-2-bold-duotone" className="text-[10px] text-emerald-300" />
-                                </div>
-                                <p className="text-[11px] font-bold text-emerald-300">Edit Preferensi #{i + 1}</p>
-                              </div>
-                              <button onClick={cancelEdit} className="text-[10px] font-semibold text-slate-400 hover:text-white transition-colors">
-                                Batal
-                              </button>
-                            </div>
-
-                            {/* Tipe Properti */}
-                            <div>
-                              <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Tipe Properti</label>
-                              <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] transition-all hover:border-white/20">
-                                <TypePicker
-                                  theme="dark"
-                                  label=""
-                                  value={editForm.tipe_properti.map(t => TIPE_PROPERTI_LABEL[t])}
-                                  onChange={labels =>
-                                    setEditForm(f => f ? { ...f, tipe_properti: labels.map(l => Object.entries(TIPE_PROPERTI_LABEL).find(([, v]) => v === l)?.[0] as TipeProperti).filter(Boolean) } : f)
-                                  }
-                                  options={TIPE_LABELS}
-                                  icons={TIPE_ICONS}
-                                  open={openEditPicker === "type"}
-                                  onOpenChange={v => setOpenEditPicker(v ? "type" : null)}
-                                />
-                              </div>
-                            </div>
-
-                            {/* Jenis Transaksi */}
-                            <div>
-                              <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Jenis Transaksi</label>
-                              <PremiumSelect
-                                value={editForm.jenis_transaksi}
-                                onChange={v => setEditForm(f => f ? { ...f, jenis_transaksi: v as JenisTransaksi | "" } : f)}
-                                placeholder="-- Semua --"
-                                options={JENIS_EDIT_OPTIONS}
-                                open={openEditPicker === "transaksi"}
-                                onOpenChange={v => setOpenEditPicker(v ? "transaksi" : null)}
-                              />
-                            </div>
-
-                            {/* Lokasi */}
-                            <div>
-                              <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Lokasi</label>
-                              <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] px-1 transition-all hover:border-white/20">
-                                <LocationPicker
-                                  theme="dark"
-                                  label=""
-                                  value={editForm.locations}
-                                  onChange={locs => setEditForm(f => f ? { ...f, locations: locs } : f)}
-                                  open={openEditPicker === "location"}
-                                  onOpenChange={v => setOpenEditPicker(v ? "location" : null)}
-                                />
-                              </div>
-                            </div>
-
-                            {/* Budget */}
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Budget Min (Rp)</label>
-                                <input type="text" inputMode="numeric" placeholder="500.000.000"
-                                  value={editForm.budget_min}
-                                  onChange={e => setEditForm(f => f ? { ...f, budget_min: fmtRup(e.target.value) } : f)}
-                                  className={editInputCls} />
-                              </div>
-                              <div>
-                                <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Budget Max (Rp)</label>
-                                <input type="text" inputMode="numeric" placeholder="2.000.000.000"
-                                  value={editForm.budget_max}
-                                  onChange={e => setEditForm(f => f ? { ...f, budget_max: fmtRup(e.target.value) } : f)}
-                                  className={editInputCls} />
-                              </div>
-                            </div>
-
-                            {/* Luas */}
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Min (m²)</label>
-                                <input type="text" inputMode="numeric" placeholder="60"
-                                  value={editForm.luas_min}
-                                  onChange={e => setEditForm(f => f ? { ...f, luas_min: fmtRup(e.target.value) } : f)}
-                                  className={editInputCls} />
-                              </div>
-                              <div>
-                                <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Max (m²)</label>
-                                <input type="text" inputMode="numeric" placeholder="500"
-                                  value={editForm.luas_max}
-                                  onChange={e => setEditForm(f => f ? { ...f, luas_max: fmtRup(e.target.value) } : f)}
-                                  className={editInputCls} />
-                              </div>
-                            </div>
-
-                            {/* Tujuan + Catatan */}
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Tujuan Beli</label>
-                                <PremiumSelect
-                                  value={editForm.tujuan_beli}
-                                  onChange={v => setEditForm(f => f ? { ...f, tujuan_beli: v as TujuanBeli | "" } : f)}
-                                  placeholder="-- Belum tahu --"
-                                  options={TUJUAN_OPTIONS}
-                                  open={openEditPicker === "tujuan"}
-                                  onOpenChange={v => setOpenEditPicker(v ? "tujuan" : null)}
-                                />
-                              </div>
-                              <div>
-                                <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Catatan</label>
-                                <input type="text" placeholder="Hal lain..."
-                                  value={editForm.catatan}
-                                  onChange={e => setEditForm(f => f ? { ...f, catatan: e.target.value } : f)}
-                                  className={editInputCls} />
-                              </div>
-                            </div>
-
-                            {/* Action buttons */}
-                            <div className="flex gap-2 pt-1">
-                              <button onClick={cancelEdit}
-                                className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 text-[12px] font-bold text-slate-300 transition-all hover:border-white/20 hover:text-white">
-                                Batal
-                              </button>
-                              <button
-                                onClick={() => handleSaveEdit(g)}
-                                disabled={savingEdit || editForm.tipe_properti.length === 0}
-                                className="flex-[2] flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 py-2.5 text-[12px] font-extrabold text-[#04130d] transition-all hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50"
-                              >
-                                {savingEdit
-                                  ? <><Icon icon="solar:refresh-circle-bold-duotone" className="animate-spin text-sm" /> Menyimpan...</>
-                                  : <><Icon icon="solar:check-circle-bold" className="text-sm" /> Simpan Perubahan</>
-                                }
-                              </button>
-                            </div>
-                          </motion.div>
+                          /* ── MODE EDIT INLINE ──
+                             Komponen yang SAMA dengan formulir tambah. */
+                          <FormPreferensi
+                            form={editForm}
+                            setForm={setEditForm}
+                            pickerTerbuka={openEditPicker}
+                            setPicker={setOpenEditPicker}
+                            judul={`Edit Preferensi #${i + 1}`}
+                            ikon="solar:pen-2-bold-duotone"
+                            labelSimpan="Simpan Perubahan"
+                            menyimpan={savingEdit}
+                            onBatal={cancelEdit}
+                            onSimpan={() => handleSaveEdit(g)}
+                          />
                         ) : (
                           /* ── MODE BACA ── */
                           <motion.div
@@ -1319,10 +2400,12 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
                             {(g.luas_min || g.luas_max) && (
                               <InfoRow label="Luas" value={[g.luas_min, g.luas_max].filter(Boolean).join(" – ") + " m²"} />
                             )}
+                            {g.dekat_nilai && <InfoRow label="Dekat" value={`${g.dekat_nilai}${g.dekat_radius ? ` · ${(g.dekat_radius/1000).toFixed(1).replace(".", ",")} km` : ""}`} />}
+                            {g.legalitas && <InfoRow label="Sertifikat" value={SERTIFIKAT_LABEL[g.legalitas as Sertifikat] ?? g.legalitas} />}
                             {g.tujuan_beli && <InfoRow label="Tujuan" value={{ ditempati: "Ditempati", investasi: "Investasi", disewakan: "Disewakan" }[g.tujuan_beli] ?? g.tujuan_beli} />}
                             {g.catatan && <InfoRow label="Catatan" value={g.catatan} />}
                             <button
-                              onClick={() => setMatchPref(g.rows[0])}
+                              onClick={() => setMatchPrefIds(g.ids)}
                               className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-400/25 bg-emerald-500/10 py-2 text-[12px] font-bold text-emerald-200 transition-all hover:bg-emerald-500/20"
                             >
                               <Icon icon="solar:magnifer-bold-duotone" className="text-sm" />
@@ -1334,6 +2417,38 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
                     </div>
                   );
                 })}
+
+                {/* ── Formulir tambah ── */}
+                <AnimatePresence mode="wait" initial={false}>
+                  {adaFormTambah && (
+                    <FormPreferensi
+                      className="rounded-2xl border border-emerald-400/25 bg-emerald-500/[0.04]"
+                      form={editForm!}
+                      setForm={setEditForm}
+                      pickerTerbuka={openEditPicker}
+                      setPicker={setOpenEditPicker}
+                      judul="Preferensi Baru"
+                      ikon="solar:add-circle-bold-duotone"
+                      labelSimpan="Simpan Preferensi"
+                      menyimpan={savingTambah}
+                      onBatal={batalTambah}
+                      onSimpan={handleSaveTambah}
+                    />
+                  )}
+                </AnimatePresence>
+
+                {/* Tombol tambah hanya muncul saat TIDAK ada formulir terbuka.
+                    Tombol "tambah" di bawah formulir tambah yang sedang terisi
+                    adalah undangan untuk kehilangan isian. */}
+                {groups.length > 0 && !adaFormTambah && editingGroupIdx === null && (
+                  <button
+                    onClick={mulaiTambah}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/[0.12] bg-white/[0.02] py-2.5 text-[12px] font-bold text-slate-300 transition-all hover:border-emerald-400/40 hover:bg-emerald-500/[0.06] hover:text-emerald-200"
+                  >
+                    <Icon icon="solar:add-circle-bold-duotone" className="text-sm" />
+                    Tambah Preferensi
+                  </button>
+                )}
               </InfoSection>
             );
           })()}
@@ -1475,14 +2590,14 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
         </footer>
       </div>
 
-      {matchPref && (
+      {matchPrefIds && (
         <MatchListingModal
           klienId={klien.id_klien}
           klienNama={klien.nama}
-          klienWhatsapp={klien.nomor_whatsapp}
+          punyaWa={!!klien.nomor_whatsapp}
           klienEmail={klien.email}
-          pref={matchPref}
-          onClose={() => setMatchPref(null)}
+          prefIds={matchPrefIds}
+          onClose={() => setMatchPrefIds(null)}
         />
       )}
     </div>
@@ -1490,10 +2605,50 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
 }
 
 /* ════════════════════════════════════════════════════════════
-   MATCH LISTING MODAL — listing yang cocok dgn sebuah preferensi
+   ASISTEN ASET — modal pencarian & pengiriman
+   ------------------------------------------------------------
+   Dulu layar ini hanya sebuah daftar: cari aset yang cocok, lalu setiap kartu
+   punya tombol WhatsApp sendiri. Akibatnya agent yang ingin mengirim empat
+   aset harus mengirim empat pesan terpisah, dan tidak ada satu pun jejak
+   siapa pernah dikirimi apa — sehingga minggu depan ia mengirim rumah yang
+   sama lagi, dan klien mengira agennya tidak ingat percakapan mereka.
+
+   Sekarang layar ini punya dua muka:
+     COCOK    — pilih beberapa aset sekaligus, satu pesan, satu ketukan.
+     TERKIRIM — apa yang pernah dikirim, bagaimana tanggapan klien, dan apa
+                yang berubah sejak itu.
    ════════════════════════════════════════════════════════════ */
+
+/** Satu PILL di layar Asisten Aset = satu kriteria yang DIRASAKAN agent,
+ *  bukan satu baris `preferensi_klien`. Formulir menyimpan "Gudang di
+ *  Surabaya, Sidoarjo, Gresik" sebagai tiga baris; menampilkannya sebagai tiga
+ *  pill membocorkan bentuk penyimpanan ke layar dan membuat klien yang punya
+ *  dua kriteria terlihat punya empat. Pengelompokannya dikerjakan server
+ *  (src/lib/klienRingkas.ts) supaya sama persis dengan kartu klien. */
+type PrefRingkasan = {
+  id_grup: string;
+  ids: string[];
+  label: string;
+  maksud: string;
+  /** Seluruh kecocokan kriteria ini, termasuk yang tidak muat di daftar. */
+  total: number;
+  /** Yang benar-benar ada di daftar untuk grup ini — INI yang ditulis di pill.
+   *  Menulis `total` di pill lalu menampilkan lebih sedikit adalah cara
+   *  tercepat membuat agent berhenti percaya angkanya. */
+  ditampilkan: number;
+};
+
 type MatchedListing = {
   id_property: string;
+  /** Preferensi yang paling menjelaskan kenapa aset ini muncul — yang dicatat
+   *  saat dikirim. */
+  id_preferensi: string;
+  /** Grup kriteria yang paling menjelaskan kenapa aset ini muncul. */
+  grup?: string;
+  /** SEMUA grup yang mencocoki aset ini. Satu aset bisa memenuhi dua kriteria
+   *  klien yang sama; menyaring hanya lewat satu grup akan membuatnya
+   *  menghilang dari yang lain tanpa alasan yang terlihat. */
+  cocok_grup?: string[];
   slug: string;
   judul: string;
   kota: string;
@@ -1503,6 +2658,7 @@ type MatchedListing = {
   jenis_transaksi: string;
   kategori: string;
   harga: number;
+  harga_asli: number;
   harga_promo: number | null;
   nilai_limit_lelang: number | null;
   gambar: string;
@@ -1512,20 +2668,212 @@ type MatchedListing = {
   kamar_mandi: number;
   agent_name: string;
   agent_office: string;
+  skor: number;
+  alasan: string[];
 };
 
-function MatchListingModal({ klienId, klienNama, klienWhatsapp, klienEmail, pref, onClose }: {
+type Diagnosa = {
+  totalTanpaFilterLunak: number;
+  jikaBudgetNaik10: number;
+  jikaLokasiDiperluas: number;
+  jikaLuasDiabaikan: number;
+  tingkatLokasi: string;
+  adaBudget: boolean;
+  adaLuas: boolean;
+  /** Preferensi mana yang didiagnosa. Klien bisa punya beberapa, dan saran
+   *  "naikkan plafon 10%" tanpa menyebut plafon yang mana tidak bisa
+   *  ditindaklanjuti. */
+  id_preferensi?: string;
+  label?: string;
+};
+
+type PerubahanKiriman = {
+  id: string;
+  jenis: "HARGA_TURUN" | "HARGA_NAIK" | "TERJUAL" | "DITARIK" | "LELANG_DEKAT";
+  harga_lama: number | null;
+  harga_baru: number | null;
+  selisih_persen: number | null;
+  terdeteksi_pada: string;
+};
+
+type ItemTerkirim = {
+  id_kiriman: string;
+  id_property: string;
+  slug: string;
+  judul: string;
+  kota: string;
+  kecamatan: string;
+  jenis_transaksi: string;
+  kategori: string;
+  gambar: string;
+  status_tayang: string;
+  harga_sekarang: number;
+  harga_saat_kirim: number;
+  harga_diketahui: number;
+  jumlah_kirim: number;
+  terakhir_dikirim: string;
+  tanggapan: string;
+  alasan_tanggapan: string | null;
+  perubahan: PerubahanKiriman[];
+};
+
+const TANGGAPAN_META: Record<string, { label: string; kelas: string; ikon: string }> = {
+  MENUNGGU:     { label: "Menunggu",   kelas: "border-white/[0.08] bg-white/[0.04] text-slate-400",        ikon: "solar:clock-circle-bold-duotone" },
+  SUKA:         { label: "Suka",       kelas: "border-emerald-400/25 bg-emerald-500/[0.12] text-emerald-200", ikon: "solar:like-bold-duotone" },
+  TIDAK_COCOK:  { label: "Tidak cocok",kelas: "border-white/[0.08] bg-white/[0.03] text-slate-500",         ikon: "solar:dislike-bold-duotone" },
+  MINTA_SURVEI: { label: "Minta survei",kelas: "border-amber-400/25 bg-amber-500/[0.12] text-amber-200",    ikon: "solar:calendar-mark-bold-duotone" },
+  DEAL:         { label: "Deal",       kelas: "border-emerald-400/40 bg-emerald-500/20 text-emerald-100",   ikon: "solar:cup-star-bold-duotone" },
+};
+
+const PERUBAHAN_META: Record<string, { label: string; kelas: string; ikon: string }> = {
+  HARGA_TURUN:  { label: "Harga turun",  kelas: "border-emerald-400/30 bg-emerald-500/[0.12] text-emerald-200", ikon: "solar:graph-down-bold-duotone" },
+  HARGA_NAIK:   { label: "Harga naik",   kelas: "border-amber-400/30 bg-amber-500/[0.12] text-amber-200",       ikon: "solar:graph-up-bold-duotone" },
+  TERJUAL:      { label: "Sudah laku",   kelas: "border-rose-400/30 bg-rose-500/[0.12] text-rose-200",          ikon: "solar:lock-bold-duotone" },
+  DITARIK:      { label: "Ditarik",      kelas: "border-slate-400/25 bg-slate-500/[0.12] text-slate-300",       ikon: "solar:archive-bold-duotone" },
+  LELANG_DEKAT: { label: "Lelang dekat", kelas: "border-amber-400/30 bg-amber-500/[0.12] text-amber-200",       ikon: "solar:hammer-bold-duotone" },
+};
+
+/* ── SIMPANAN HASIL PENCARIAN ───────────────────────────────────────────────
+   Layar ini menjalankan satu query pencocokan PER BARIS preferensi, dan tiap
+   query menarik kolam sampai 600 baris untuk disaring ketat di JavaScript.
+   Untuk klien dengan empat baris preferensi, membukanya berarti empat kali
+   pekerjaan itu — dan agent membuka layar yang sama berkali-kali dalam satu
+   sesi: buka, lihat, tutup, buka lagi untuk klien sebelumnya.
+
+   Isinya juga tidak berubah secepat itu. Listing baru masuk dalam hitungan
+   jam, bukan detik. Maka hasilnya disimpan, ditampilkan SEKETIKA saat dibuka
+   lagi, lalu disegarkan diam-diam di belakang layar. Agent tidak pernah
+   menunggu untuk melihat sesuatu yang sudah pernah ia lihat.
+
+   Disimpan di modul, bukan di React state: seluruh maksudnya justru bertahan
+   melewati pelepasan komponen. Ikut hilang saat halaman dimuat ulang, dan itu
+   memang batas yang tepat — tidak ada yang perlu bertahan lebih lama dari
+   satu sesi tab. */
+type IsiSimpanan = {
+  items: MatchedListing[];
+  /** Kode agent yang sedang login — ditempelkan di ekor tautan detail. */
+  idAgent: string | null;
+  diagnosa: Diagnosa | null;
+  daftarPref: PrefRingkasan[];
+  tanpaPref: boolean;
+  nama: string;
+  adaWa: boolean;
+  terpilih: string[];
+  waktu: number;
+};
+const simpananCocok = new Map<string, IsiSimpanan>();
+
+/** Umur simpanan sebelum layar memilih memuat dari nol (dengan pemintal)
+ *  alih-alih menampilkan yang lama dulu. Lima menit: cukup lama untuk menutupi
+ *  perpindahan antar klien, cukup pendek supaya data yang benar-benar basi
+ *  tidak pernah tampil tanpa penyegaran. */
+const UMUR_SIMPANAN_MS = 5 * 60_000;
+
+/** Buang simpanan satu klien. Dipanggil sesudah mengirim: aset yang baru saja
+ *  dikirim harus hilang dari daftar "cocok", dan simpanan yang tidak dibuang
+ *  akan menampilkannya lagi seolah belum pernah dikirim. */
+function buangSimpanan(klienId: string) {
+  for (const k of [...simpananCocok.keys()]) {
+    if (k.startsWith(`${klienId}|`)) simpananCocok.delete(k);
+  }
+}
+
+/**
+ * Kriteria klien berubah → cari ulang SEKARANG, di belakang layar.
+ *
+ * Membuang simpanan saja belum cukup. Agent yang baru saja memperbaiki plafon
+ * budget ingin tahu apakah perbaikannya berhasil — dan tanpa jawaban, ia harus
+ * membuka layar Asisten Aset hanya untuk mencari tahu, lalu menunggu pemintal
+ * yang sama seperti sebelum ada simpanan. Dua langkah yang seluruhnya bisa
+ * dihapus: pencarian dijalankan begitu kriterianya disimpan, hasilnya
+ * dilaporkan sebagai satu kalimat, dan layarnya terbuka seketika saat diketuk.
+ *
+ * Sengaja TIDAK melempar galat. Ini pekerjaan latar yang memperbaiki
+ * pengalaman, bukan yang menentukan kebenaran — kegagalannya cukup dibalas
+ * dengan `null`, dan layar Asisten Aset tetap bisa memuat sendiri seperti biasa.
+ *
+ * @returns jumlah kecocokan, atau null bila gagal / tidak bisa dipastikan.
+ */
+async function cariUlangDiamDiam(klienId: string): Promise<number | null> {
+  buangSimpanan(klienId);
+  try {
+    const r = await fetch(`/api/dashboard/klien/${klienId}/rekomendasi/siap`);
+    const j = await r.json();
+    if (!j?.ok) return null;
+    simpananCocok.set(`${klienId}|`, {
+      items: j.items || [],
+      idAgent: j.idAgent ?? null,
+      diagnosa: j.diagnosa || null,
+      daftarPref: j.preferensi || [],
+      tanpaPref: !!j.tanpaPreferensi,
+      nama: j.klien?.nama || "",
+      adaWa: !!j.klien?.punyaWa,
+      terpilih: Array.isArray(j.terpilih) ? j.terpilih : [],
+      waktu: Date.now(),
+    });
+    return typeof j.total === "number" ? j.total : (j.items?.length ?? 0);
+  } catch {
+    buangSimpanan(klienId);
+    return null;
+  }
+}
+
+/** Apakah dua daftar preferensi menyebut kriteria yang sama?
+ *
+ *  Dipakai untuk memutuskan apakah pencarian ulang perlu dijalankan. Formulir
+ *  edit klien MENULIS ULANG seluruh preferensi (hapus semua → buat baru), jadi
+ *  id-nya selalu berubah meskipun agent cuma mengganti nomor telepon —
+ *  membandingkan id akan membuat setiap penyuntingan catatan memicu empat
+ *  query pencocokan yang tidak ada gunanya. Yang dibandingkan ISI kriterianya. */
+function kriteriaSama(a: PreferensiKlien[], b: PreferensiKlien[]): boolean {
+  if (a.length !== b.length) return false;
+  const sidik = (p: PreferensiKlien) => JSON.stringify([
+    p.tipe_properti, p.jenis_transaksi ?? "", p.lokasi_dicari ?? "",
+    p.budget_min ?? "", p.budget_max ?? "", p.luas_min ?? "", p.luas_max ?? "",
+  ]);
+  const kiri = a.map(sidik).sort();
+  const kanan = b.map(sidik).sort();
+  return kiri.every((v, i) => v === kanan[i]);
+}
+
+function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, praPilih, onClose }: {
   klienId: string;
+  /** Petunjuk awal saja — nama sebenarnya datang dari API, karena layar ini
+   *  bisa dibuka dari panel "siap kirim" dan dari tautan dalam yang tidak
+   *  memuat data klien apa pun. */
   klienNama: string;
-  klienWhatsapp: string | null;
+  punyaWa: boolean;
   klienEmail: string | null;
-  pref: PreferensiKlien;
+  /** null = GABUNGAN seluruh preferensi klien. Inilah jalur normalnya: agent
+   *  tidak pernah berpikir "kirim aset dari preferensi kedua Budi", ia
+   *  berpikir "kirimkan sesuatu untuk Budi".
+   *
+   *  Berupa DAFTAR, bukan satu preferensi. Satu kartu preferensi di layar
+   *  sebenarnya beberapa baris di database — satu per tipe properti — jadi
+   *  "Rumah atau Ruko di Gresik" tersimpan sebagai dua baris. Mengirimkan
+   *  hanya baris pertama, seperti sebelumnya, membuat separuh kriteria klien
+   *  tidak pernah ikut dicari, dan tidak ada satu pun pesan galat yang
+   *  memberi tahu bahwa itu terjadi. */
+  prefIds: string[] | null;
+  /** id_property yang langsung tercentang saat layar terbuka — dipakai tautan
+   *  dari email/tugas yang sudah menyebut aset tertentu. */
+  praPilih?: string[];
   onClose: () => void;
 }) {
   const [shown, setShown] = useState(false);
+  const [tab, setTab] = useState<"cocok" | "terkirim">("cocok");
+
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<MatchedListing[]>([]);
+  const [diagnosa, setDiagnosa] = useState<Diagnosa | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [terkirim, setTerkirim] = useState<ItemTerkirim[]>([]);
+  const [loadingKirim, setLoadingKirim] = useState(true);
+
+  const [dipilih, setDipilih] = useState<Set<string>>(new Set());
+  const [mengirim, setMengirim] = useState(false);
+  const [draf, setDraf] = useState<{ pesan: string; waUrl: string | null } | null>(null);
 
   useEffect(() => { const t = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(t); }, []);
   const close = useCallback(() => { setShown(false); setTimeout(onClose, 200); }, [onClose]);
@@ -1535,18 +2883,179 @@ function MatchListingModal({ klienId, klienNama, klienWhatsapp, klienEmail, pref
     return () => window.removeEventListener("keydown", fn);
   }, [close]);
 
-  useEffect(() => {
-    let active = true;
-    setLoading(true); setError(null);
-    fetch(`/api/dashboard/klien/${klienId}/preferensi/${pref.id_preferensi}/match`)
-      .then(r => r.json())
-      .then(j => { if (!active) return; if (j.ok) setItems(j.items); else setError("Gagal memuat"); })
-      .catch(() => { if (active) setError("Gagal memuat"); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [klienId, pref.id_preferensi]);
+  const [nama, setNama] = useState(klienNama);
+  const [adaWa, setAdaWa] = useState(punyaWa);
+  const [tanpaPref, setTanpaPref] = useState(false);
+  const [idAgent, setIdAgent] = useState<string | null>(null);
+  const [daftarPref, setDaftarPref] = useState<PrefRingkasan[]>([]);
+  /* Preferensi mana yang sedang disorot DI LAYAR — beda dari `prefIds`, yang
+     menentukan apa yang diminta dari server. Penyaringannya di sisi klien:
+     datanya sudah ada, dan menembak ulang server untuk menyembunyikan baris
+     membuat penyaring terasa berat padahal pekerjaannya nol. */
+  const [sorot, setSorot] = useState<string | null>(null);
 
-  const tipeLabel = pref.tipe_properti.charAt(0) + pref.tipe_properti.slice(1).toLowerCase().replace(/_/g, " ");
+  const kunciPref = (prefIds ?? []).join(",");
+
+  const kunciSimpanan = `${klienId}|${kunciPref}`;
+
+  /** Pasang isi simpanan ke layar. Dipisah dari pengambilannya supaya jalur
+   *  "tampilkan yang lama" dan jalur "pasang yang baru" memakai kode yang
+   *  sama — kalau tidak, keduanya akan menyimpang dan salah satunya lupa
+   *  menyetel sesuatu. */
+  const pasang = useCallback((c: IsiSimpanan, pilihkan: boolean) => {
+    setItems(c.items);
+    setDiagnosa(c.diagnosa);
+    setTanpaPref(c.tanpaPref);
+    setIdAgent(c.idAgent);
+    setDaftarPref(c.daftarPref);
+    setNama(c.nama);
+    setAdaWa(c.adaWa);
+    if (pilihkan) {
+      /* Tautan dari email sudah menyebut aset mana yang dimaksud; centangnya
+         harus mengikuti itu, bukan tiga teratas versi server — kalau tidak,
+         agent yang mengetuk "kirim 3 aset ini" dari email bisa mengirim tiga
+         aset yang lain. */
+      const dariTautan = (praPilih ?? []).filter(id => c.items.some(x => x.id_property === id));
+      /* Tiga aset terbaik langsung tercentang. Layar yang terbuka dengan nol
+         pilihan memaksa agent memutuskan sesuatu sebelum bisa bertindak, dan
+         keputusan itulah gesekan yang sebenarnya — mencabut centang jauh lebih
+         murah daripada memasangnya. */
+      const awal = dariTautan.length > 0 ? dariTautan : c.terpilih;
+      if (awal.length > 0) setDipilih(new Set(awal));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * @param diam jangan tampilkan pemintal — dipakai saat menyegarkan di balik
+   *   data lama yang sudah terpampang. Pemintal di atas isi yang benar dan
+   *   terbaca hanya membuat layar terasa lebih lambat daripada sebenarnya.
+   */
+  const muatCocok = useCallback((diam = false) => {
+    if (!diam) setLoading(true);
+    setError(null);
+    const url = kunciPref
+      ? `/api/dashboard/klien/${klienId}/rekomendasi/siap?pref=${encodeURIComponent(kunciPref)}`
+      : `/api/dashboard/klien/${klienId}/rekomendasi/siap`;
+    return fetch(url)
+      .then(r => r.json())
+      .then(j => {
+        if (!j.ok) { if (!diam) setError(j.message || "Gagal memuat"); return; }
+        const isi: IsiSimpanan = {
+          items: j.items || [],
+          idAgent: j.idAgent ?? null,
+          diagnosa: j.diagnosa || null,
+          daftarPref: j.preferensi || [],
+          tanpaPref: !!j.tanpaPreferensi,
+          nama: j.klien?.nama || klienNama,
+          adaWa: !!j.klien?.punyaWa,
+          terpilih: Array.isArray(j.terpilih) ? j.terpilih : [],
+          waktu: Date.now(),
+        };
+        simpananCocok.set(kunciSimpanan, isi);
+        /* Saat menyegarkan diam-diam, centang TIDAK disetel ulang: agent bisa
+           sedang memilih aset ketika jawabannya tiba, dan pilihan yang tiba-
+           tiba berubah sendiri adalah kehilangan kendali yang paling menjengkelkan. */
+        pasang(isi, !diam);
+      })
+      .catch(() => { if (!diam) setError("Gagal memuat"); })
+      .finally(() => { if (!diam) setLoading(false); });
+  }, [klienId, klienNama, kunciPref, kunciSimpanan, pasang]);
+
+  const muatTerkirim = useCallback(() => {
+    setLoadingKirim(true);
+    return fetch(`/api/dashboard/klien/${klienId}/rekomendasi`)
+      .then(r => r.json())
+      .then(j => { if (j.ok) setTerkirim(j.items || []); })
+      .catch(() => {})
+      .finally(() => setLoadingKirim(false));
+  }, [klienId]);
+
+  useEffect(() => {
+    const c = simpananCocok.get(kunciSimpanan);
+    if (c) {
+      /* Tampilkan yang lama SEKETIKA, lalu segarkan di belakang layar. Yang
+         dihindari bukan sekadar detik menunggunya, melainkan layar kosong
+         berpemintal untuk daftar yang isinya hampir pasti sama dengan yang
+         barusan dilihat agent. */
+      pasang(c, true);
+      setLoading(false);
+      if (Date.now() - c.waktu > UMUR_SIMPANAN_MS) muatCocok(true);
+    } else {
+      muatCocok();
+    }
+    muatTerkirim();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kunciSimpanan]);
+
+  const togglePilih = (id: string) => setDipilih(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id);
+    /* Enam adalah batas yang sama dengan yang ditegakkan server. Ditegakkan
+       juga di sini supaya agent tahu batasnya SEBELUM menekan kirim, bukan
+       lewat pesan galat setelahnya. */
+    else if (n.size < 6) n.add(id);
+    return n;
+  });
+
+  async function kirim() {
+    if (dipilih.size === 0 || mengirim) return;
+    setMengirim(true);
+    try {
+      const res = await fetch(`/api/dashboard/klien/${klienId}/rekomendasi/kirim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: [...dipilih],
+          /* PETA, bukan satu nilai. Aset dalam satu pesan bisa datang dari
+             kriteria yang berbeda — klien yang mencari "rumah Gresik ≤500jt"
+             DAN "ruko Surabaya ≤1M" menerima keduanya sekaligus — dan
+             mencatat semuanya di bawah satu preferensi membuat laporan
+             "kriteria mana yang menghasilkan closing" bohong sejak awal. */
+          pref_map: Object.fromEntries(
+            items.filter(i => dipilih.has(i.id_property)).map(i => [i.id_property, i.id_preferensi]),
+          ),
+        }),
+      });
+      const j = await res.json();
+      if (!j.ok) { setError(j.message || "Gagal mencatat kiriman"); return; }
+      setDraf({ pesan: j.pesan, waUrl: j.waUrl });
+      setDipilih(new Set());
+      /* Aset yang barusan dikirim harus lenyap dari daftar "cocok". Simpanan
+         yang tidak dibuang akan menampilkannya lagi seolah belum pernah
+         dikirim — dan anti-dobel yang terlihat bocor merusak kepercayaan pada
+         seluruh buku kiriman. */
+      buangSimpanan(klienId);
+      muatCocok(); muatTerkirim();
+    } finally {
+      setMengirim(false);
+    }
+  }
+
+  const perluDikabari = terkirim.filter(t => t.perubahan.length > 0).length;
+
+  /* Chip penyaring hanya muncul kalau memang ADA yang bisa disaring. Satu chip
+     tunggal di atas daftar cuma menyita ruang dan menyiratkan ada pilihan lain
+     yang sebenarnya tidak ada. */
+  const adaBanyakPref = daftarPref.length > 1;
+  /* Berapa kecocokan yang ADA tapi belum muat di daftar — dihitung untuk
+     lingkup yang sedang dilihat, bukan global. */
+  const sisaBelumTampil = useMemo(() => {
+    if (sorot) {
+      const g = daftarPref.find(p => p.id_grup === sorot);
+      return g ? Math.max(0, g.total - g.ditampilkan) : 0;
+    }
+    return Math.max(0, daftarPref.reduce((n, p) => n + p.total, 0) - items.length);
+  }, [daftarPref, sorot, items.length]);
+  const tampil = useMemo(
+    () => (sorot ? items.filter(i => (i.cocok_grup ?? []).includes(sorot)) : items),
+    [items, sorot],
+  );
+  const ringkasHeader = daftarPref.length === 0
+    ? "Dari seluruh preferensi klien ini"
+    : daftarPref.length === 1
+      ? daftarPref[0].label
+      : `${daftarPref.length} preferensi · ${daftarPref.reduce((n, p) => n + p.total, 0)} kecocokan`;
 
   return (
     <div
@@ -1555,7 +3064,7 @@ function MatchListingModal({ klienId, klienNama, klienWhatsapp, klienEmail, pref
     >
       <div
         onClick={e => e.stopPropagation()}
-        className={`relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] border-t border-white/[0.1] bg-[#0a0c12] shadow-[0_-30px_80px_rgba(0,0,0,0.7)] transition-transform duration-300 sm:max-h-[85vh] sm:rounded-[28px] sm:border ${shown ? "translate-y-0" : "translate-y-10"}`}
+        className={`relative flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-[28px] border-t border-white/[0.1] bg-[#0a0c12] shadow-[0_-30px_80px_rgba(0,0,0,0.7)] transition-transform duration-300 sm:max-h-[88vh] sm:rounded-[28px] sm:border ${shown ? "translate-y-0" : "translate-y-10"}`}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-400/0 via-emerald-400/80 to-emerald-400/0" />
         <div className="absolute left-1/2 top-2.5 z-20 h-1 w-12 -translate-x-1/2 rounded-full bg-white/20 sm:hidden" />
@@ -1564,144 +3073,642 @@ function MatchListingModal({ klienId, klienNama, klienWhatsapp, klienEmail, pref
           <Icon icon="solar:close-circle-bold" className="text-lg" />
         </button>
 
-        <header className="shrink-0 border-b border-white/[0.06] px-5 pb-4 pt-9 sm:pt-6">
+        {/* ── Kepala ── */}
+        <header className="shrink-0 border-b border-white/[0.06] px-5 pb-0 pt-9 sm:pt-6">
           <div className="flex items-center gap-2">
-            <Icon icon="solar:magnifer-bold-duotone" className="text-base text-emerald-300" />
-            <h3 className="text-[15px] font-extrabold text-white">Listing yang Cocok</h3>
+            <Icon icon="solar:magic-stick-3-bold-duotone" className="text-base text-emerald-300" />
+            <h3 className="text-[15px] font-extrabold text-white">Asisten Aset · {nama}</h3>
           </div>
-          <p className="mt-1 text-[12px] text-slate-400">
-            {tipeLabel}
-            {pref.jenis_transaksi ? ` · ${JENIS_TRANSAKSI_LABEL[pref.jenis_transaksi]}` : ""}
-            {pref.lokasi_dicari ? ` · ${pref.lokasi_dicari}` : ""}
-            {(pref.budget_min || pref.budget_max)
-              ? ` · Rp ${[formatRp(pref.budget_min), formatRp(pref.budget_max)].filter(Boolean).join("–")}`
-              : ""}
-          </p>
+          <p className="mt-1 text-[12px] text-slate-400">{ringkasHeader}</p>
+
+          {/* ── Chip preferensi ──
+              Klien nyata jarang punya satu kriteria. Tanpa baris ini, dua
+              preferensi menghasilkan satu daftar campur yang tidak bisa
+              ditelusuri: agent melihat ruko di antara rumah dan menyimpulkan
+              pencocokannya rusak. Angka nol pun sengaja ditampilkan — kriteria
+              yang tidak menghasilkan apa pun adalah kriteria yang perlu
+              digeser, dan menyembunyikannya membuatnya tak pernah diperbaiki. */}
+          {adaBanyakPref && (
+            <div className="-mx-1 mt-2.5 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <button
+                onClick={() => setSorot(null)}
+                className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  sorot === null
+                    ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200"
+                    : "border-white/[0.08] bg-white/[0.03] text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                Semua · {items.length}
+              </button>
+              {daftarPref.map(p => (
+                <button
+                  key={p.id_grup}
+                  onClick={() => setSorot(s => (s === p.id_grup ? null : p.id_grup))}
+                  className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                    sorot === p.id_grup
+                      ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200"
+                      : p.ditampilkan === 0
+                        ? "border-white/[0.06] bg-white/[0.02] text-slate-600 hover:text-slate-400"
+                        : "border-white/[0.08] bg-white/[0.03] text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  {p.label} · {p.ditampilkan}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-3 flex gap-1">
+            {([
+              { k: "cocok" as const, label: "Cocok", n: items.length },
+              { k: "terkirim" as const, label: "Terkirim", n: terkirim.length },
+            ]).map(t => (
+              <button
+                key={t.k}
+                onClick={() => setTab(t.k)}
+                className={`relative flex items-center gap-1.5 rounded-t-lg px-3.5 py-2 text-[12.5px] font-bold transition-colors ${
+                  tab === t.k ? "text-white" : "text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {t.label}
+                {t.n > 0 && (
+                  <span className={`rounded-full px-1.5 py-px text-[10px] ${tab === t.k ? "bg-emerald-400/15 text-emerald-300" : "bg-white/[0.06] text-slate-500"}`}>
+                    {t.n}
+                  </span>
+                )}
+                {/* Titik peringatan: ada kabar yang belum diteruskan ke klien. */}
+                {t.k === "terkirim" && perluDikabari > 0 && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 shadow-[0_0_6px_currentColor]" />
+                )}
+                {tab === t.k && <span className="absolute inset-x-0 -bottom-px h-[2px] rounded-full bg-emerald-400" />}
+              </button>
+            ))}
+          </div>
         </header>
 
+        {/* ── Isi ── */}
         <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-4">
-          {loading ? (
+          {tab === "cocok" ? (
+            loading ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-20 text-slate-400">
+                <Icon icon="svg-spinners:ring-resize" className="text-3xl text-emerald-400" />
+                <p className="text-[13px]">Mencari aset…</p>
+              </div>
+            ) : error ? (
+              <div className="py-20 text-center text-[13px] text-rose-300">{error}</div>
+            ) : items.length === 0 ? (
+              <PanelKosong diagnosa={diagnosa} tanpaPref={tanpaPref} />
+            ) : tampil.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <Icon icon="solar:filter-bold-duotone" className="text-3xl text-slate-700" />
+                <p className="mt-3 text-[13px] font-bold text-white">Preferensi ini belum ada yang cocok</p>
+                <p className="mt-1 max-w-xs text-[12px] text-slate-500">
+                  Kriteria lain klien ini masih punya {items.length} aset — ketuk “Semua” di atas.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Menyebut sisanya secara terbuka. Daftar yang memotong diam-diam
+                    membuat agent mengira persediaannya cuma segitu, lalu berhenti
+                    mencari — padahal aset berikutnya muncul sendiri begitu yang
+                    sekarang selesai dikirim. */}
+                <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  {tampil.length} aset cocok · pilih maksimal 6 untuk dikirim sekaligus
+                  {sisaBelumTampil > 0 && (
+                    <span className="ml-1 normal-case tracking-normal text-slate-600">
+                      ({sisaBelumTampil.toLocaleString("id-ID")} lagi menyusul setelah ini dikirim)
+                    </span>
+                  )}
+                </p>
+                {tampil.map(it => (
+                  <KartuCocok
+                    key={it.id_property}
+                    it={it}
+                    idAgent={idAgent}
+                    dipilih={dipilih.has(it.id_property)}
+                    onToggle={() => togglePilih(it.id_property)}
+                  />
+                ))}
+              </>
+            )
+          ) : loadingKirim ? (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-slate-400">
               <Icon icon="svg-spinners:ring-resize" className="text-3xl text-emerald-400" />
-              <p className="text-[13px]">Mencari listing…</p>
             </div>
-          ) : error ? (
-            <div className="py-20 text-center text-[13px] text-rose-300">{error}</div>
-          ) : items.length === 0 ? (
+          ) : terkirim.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="grid h-16 w-16 place-items-center rounded-3xl border border-white/[0.06] bg-white/[0.02]">
-                <Icon icon="solar:home-smile-angle-bold-duotone" className="text-3xl text-slate-500" />
-              </div>
-              <p className="mt-3 text-[14px] font-bold text-white">Belum ada listing yang cocok</p>
+              <Icon icon="solar:posts-carousel-vertical-bold-duotone" className="text-4xl text-slate-700" />
+              <p className="mt-3 text-[14px] font-bold text-white">Belum ada aset yang dikirim</p>
               <p className="mt-1 max-w-xs text-[12px] text-slate-500">
-                Coba longgarkan kriteria preferensi (budget, luas, atau lokasi) lalu cari lagi.
+                Aset yang Anda kirim tercatat di sini — lengkap dengan tanggapan klien dan perubahan harganya.
               </p>
             </div>
           ) : (
-            <>
-              <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                {items.length} listing ditemukan
-              </p>
-              {items.map(it => (
-                <MatchCard
-                  key={it.id_property}
-                  it={it}
-                  klienNama={klienNama}
-                  klienWhatsapp={klienWhatsapp}
-                  klienEmail={klienEmail}
-                />
-              ))}
-            </>
+            terkirim.map(t => (
+              <KartuTerkirim
+                key={t.id_kiriman}
+                t={t}
+                idAgent={idAgent}
+                klienId={klienId}
+                onSelesai={() => { buangSimpanan(klienId); muatTerkirim(); muatCocok(); }}
+              />
+            ))
           )}
         </div>
+
+        {/* ── Kaki: bilah kirim ──
+            Hanya muncul saat ada yang dipilih. Bilah aksi permanen yang
+            kebanyakan waktu berisi tombol mati cuma memakan tinggi layar. */}
+        {tab === "cocok" && dipilih.size > 0 && (
+          <footer className="shrink-0 border-t border-white/[0.08] bg-[#0c0f16] px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => setDipilih(new Set())}
+                className="shrink-0 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-[12px] font-semibold text-slate-300 transition-colors hover:bg-white/[0.07]"
+              >
+                Batal
+              </button>
+              <button
+                onClick={kirim}
+                disabled={mengirim}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-500 py-2.5 text-[13px] font-extrabold text-[#04130d] transition-all hover:from-emerald-300 hover:to-emerald-400 active:scale-[0.99] disabled:opacity-60"
+              >
+                <Icon icon={mengirim ? "svg-spinners:ring-resize" : "ic:baseline-whatsapp"} className="text-base" />
+                {mengirim ? "Menyiapkan…" : `Siapkan pesan · ${dipilih.size} aset`}
+              </button>
+            </div>
+          </footer>
+        )}
       </div>
+
+      {draf && (
+        <DrafPesanModal
+          draf={draf}
+          punyaWa={adaWa}
+          klienEmail={klienEmail}
+          onClose={() => setDraf(null)}
+        />
+      )}
     </div>
   );
 }
 
-function MatchCard({ it, klienNama, klienWhatsapp, klienEmail }: {
-  it: MatchedListing;
-  klienNama: string;
-  klienWhatsapp: string | null;
-  klienEmail: string | null;
+/* ── Panel "kenapa kosong" ─────────────────────────────────────
+   Inilah bayaran atas keputusan mencocokkan secara ketat. Layar kosong tanpa
+   penjelasan membuat agent menyimpulkan fiturnya rusak; layar kosong yang
+   menyebut gerbang mana yang menghalangi membuatnya membuka preferensi dan
+   memperbaiki satu angka. */
+function PanelKosong({ diagnosa, tanpaPref }: { diagnosa: Diagnosa | null; tanpaPref?: boolean }) {
+  if (tanpaPref) {
+    return (
+      <div className="flex flex-col items-center py-16 text-center">
+        <div className="grid h-16 w-16 place-items-center rounded-3xl border border-white/[0.06] bg-white/[0.02]">
+          <Icon icon="solar:clipboard-list-bold-duotone" className="text-3xl text-slate-500" />
+        </div>
+        <p className="mt-3 text-[14px] font-bold text-white">Klien ini belum punya preferensi</p>
+        <p className="mt-1 max-w-xs text-[12px] text-slate-500">
+          Isi kriteria yang dicari (tipe, lokasi, budget) di kartu klien, lalu asisten ini bisa mencarikan asetnya.
+        </p>
+      </div>
+    );
+  }
+
+  const saran: { ikon: string; teks: string; n: number }[] = [];
+  if (diagnosa) {
+    if (diagnosa.adaBudget && diagnosa.jikaBudgetNaik10 > 0)
+      saran.push({ ikon: "solar:wallet-money-bold-duotone", teks: "kalau plafon budget dinaikkan 10%", n: diagnosa.jikaBudgetNaik10 });
+    if (diagnosa.tingkatLokasi !== "bebas" && diagnosa.jikaLokasiDiperluas > 0)
+      saran.push({ ikon: "solar:map-point-bold-duotone", teks: "kalau lokasi diperluas satu tingkat", n: diagnosa.jikaLokasiDiperluas });
+    if (diagnosa.adaLuas && diagnosa.jikaLuasDiabaikan > 0)
+      saran.push({ ikon: "solar:ruler-angular-bold-duotone", teks: "kalau batas luas dilepas", n: diagnosa.jikaLuasDiabaikan });
+  }
+
+  return (
+    <div className="flex flex-col items-center py-14 text-center">
+      <div className="grid h-16 w-16 place-items-center rounded-3xl border border-white/[0.06] bg-white/[0.02]">
+        <Icon icon="solar:home-smile-angle-bold-duotone" className="text-3xl text-slate-500" />
+      </div>
+      <p className="mt-3 text-[14px] font-bold text-white">Belum ada aset yang cocok persis</p>
+      {/* Klien bisa punya beberapa kriteria; saran "naikkan plafon 10%" tanpa
+          menyebut plafon yang mana tidak bisa ditindaklanjuti. */}
+      {diagnosa?.label && (
+        <p className="mt-1 text-[11px] font-semibold text-slate-500">
+          Ditinjau dari kriteria: <span className="text-slate-300">{diagnosa.label}</span>
+        </p>
+      )}
+
+      {diagnosa && diagnosa.totalTanpaFilterLunak === 0 ? (
+        <p className="mt-1 max-w-sm text-[12px] text-slate-500">
+          Tidak ada satu pun aset dengan kategori dan jenis transaksi ini yang sedang tersedia. Kriteria budget dan
+          lokasinya belum jadi soal.
+        </p>
+      ) : saran.length > 0 ? (
+        <>
+          <p className="mt-1 max-w-sm text-[12px] text-slate-500">
+            Pencarian sengaja ketat — tidak ada aset yang ditampilkan kalau tidak benar-benar masuk kriteria. Yang
+            menghalangi:
+          </p>
+          <div className="mt-3 w-full max-w-sm space-y-1.5">
+            {saran.map((s, i) => (
+              <div key={i} className="flex items-center gap-2.5 rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-left">
+                <Icon icon={s.ikon} className="shrink-0 text-[17px] text-emerald-300/80" />
+                <span className="min-w-0 flex-1 text-[11.5px] text-slate-300">{s.teks}</span>
+                <span className="shrink-0 rounded-full bg-emerald-400/10 px-2 py-0.5 text-[11px] font-bold text-emerald-300">
+                  +{s.n}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 max-w-sm text-[11px] text-slate-600">
+            Ubah preferensinya di kartu klien kalau salah satu pelonggaran itu memang masuk akal.
+          </p>
+        </>
+      ) : (
+        <p className="mt-1 max-w-sm text-[12px] text-slate-500">
+          Semua aset yang cocok sudah pernah dikirim ke klien ini. Lihat tab Terkirim.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ── Foto aset ─────────────────────────────────────────────── */
+
+/* KENAPA <Image>, BUKAN <img>.
+   Nilai kolom `gambar` menunjuk ke host pihak ketiga: 121.411 baris ke
+   file.lelang.go.id, sisanya ke drive.google.com. <img> biasa membuat BROWSER
+   agent yang mengambilnya langsung ke sana — dan kedua host itu punya aturan
+   sendiri soal siapa yang boleh mengambil: file.lelang.go.id menolak hotlink,
+   Drive membatasi laju per akun dan ikut membaca cookie Google si agent. Jadi
+   fotonya bisa hilang di layar seorang agent sementara URL-nya baik-baik saja
+   dari server (sudah dicek: 12 dari 12 URL Drive membalas 200 dari sini).
+
+   Seluruh permukaan lain di situs ini memakai next/image, yang mengambilnya
+   SERVER-SIDE lalu menyajikannya dari domain sendiri. Kartu CRM ini satu-
+   satunya yang tidak — karena itu pula hanya di sini fotonya rusak. Kedua host
+   sudah terdaftar di remotePatterns, dan hasil optimasinya (cache 30 hari)
+   dipakai bersama kartu publik yang menampilkan aset yang sama. */
+function FotoAset({ src, alt, ikon }: { src: string; alt: string; ikon: string }) {
+  /* Kunci per-URL. Tanpa ini, kartu yang tergantikan aset lain saat daftarnya
+     disaring ulang akan mewarisi status gagal milik aset sebelumnya, dan foto
+     yang sebenarnya baik ikut tidak pernah tampil. */
+  const [gagal, setGagal] = useState("");
+
+  if (!src || gagal === src) {
+    return (
+      <div className="grid h-full w-full place-items-center text-slate-700">
+        <Icon icon="solar:gallery-bold-duotone" className={ikon} />
+      </div>
+    );
+  }
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      fill
+      /* Kartunya berukuran tetap dan kecil; tanpa `sizes` next/image meminta
+         lebar viewport penuh dan mengunduh gambar 1080px untuk kotak 92px. */
+      sizes="96px"
+      className="object-cover"
+      /* Placeholder yang tenang mengalahkan teks alt yang meluber keluar kotak
+         — bentuk kegagalan yang tadinya terlihat seperti kartu yang rusak. */
+      onError={() => setGagal(src)}
+    />
+  );
+}
+
+/* ── Kartu aset yang cocok ─────────────────────────────────── */
+
+function KartuCocok({ it, idAgent, dipilih, onToggle }: {
+  it: MatchedListing; idAgent: string | null; dipilih: boolean; onToggle: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const isLel = it.jenis_transaksi.toUpperCase() === "LELANG";
-  const price = isLel ? it.nilai_limit_lelang : (it.harga_promo ?? it.harga);
-  const lokasi = [it.kelurahan, it.kecamatan, it.kota].filter(Boolean).join(", ");
+  const harga = isLel ? (it.nilai_limit_lelang ?? it.harga) : it.harga;
+  /* Alamat lengkap, bukan rangkaian kelurahan/kecamatan/kota. Di situlah nama
+     jalan, komplek, blok, dan nomor kavling berada — hal-hal yang membuat
+     agent tahu persis di mana asetnya tanpa membuka detailnya. Sebagian baris
+     bahkan punya alamat lengkap sementara kolom kelurahan & kecamatannya
+     kosong, dan versi lama menampilkan "Kab. Gresik" saja untuk aset yang
+     alamatnya sebenarnya "Perum GKGA Blok Q-11, Kedanyang, Gresik".
+     Dirapikan karena 26% baris datang dari lelang.go.id dalam HURUF BESAR
+     SEMUA, dan teks yang berteriak justru lebih lambat dibaca. */
+  const lokasi =
+    rapikanAlamat(it.alamat_lengkap) ||
+    [it.kelurahan, it.kecamatan, it.kota].filter(Boolean).join(", ");
+  /* Sudah dinormalisasi server (file-id Drive → URL thumbnail). */
+  const foto = it.gambar || "";
   const luas = it.kategori.toUpperCase() === "TANAH"
     ? (it.luas_tanah ? `LT ${it.luas_tanah} m²` : "")
     : [it.luas_tanah ? `LT ${it.luas_tanah}` : "", it.luas_bangunan ? `LB ${it.luas_bangunan}` : ""].filter(Boolean).join(" · ");
 
-  // Link & pesan share — pakai URL detail publik (absolut).
-  const detailHref = propertiHref(it);
-  const fullUrl = (typeof window !== "undefined" ? window.location.origin : "") + detailHref;
-  const firstName = klienNama ? klienNama.split(" ")[0] : "";
-  const greet = firstName ? `Halo ${firstName} 👋 ` : "Halo 👋 ";
-  const pesan = `${greet}Ini ada properti yang mungkin cocok untuk Anda:\n\n*${it.judul}*\n${formatRpFull(price)}${lokasi ? `\n📍 ${lokasi}` : ""}\n\nDetail lengkap:\n${fullUrl}`;
-  const waDigits = (klienWhatsapp || "").replace(/\D/g, "");
-  const waHref = waDigits
-    ? `https://wa.me/${waDigits}?text=${encodeURIComponent(pesan)}`
-    : `https://wa.me/?text=${encodeURIComponent(pesan)}`;
-  const mailHref = `mailto:${klienEmail || ""}?subject=${encodeURIComponent("Properti untuk Anda: " + it.judul)}&body=${encodeURIComponent(pesan)}`;
-  const copyLink = () => {
-    navigator.clipboard?.writeText(fullUrl)
-      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); })
-      .catch(() => {});
-  };
-
   return (
-    <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-2.5 transition-all hover:border-white/[0.12]">
-      {/* Info listing → ketuk untuk buka detail */}
-      <a href={detailHref} target="_blank" rel="noopener noreferrer" className="flex gap-3">
-        <div className="relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-white/[0.04]">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={it.gambar} alt={it.judul} className="h-full w-full object-cover" loading="lazy" />
+    <div
+      onClick={onToggle}
+      className={`group cursor-pointer rounded-2xl border p-2.5 transition-all ${
+        dipilih
+          ? "border-emerald-400/50 bg-emerald-500/[0.07] shadow-[0_0_24px_-10px_rgba(16,185,129,0.8)]"
+          : "border-white/[0.06] bg-white/[0.02] hover:border-white/[0.14]"
+      }`}
+    >
+      <div className="flex gap-3">
+        {/* Kotak centang. Seluruh kartu bisa diketuk, tapi kotaknya tetap
+            digambar — tanpa penanda visual, tidak ada yang menduga kartu ini
+            bisa dipilih berbarengan. */}
+        <div className="flex shrink-0 items-center">
+          <span className={`grid h-5 w-5 place-items-center rounded-md border transition-all ${
+            dipilih ? "border-emerald-400 bg-emerald-400 text-[#04130d]" : "border-white/20 bg-white/[0.04] text-transparent group-hover:border-white/40"
+          }`}>
+            <Icon icon="solar:check-read-linear" className="text-[13px]" />
+          </span>
+        </div>
+
+        <div className="relative h-[72px] w-[92px] shrink-0 overflow-hidden rounded-xl bg-white/[0.04]">
+          <FotoAset src={foto} alt={it.judul} ikon="text-xl" />
           <span className="absolute left-1 top-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-200 backdrop-blur">
             {JENIS_TRANSAKSI_LABEL[it.jenis_transaksi as keyof typeof JENIS_TRANSAKSI_LABEL] ?? it.jenis_transaksi}
           </span>
         </div>
+
         <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
-          <div>
+          <div className="min-w-0">
             <p className="line-clamp-1 text-[13px] font-bold text-white">{it.judul}</p>
-            <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-400">
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-slate-400">
               <Icon icon="solar:map-point-bold-duotone" className="mr-0.5 inline align-[-2px] text-[11px] text-slate-500" />
               {lokasi || "—"}
             </p>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[13px] font-extrabold text-emerald-300">{formatRpFull(price)}</span>
+            <span className="text-[13px] font-extrabold text-emerald-300">{formatRpFull(harga)}</span>
             {luas && <span className="shrink-0 text-[10px] text-slate-500">{luas}</span>}
           </div>
         </div>
-      </a>
+      </div>
 
-      {/* Tombol share */}
-      <div className="mt-2 flex items-center gap-1.5 border-t border-white/[0.06] pt-2">
+      {/* Kaki kartu: alasan di kiri, jalan keluar di kanan.
+          SELALU dirender — dulu hanya muncul kalau ada alasan, dan itu membuat
+          tombol "Lihat detail" hilang persis pada aset yang paling perlu
+          diperiksa: yang datanya paling miskin.
+
+          Alasan kenapa aset ini muncul. Rekomendasi tanpa alasan menuntut
+          kepercayaan buta, dan agent berhenti memakainya setelah satu hasil
+          yang terasa aneh.
+
+          Di sini TIDAK ada lencana "sudah pernah dikirim", dan itu disengaja:
+          aset yang sudah dikirim dikeluarkan dari kolam pencarian di server
+          (lihat `kecuali` di endpoint /rekomendasi/siap), jadi ia tidak pernah
+          sampai ke kartu ini. Daftar ini antrean kerja, bukan katalog. */}
+      <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/[0.05] pt-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          {saringAlasan(it.alasan, lokasi).map((a, i) => (
+            <span key={i} className="rounded-md bg-white/[0.05] px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
+              {a}
+            </span>
+          ))}
+        </div>
+
+        {/* Bertuliskan "Lihat detail", bukan ikon telanjang. Ikon panah-keluar
+            sendirian menuntut agent menebak, dan yang ditebak salah di sini
+            adalah membuka tab baru — hal yang terasa seperti kehilangan tempat.
+
+            Tiga keputusan yang tidak terlihat:
+            • stopPropagation — seluruh kartu ini saklar pilih. Tanpanya,
+              membuka detail sekaligus mencentang/mencabut asetnya, dan agent
+              kembali dari tab sebelah menemukan pilihannya berubah sendiri.
+            • target="_blank" — agent sedang di tengah memilih sampai enam aset.
+              Berpindah halaman di tab yang sama membuang seluruh pilihan itu.
+            • jalur relatif (pathListing), bukan URL berdomain — SITE_URL
+              menunjuk ke solusindoaset.com, jadi tautan berdomain akan
+              melempar agent ke situs produksi saat menguji di localhost. */}
         <a
-          href={waHref}
+          href={pathListing({ slug: it.slug, id_property: it.id_property, jenis_transaksi: it.jenis_transaksi }, idAgent)}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-400/25 bg-emerald-500/10 py-2 text-[11px] font-bold text-emerald-200 transition-all hover:bg-emerald-500/20"
+          onClick={e => e.stopPropagation()}
+          aria-label={`Lihat detail ${it.judul} di tab baru`}
+          className="flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-bold text-slate-300 transition-colors hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200"
         >
-          <Icon icon="ic:baseline-whatsapp" className="text-sm" />
-          WhatsApp
+          Lihat detail
+          <Icon icon="solar:arrow-right-up-linear" className="text-[12px]" />
         </a>
-        <a
-          href={mailHref}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-sky-400/20 bg-sky-500/10 py-2 text-[11px] font-bold text-sky-200 transition-all hover:bg-sky-500/20"
-        >
-          <Icon icon="solar:letter-bold" className="text-sm" />
-          Email
-        </a>
-        <button
-          onClick={copyLink}
-          title="Salin link"
-          className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[11px] font-bold text-slate-200 transition-all hover:bg-white/[0.08]"
-        >
-          <Icon icon={copied ? "solar:check-circle-bold" : "solar:copy-bold"} className="text-sm" />
-          {copied ? "Tersalin" : "Salin"}
-        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Kartu aset yang sudah dikirim ─────────────────────────── */
+
+function KartuTerkirim({ t, idAgent, klienId, onSelesai }: {
+  t: ItemTerkirim; idAgent: string | null; klienId: string; onSelesai: () => void;
+}) {
+  const [sibuk, setSibuk] = useState(false);
+  const meta = TANGGAPAN_META[t.tanggapan] ?? TANGGAPAN_META.MENUNGGU;
+  const foto = t.gambar || "";
+  const lokasi = [t.kecamatan, t.kota].filter(Boolean).join(", ");
+
+  async function setTanggapan(tanggapan: string) {
+    if (sibuk) return;
+    setSibuk(true);
+    try {
+      await fetch(`/api/dashboard/klien/${klienId}/rekomendasi/tanggapan`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_kiriman: t.id_kiriman, tanggapan }),
+      });
+      onSelesai();
+    } finally { setSibuk(false); }
+  }
+
+  async function tutupPerubahan(id: string, aksi: "TERUSKAN" | "ABAIKAN") {
+    if (sibuk) return;
+    setSibuk(true);
+    try {
+      await fetch(`/api/dashboard/klien/${klienId}/rekomendasi/tanggapan`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_perubahan: id, aksi }),
+      });
+      onSelesai();
+    } finally { setSibuk(false); }
+  }
+
+  return (
+    <div className={`rounded-2xl border p-2.5 transition-all ${
+      t.perubahan.length > 0 ? "border-amber-400/25 bg-amber-500/[0.04]" : "border-white/[0.06] bg-white/[0.02]"
+    }`}>
+      <div className="flex gap-3">
+        <div className="relative h-[62px] w-[80px] shrink-0 overflow-hidden rounded-xl bg-white/[0.04]">
+          <FotoAset src={foto} alt={t.judul} ikon="text-lg" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="line-clamp-1 text-[12.5px] font-bold text-white">{t.judul}</p>
+            {/* Di tab ini justru lebih sering diperlukan daripada di tab Cocok:
+                klien membalas menanyakan sesuatu, dan agent harus membuka
+                asetnya untuk menjawab. Kartu ini BUKAN saklar pilih, jadi tidak
+                perlu stopPropagation — tapi tetap tab baru, supaya daftar
+                kiriman yang sedang ditelusuri tidak hilang. */}
+            <a
+              href={pathListing({ slug: t.slug, id_property: t.id_property, jenis_transaksi: t.jenis_transaksi }, idAgent)}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Lihat detail ${t.judul} di tab baru`}
+              className="flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 py-1 text-[10.5px] font-bold text-slate-400 transition-colors hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200"
+            >
+              Detail
+              <Icon icon="solar:arrow-right-up-linear" className="text-[11px]" />
+            </a>
+          </div>
+          <p className="mt-0.5 line-clamp-1 text-[10.5px] text-slate-500">{lokasi || "—"}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className="text-[12px] font-extrabold text-emerald-300">{formatRpFull(t.harga_sekarang)}</span>
+            {t.harga_sekarang !== t.harga_diketahui && (
+              <span className="text-[10px] text-slate-500 line-through">{formatRpFull(t.harga_diketahui)}</span>
+            )}
+            <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9.5px] font-bold ${meta.kelas}`}>
+              <Icon icon={meta.ikon} className="text-[11px]" />
+              {meta.label}
+            </span>
+            {t.jumlah_kirim > 1 && (
+              <span className="text-[10px] text-slate-600">dikirim {t.jumlah_kirim}×</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Kabar yang belum diteruskan ke klien */}
+      {t.perubahan.map(p => {
+        const m = PERUBAHAN_META[p.jenis];
+        return (
+          <div key={p.id} className={`mt-2 rounded-xl border px-2.5 py-2 ${m.kelas}`}>
+            <div className="flex items-center gap-1.5 text-[11.5px] font-bold">
+              <Icon icon={m.ikon} className="text-[14px]" />
+              {m.label}
+              {p.selisih_persen != null && (
+                <span>{Math.abs(Number(p.selisih_persen)).toFixed(1).replace(".", ",")}%</span>
+              )}
+              {p.harga_lama != null && p.harga_baru != null && (
+                <span className="font-medium opacity-80">
+                  {formatRpFull(p.harga_lama)} → {formatRpFull(p.harga_baru)}
+                </span>
+              )}
+            </div>
+            <div className="mt-1.5 flex gap-1.5">
+              <button
+                onClick={() => tutupPerubahan(p.id, "TERUSKAN")}
+                disabled={sibuk}
+                className="flex-1 rounded-lg bg-white/[0.12] py-1.5 text-[11px] font-bold transition-colors hover:bg-white/20 disabled:opacity-50"
+              >
+                Sudah saya kabari
+              </button>
+              <button
+                onClick={() => tutupPerubahan(p.id, "ABAIKAN")}
+                disabled={sibuk}
+                className="rounded-lg border border-white/[0.12] px-2.5 py-1.5 text-[11px] font-semibold opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
+              >
+                Lewati
+              </button>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Pencatat tanggapan klien. Bukan hiasan: "tidak cocok" empat kali
+          berturut-turut adalah bukti bahwa kriteria di preferensinya salah. */}
+      <div className="mt-2 flex flex-wrap gap-1 border-t border-white/[0.05] pt-2">
+        {(["SUKA", "MINTA_SURVEI", "TIDAK_COCOK", "DEAL"] as const).map(k => {
+          const m = TANGGAPAN_META[k];
+          const aktif = t.tanggapan === k;
+          return (
+            <button
+              key={k}
+              onClick={() => setTanggapan(aktif ? "MENUNGGU" : k)}
+              disabled={sibuk}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10.5px] font-bold transition-all disabled:opacity-50 ${
+                aktif ? m.kelas : "border-white/[0.07] bg-white/[0.02] text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              <Icon icon={m.ikon} className="text-[12px]" />
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ── Draf pesan ────────────────────────────────────────────────
+   Muncul SETELAH kiriman tercatat. Urutannya disengaja: kalau tautan WhatsApp
+   dibuka lebih dulu lalu pencatatannya gagal, agent sudah terlanjur mengirim
+   sesuatu yang tidak tercatat — dan anti-dobel bocor pada aset itu selamanya. */
+function DrafPesanModal({ draf, punyaWa, klienEmail, onClose }: {
+  draf: { pesan: string; waUrl: string | null };
+  punyaWa: boolean;
+  klienEmail: string | null;
+  onClose: () => void;
+}) {
+  const [disalin, setDisalin] = useState(false);
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[90] flex items-end justify-center bg-black/80 p-0 backdrop-blur-md sm:items-center sm:p-4">
+      <div onClick={e => e.stopPropagation()} className="flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-t-[24px] border border-white/[0.1] bg-[#0a0c12] sm:rounded-[24px]">
+        <header className="shrink-0 border-b border-white/[0.06] px-5 py-4">
+          <div className="flex items-center gap-2">
+            <Icon icon="solar:check-circle-bold" className="text-lg text-emerald-400" />
+            <h4 className="text-[14px] font-extrabold text-white">Kiriman tercatat</h4>
+          </div>
+          <p className="mt-1 text-[11.5px] text-slate-500">
+            Aset ini tidak akan muncul lagi sebagai rekomendasi baru untuk klien tersebut, dan harganya mulai dipantau.
+          </p>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <pre className="whitespace-pre-wrap break-words rounded-2xl border border-white/[0.07] bg-white/[0.03] p-3 font-sans text-[12px] leading-relaxed text-slate-200">
+            {draf.pesan}
+          </pre>
+        </div>
+
+        <footer className="shrink-0 space-y-2 border-t border-white/[0.08] px-5 py-4">
+          {draf.waUrl ? (
+            <a
+              href={draf.waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={onClose}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-500 py-3 text-[13px] font-extrabold text-[#04130d] transition-all hover:from-emerald-300 hover:to-emerald-400"
+            >
+              <Icon icon="ic:baseline-whatsapp" className="text-lg" />
+              Buka WhatsApp
+            </a>
+          ) : (
+            <p className="rounded-xl border border-amber-400/25 bg-amber-500/[0.08] px-3 py-2 text-center text-[11.5px] text-amber-200">
+              Klien ini belum punya nomor WhatsApp. Salin pesannya, atau lengkapi nomornya di kartu klien.
+            </p>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                navigator.clipboard?.writeText(draf.pesan)
+                  .then(() => { setDisalin(true); setTimeout(() => setDisalin(false), 1600); })
+                  .catch(() => {});
+              }}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 text-[12px] font-bold text-slate-200 transition-colors hover:bg-white/[0.07]"
+            >
+              <Icon icon={disalin ? "solar:check-circle-bold" : "solar:copy-bold"} className="text-sm" />
+              {disalin ? "Tersalin" : "Salin pesan"}
+            </button>
+            {klienEmail && (
+              <a
+                href={`mailto:${klienEmail}?subject=${encodeURIComponent("Properti untuk Anda")}&body=${encodeURIComponent(draf.pesan)}`}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-sky-400/20 bg-sky-500/10 py-2.5 text-[12px] font-bold text-sky-200 transition-colors hover:bg-sky-500/20"
+              >
+                <Icon icon="solar:letter-bold" className="text-sm" />
+                Email
+              </a>
+            )}
+          </div>
+        </footer>
       </div>
     </div>
   );

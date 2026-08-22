@@ -9,7 +9,17 @@ import prisma from "@/lib/prisma";
 import { pusherServer } from "@/lib/pusher-server";
 import { notifyCobrokeSubmission } from "@/lib/notifications";
 
-type ClickSource = "whatsapp" | "telepon" | "survei" | "penawaran" | "cobroke";
+// "form_inquiry" = pengajuan sewa dari panel pemesanan /Sewa. Nilainya sudah
+// ada di enum `lead_source_enum` sejak awal dan sudah dikenali hilir (dashboard
+// menampilkannya sebagai "Form", sync-prospek memetakannya ke sumber "website"),
+// jadi tidak ada migrasi maupun perubahan dashboard yang perlu menyertainya.
+type ClickSource =
+  | "whatsapp"
+  | "telepon"
+  | "survei"
+  | "penawaran"
+  | "cobroke"
+  | "form_inquiry";
 
 interface ClickBody {
   id_property: string | number;
@@ -43,19 +53,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!["whatsapp", "telepon", "survei", "penawaran", "cobroke"].includes(body.source)) {
+    if (
+      !["whatsapp", "telepon", "survei", "penawaran", "cobroke", "form_inquiry"].includes(
+        body.source,
+      )
+    ) {
       return NextResponse.json(
         { ok: false, error: "source tidak valid" },
         { status: 400 },
       );
     }
 
-    if (body.source === "penawaran" && !["cash", "kpr"].includes(body.payment_method || "")) {
-      return NextResponse.json(
-        { ok: false, error: "Cara bayar wajib diisi (cash/kpr)" },
-        { status: 400 },
-      );
-    }
+    // Cara bayar (cash/kpr) diperiksa SETELAH listingnya dibaca — lihat catatan
+    // di bawah, tepat sesudah `findUnique`. Aturannya bergantung pada jenis
+    // transaksi listing, dan jenis itu belum diketahui di sini.
 
     // Penawaran harga wajib login — anti klien nakal/ghoib.
     let pengguna: { id_pengguna: string; nama_lengkap: string; nomor_telepon: string | null; email: string | null } | null = null;
@@ -113,13 +124,36 @@ export async function POST(req: NextRequest) {
     // Validasi listing & agent
     const listing = await prisma.listing.findUnique({
       where: { id_property },
-      select: { id_property: true, id_agent: true },
+      select: { id_property: true, id_agent: true, jenis_transaksi: true },
     });
 
     if (!listing) {
       return NextResponse.json(
         { ok: false, error: "Properti tidak ditemukan" },
         { status: 404 },
+      );
+    }
+
+    /**
+     * Cara bayar wajib untuk penawaran JUAL/LELANG, tidak untuk SEWA.
+     *
+     * "Cash atau KPR" adalah pertanyaan pembelian. Menyewa gudang tidak dibayar
+     * dengan KPR, dan memaksa penyewa memilih salah satunya hanya menghasilkan
+     * satu hal: kolom `pembayaran` di tabel lead terisi angka yang tidak pernah
+     * berarti apa-apa, lalu ikut terbaca di dashboard agent sebagai fakta.
+     * Lebih baik kosong daripada terisi keterangan yang tidak benar.
+     */
+    const penawaranSewa =
+      body.source === "penawaran" && listing.jenis_transaksi === "SEWA";
+
+    if (
+      body.source === "penawaran" &&
+      !penawaranSewa &&
+      !["cash", "kpr"].includes(body.payment_method || "")
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "Cara bayar wajib diisi (cash/kpr)" },
+        { status: 400 },
       );
     }
 
@@ -207,12 +241,24 @@ export async function POST(req: NextRequest) {
       body.source === "penawaran" && body.offer_amount
         ? BigInt(Math.round(body.offer_amount))
         : null;
+    // Sumber yang memang membawa keterangan dari pengirimnya. Klik WA/telepon
+    // tidak: catatan yang datang bersamanya hanya bisa berasal dari pemanggil
+    // yang mengarang isinya.
+    //
+    // Dipotong 1000 karakter mengikuti lebar kolom `catatan` — tanpa ini,
+    // catatan panjang membuat seluruh penyimpanan lead gagal, dan yang hilang
+    // bukan cuma catatannya melainkan leadnya.
     const notes =
-      body.source === "penawaran" || body.source === "cobroke"
-        ? body.notes?.trim() || null
+      body.source === "penawaran" ||
+      body.source === "cobroke" ||
+      body.source === "form_inquiry"
+        ? body.notes?.trim().slice(0, 1000) || null
         : null;
     const diskon = body.source === "penawaran" ? body.discount_pct ?? null : null;
-    const pembayaran = body.source === "penawaran" ? body.payment_method ?? null : null;
+    const pembayaran =
+      body.source === "penawaran" && !penawaranSewa
+        ? body.payment_method ?? null
+        : null;
 
     // Anti-spam ringan: jangan buat lead duplikat dalam 5 menit
     // untuk session+property+source yang sama.

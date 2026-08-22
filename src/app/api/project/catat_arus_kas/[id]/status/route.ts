@@ -1,24 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { PrismaClient } from "@prisma/client";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
+import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClient;
-};
-
-const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-  });
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
 
 const ALLOWED_STATUSES = [
   "pendanaan_terbuka",

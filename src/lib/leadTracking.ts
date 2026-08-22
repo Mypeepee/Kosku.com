@@ -24,7 +24,14 @@ function getSessionId(): string {
 export interface TrackLeadClickInput {
   id_property: string | number | bigint;
   id_agent?: string;
-  source: "whatsapp" | "telepon" | "survei" | "penawaran" | "cobroke";
+  source:
+    | "whatsapp"
+    | "telepon"
+    | "survei"
+    | "penawaran"
+    | "cobroke"
+    /** Pengajuan sewa dari panel pemesanan halaman detail /Sewa. */
+    | "form_inquiry";
   client_name?: string;
   client_phone?: string;
   client_email?: string;

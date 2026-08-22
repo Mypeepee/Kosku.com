@@ -1,4 +1,5 @@
 import type { SelectedRegion } from "@/lib/regionSearch";
+import type { TempatDipilih } from "@/lib/searchTabs";
 
 export type KlienStatus =
   | "lead_baru"
@@ -40,7 +41,8 @@ export type JenisTransaksi =
 export interface PreferensiKlien {
   id_preferensi: string;
   id_klien: string;
-  tipe_properti: TipeProperti;
+  /** null = semua tipe. */
+  tipe_properti: TipeProperti | null;
   jenis_transaksi: JenisTransaksi | null;
   lokasi_dicari: string | null;
   loc_provinsi: string | null;
@@ -51,6 +53,10 @@ export interface PreferensiKlien {
   budget_max: number | null;
   luas_min: number | null;
   luas_max: number | null;
+  legalitas: Sertifikat | null;
+  dekat_nilai: string | null;
+  dekat_radius: number | null;
+  alamat_teks: string | null;
   tujuan_beli: TujuanBeli | null;
   catatan: string | null;
   dibuat_pada: string;
@@ -102,6 +108,14 @@ export interface PreferensiForm {
   budget_max: string;
   luas_min: string;
   luas_max: string;
+  /** "" = tidak mempermasalahkan. Itu keadaan bawaan dan yang paling sering
+   *  benar — memaksa agent memilih akan membuatnya mengarang jawaban. */
+  legalitas: Sertifikat | "";
+  /** Tempat patokan, disimpan utuh supaya chip-nya bisa digambar ulang tanpa
+   *  menanyakan kamus lagi. null = tanpa kriteria tempat. */
+  dekat: TempatDipilih | null;
+  /** Patokan teks alamat (nama jalan / perumahan). "" = tidak dipakai. */
+  alamat_teks: string;
   tujuan_beli: TujuanBeli | "";
   catatan: string;
 }
@@ -176,6 +190,21 @@ export const JENIS_TRANSAKSI_LABEL: Record<JenisTransaksi, string> = {
   CESSIE:    "Cessie",
 };
 
+/** Nilai `sertifikat_enum` di database. Urutannya sengaja dari yang paling
+ *  sering diminta: SHM dipegang 107 ribu dari 120 ribu aset, HGB 12 ribu,
+ *  sisanya ekor panjang. */
+export type Sertifikat = "SHM" | "HGB" | "HGU" | "HP" | "AJB" | "PPJB" | "LAINNYA";
+
+export const SERTIFIKAT_LABEL: Record<Sertifikat, string> = {
+  SHM:     "SHM — Hak Milik",
+  HGB:     "HGB — Hak Guna Bangunan",
+  HGU:     "HGU — Hak Guna Usaha",
+  HP:      "HP — Hak Pakai",
+  AJB:     "AJB — Akta Jual Beli",
+  PPJB:    "PPJB — Perjanjian Pengikatan",
+  LAINNYA: "Lainnya",
+};
+
 export const EMPTY_PREFERENSI: PreferensiForm = {
   tipe_properti:   [],
   jenis_transaksi: "",
@@ -184,6 +213,9 @@ export const EMPTY_PREFERENSI: PreferensiForm = {
   budget_max:      "",
   luas_min:        "",
   luas_max:        "",
+  legalitas:       "",
+  dekat:           null,
+  alamat_teks:     "",
   tujuan_beli:     "",
   catatan:         "",
 };

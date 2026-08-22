@@ -9,7 +9,7 @@
  * (AnimatePresence) ikut diputar.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -25,6 +25,11 @@ interface TypePickerProps {
   onOpenChange: (open: boolean) => void;
   theme?: Theme;
   label?: string;
+  /** Sembunyikan label kecil di atas trigger, TAPI tetap pakai teksnya sebagai
+   *  judul panel. Dipakai saat trigger sudah berada di dalam kartu yang punya
+   *  judul sendiri (sheet filter mobile) — mengoper `label=""` untuk itu bikin
+   *  header panelnya ikut kosong. */
+  showLabel?: boolean;
 }
 
 interface ThemeTokens {
@@ -73,6 +78,86 @@ const THEMES: Record<Theme, ThemeTokens> = {
   },
 };
 
+/**
+ * FittedSummary — menampilkan SEBANYAK MUNGKIN nama tipe yang muat di lebar
+ * trigger, sisanya diringkas jadi "+N". Versi lama selalu memotong di item
+ * pertama ("Rumah +1") walau ruangnya masih lega.
+ *
+ * Lebarnya diukur, bukan ditebak dari jumlah karakter: nama tipe punya panjang
+ * yang jauh berbeda ("Kos" vs "Hotel & Villa") dan lebar trigger sendiri
+ * berubah-ubah (kolom sempit di desktop vs kartu penuh di sheet mobile).
+ *
+ * Pengukuran memakai "penggaris" tersembunyi yang SELALU merender seluruh item.
+ * Kalau yang diukur elemen yang terlihat, item yang disembunyikan akan berlebar
+ * nol pada pengukuran berikutnya dan hitungannya berosilasi.
+ */
+function FittedSummary({ items, className }: { items: string[]; className?: string }) {
+  const boxRef = useRef<HTMLSpanElement>(null);
+  const rulerRef = useRef<HTMLSpanElement>(null);
+  const [fit, setFit] = useState(items.length);
+
+  const key = items.join("|");
+
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const ruler = rulerRef.current;
+    if (!box || !ruler) return;
+
+    const measure = () => {
+      const avail = box.clientWidth;
+      if (!avail) return;
+
+      const parts = Array.from(ruler.querySelectorAll<HTMLElement>("[data-part]"));
+      const more = ruler.querySelector<HTMLElement>("[data-more]");
+      if (!parts.length) return;
+
+      const moreW = more?.offsetWidth ?? 26;
+      const widthUpTo = (n: number) =>
+        n === 0 ? 0 : parts[n - 1].offsetLeft + parts[n - 1].offsetWidth - parts[0].offsetLeft;
+
+      let next = items.length;
+      while (next > 1 && widthUpTo(next) + (next < items.length ? moreW : 0) > avail) {
+        next -= 1;
+      }
+      // Satu item pun kalau tidak muat tetap ditampilkan — CSS truncate yang
+      // memotongnya, supaya tidak pernah kosong sama sekali.
+      setFit((prev) => (prev === next ? prev : next));
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, [key, items.length]);
+
+  const shown = items.slice(0, fit);
+  const hidden = items.length - fit;
+
+  return (
+    <span ref={boxRef} className={`relative block min-w-0 flex-1 overflow-hidden ${className ?? ""}`}>
+      {/* penggaris: tak terlihat, tak memengaruhi layout, selalu lengkap */}
+      <span
+        ref={rulerRef}
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap"
+      >
+        {items.map((it, i) => (
+          <span key={it} data-part="">
+            {i > 0 ? ", " : ""}
+            {it}
+          </span>
+        ))}
+        <span data-more="">{` +${items.length}`}</span>
+      </span>
+
+      <span className="block truncate">
+        {shown.join(", ")}
+        {hidden > 0 ? ` +${hidden}` : ""}
+      </span>
+    </span>
+  );
+}
+
 export default function TypePicker({
   value,
   onChange,
@@ -82,6 +167,7 @@ export default function TypePicker({
   onOpenChange,
   theme = "light",
   label = "Tipe Aset",
+  showLabel = true,
 }: TypePickerProps) {
   const t = THEMES[theme];
 
@@ -115,13 +201,6 @@ export default function TypePicker({
 
   const toggle = (opt: string) =>
     onChange(value.includes(opt) ? value.filter((v) => v !== opt) : [...value, opt]);
-
-  const summary =
-    value.length === 0
-      ? "Semua Tipe"
-      : value.length === 1
-      ? value[0]
-      : `${value[0]} +${value.length - 1}`;
 
   // posisi panel (fixed, ter-clamp ke viewport)
   const vw = typeof window !== "undefined" ? window.innerWidth : 1280;
@@ -169,7 +248,7 @@ export default function TypePicker({
                     icon="solar:buildings-bold-duotone"
                     className="text-primary text-lg"
                   />
-                  Tipe Aset
+                  {label}
                 </h4>
               </div>
 
@@ -183,7 +262,7 @@ export default function TypePicker({
                       : `${t.nameIdle} ${t.rowHover}`
                   }`}
                 >
-                  <Icon icon="solar:apps-bold-duotone" className="text-lg opacity-70 shrink-0" />
+                  <Icon icon="solar:widget-3-bold-duotone" className="text-lg opacity-70 shrink-0" />
                   <span className="flex-1">Semua Tipe</span>
                   {value.length === 0 && (
                     <Icon icon="solar:check-circle-bold" className="text-primary text-lg" />
@@ -255,7 +334,7 @@ export default function TypePicker({
         className="cursor-pointer h-full flex flex-col justify-center group"
         onClick={() => onOpenChange(!open)}
       >
-        {label ? (
+        {showLabel && label ? (
           <label
             className={`text-[10px] font-extrabold tracking-wider uppercase mb-1 block transition-colors ${t.triggerLabel}`}
           >
@@ -267,7 +346,16 @@ export default function TypePicker({
             icon="solar:buildings-bold-duotone"
             className={`text-xl shrink-0 transition-colors ${t.triggerIcon}`}
           />
-          <p className={`font-bold text-sm truncate flex-1 ${t.triggerValue}`}>{summary}</p>
+          {value.length === 0 ? (
+            <p className={`font-bold text-sm truncate flex-1 ${t.triggerValue}`}>
+              Semua Tipe
+            </p>
+          ) : (
+            <FittedSummary
+              items={value}
+              className={`font-bold text-sm ${t.triggerValue}`}
+            />
+          )}
           <Icon
             icon="solar:alt-arrow-down-linear"
             className={`shrink-0 transition-transform ${t.triggerIcon} ${

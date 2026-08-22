@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Listing } from "../../page";
 import Money from "../ui/Money";
 import { Icon } from "@iconify/react";
+import { hitungBalikNama } from "@/lib/lelangBiaya";
 
 /* =========================================
   Types
@@ -103,8 +104,9 @@ function pct2(v: number) {
 }
 
 function autoBalikNama(base: number) {
-  if (!base || base <= 0) return 0;
-  return Math.round(base * 0.085) + 7_000_000;
+  // Tarif tunggal dipegang src/lib/lelangBiaya.ts supaya angka di halaman
+  // closing tidak pernah berbeda dengan estimasi di halaman detail lelang.
+  return hitungBalikNama(base);
 }
 
 function storageKey(listing: Listing) {
@@ -992,7 +994,7 @@ export default function TabTransaksi({
                   {(!isClosingMode || isSelisih) && (
                     <Hint>
                       {balikNamaMode === "AUTO"
-                        ? "Auto: 8,5% dari harga + Rp 7.000.000"
+                        ? "Auto: 8,5% dari harga + Rp 10.000.000"
                         : "Mode manual — diisi sendiri"}
                     </Hint>
                   )}

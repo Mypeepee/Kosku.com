@@ -6,30 +6,22 @@ import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { HotDealBadge, HOT_DEAL_CARD_CLASS } from "@/components/HotDeal/HotDealBadge";
 import { SliderDots } from "@/components/SliderDots";
+import {
+  PropertyCard,
+  type PropertyDB,
+} from "@/components/property/PropertyCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ListingItem {
-  id_property: string;
-  slug: string;
-  judul: string;
-  kota: string;
+/**
+ * Bentuknya sengaja PropertyDB + dua field khas carousel ini. Dengan begitu
+ * listing SEWA bisa langsung diserahkan ke kartu bersama tanpa cast — kalau
+ * suatu saat kartu itu menuntut field baru, TypeScript akan menunjuk API
+ * /api/property/populer yang harus mengisinya, bukan diam lalu tampil kosong.
+ */
+interface ListingItem extends PropertyDB {
   alamat_lengkap: string;
-  harga: number;
-  harga_promo: number | null;
-  jenis_transaksi: string;
-  kategori: string;
-  gambar: string;
-  foto_list: string[];
-  luas_tanah: number;
-  luas_bangunan: number;
-  kamar_tidur: number;
-  kamar_mandi: number;
   tanggal_lelang: string | null;
-  agent_name: string;
-  agent_photo: string;
-  agent_office: string;
-  is_hot_deal: boolean;
 }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
@@ -191,7 +183,7 @@ function JualCard({ item }: { item: ListingItem }) {
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            navigator.clipboard.writeText(item.id_property);
+            navigator.clipboard.writeText(String(item.id_property));
             setIdCopied(true);
             setTimeout(() => setIdCopied(false), 2000);
           }}
@@ -536,12 +528,15 @@ function PropertyCarousel({ listings }: { listings: ListingItem[] }) {
             key={item.id_property}
             className="snap-start shrink-0 w-[calc(100vw-3rem)] sm:w-[340px] lg:w-[380px] py-4"
           >
+            {/* SATU kartu untuk semua jenis transaksi — kartu yang sama persis
+                dengan halaman daftar (/Sewa, /Lelang, /properti). Kartu itu
+                sendiri yang bercabang menurut jenisnya: hitung mundur + luas
+                tanah untuk lelang, chip tipe unit & fasilitas untuk sewa, grid
+                KT/KM/LT/LB untuk properti dijual. Percabangan di DALAM kartu,
+                bukan di pemanggilnya — itu yang menjamin listing yang sama
+                tidak pernah tampil berbeda antar halaman. */}
             <Link href={getDetailUrl(item)} className="block h-full">
-              {item.jenis_transaksi?.toUpperCase() === "LELANG" ? (
-                <LelangCard item={item} />
-              ) : (
-                <JualCard item={item} />
-              )}
+              <PropertyCard item={item} />
             </Link>
           </div>
         ))}
@@ -594,15 +589,15 @@ const Recommendation = () => {
             Belum ada hot deal tersedia.
           </div>
         ) : listings.length <= 3 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          // Jalur "sedikit listing": grid, bukan carousel. Kartunya harus kartu
+          // yang SAMA — cabang ini pernah terlewat saat carousel diperbarui,
+          // dan akibatnya listing yang sama tampil beda hanya karena kebetulan
+          // jumlah hot deal-nya ≤3.
+          <div className="grid grid-cols-1 items-stretch gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {listings.map((item) => (
-              <div key={item.id_property} className="py-4">
+              <div key={item.id_property} className="h-full py-4">
                 <Link href={getDetailUrl(item)} className="block h-full">
-                  {item.jenis_transaksi?.toUpperCase() === "LELANG" ? (
-                    <LelangCard item={item} />
-                  ) : (
-                    <JualCard item={item} />
-                  )}
+                  <PropertyCard item={item} />
                 </Link>
               </div>
             ))}

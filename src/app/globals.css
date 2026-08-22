@@ -112,6 +112,76 @@ body {
   }
 }
 
+/* Marquee patokan terdekat di card kos ("5 mnt ke UNAIR", "0.3 km ke Superindo").
+   Pola sama dengan logo-marquee: track = 2 salinan + `w-max`, jadi -50% tepat
+   satu salinan → loop mulus. Tiap salinan diberi padding-kanan sebesar jarak
+   antar-chip supaya kedua salinan lebarnya identik dan sambungannya tidak
+   kelihatan.
+
+   Durasi TIDAK dipatok di sini — di-set inline dari lebar konten, supaya
+   kecepatannya sama (px/detik) di semua card. Kalau dipatok, kos dengan 1
+   patokan merayap dan kos dengan 6 patokan ngebut. */
+/* Pergantian foto di lightbox galeri: geser tipis searah navigasi + fade.
+   Arahnya dikirim komponen lewat custom property --lightbox-arah, supaya klik
+   panah kiri terasa datang dari kiri — tanpa itu, dua arah terlihat sama dan
+   mata kehilangan hubungan sebab-akibat antara tombol dan foto. */
+@keyframes lightbox-masuk {
+  from {
+    opacity: 0;
+    transform: translateX(var(--lightbox-arah, 24px)) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+.animate-lightbox-masuk {
+  animation: lightbox-masuk 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-lightbox-masuk {
+    animation: none;
+  }
+}
+
+@keyframes akses-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.animate-akses-marquee {
+  animation-name: akses-marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+/* Berhenti saat kursor di atasnya — supaya patokan yang menarik bisa dibaca
+   tuntas tanpa harus menunggu satu putaran penuh. */
+.akses-marquee-viewport:hover .animate-akses-marquee {
+  animation-play-state: paused;
+}
+/* Tepi kanan memudar, jadi chip yang keluar layar tidak terpotong mendadak. */
+.akses-marquee-fade {
+  -webkit-mask-image: linear-gradient(to right, #000 85%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 85%, transparent 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-akses-marquee {
+    animation: none;
+    transform: none;
+  }
+  /* Tanpa animasi isinya akan terpotong — ganti jadi bisa digeser manual. */
+  .akses-marquee-viewport {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .akses-marquee-viewport::-webkit-scrollbar {
+    display: none;
+  }
+  .akses-marquee-fade {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
 /* Reveal warna hanya di pita tengah — logo yang lewat tengah "menyala".
    Layer warna di-mask; di luar tengah transparan (yang tampak = layer putih). */
 .marquee-color-mask {
@@ -380,11 +450,13 @@ section {
 }
 
 /* Hide Scrollbar (but keep scrolling) */
-.no-scrollbar::-webkit-scrollbar {
+.no-scrollbar::-webkit-scrollbar,
+.hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
 
-.no-scrollbar {
+.no-scrollbar,
+.hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
@@ -1113,4 +1185,217 @@ section {
   0%   { transform: translateX(0); }
   60%  { transform: translateX(400%); }
   100% { transform: translateX(400%); }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   SEWA HERO — "aurora glass" search hero
+   Semua kelas diberi prefiks `sewa-hero-` karena globals.css ini sudah
+   punya beberapa keyframes generik bernama sama (shimmer/float) yang
+   dipakai halaman lain — jangan sampai saling menimpa.
+   ════════════════════════════════════════════════════════════════ */
+
+/* Blob aurora — melayang perlahan dengan arah & tempo berbeda per blob
+   supaya latar tidak pernah terlihat berulang. */
+@keyframes sewa-hero-drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33%      { transform: translate3d(6%, -8%, 0) scale(1.12); }
+  66%      { transform: translate3d(-5%, 6%, 0) scale(0.94); }
+}
+@keyframes sewa-hero-drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.06); }
+  50%      { transform: translate3d(-9%, 7%, 0) scale(0.9); }
+}
+@keyframes sewa-hero-drift-c {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(0.95); }
+  50%      { transform: translate3d(8%, 10%, 0) scale(1.16); }
+}
+.sewa-hero-blob-a { animation: sewa-hero-drift-a 22s ease-in-out infinite; }
+.sewa-hero-blob-b { animation: sewa-hero-drift-b 29s ease-in-out infinite; }
+.sewa-hero-blob-c { animation: sewa-hero-drift-c 35s ease-in-out infinite; }
+
+/* Grid teknis yang merayap ke atas, di-mask radial supaya memudar di tepi. */
+@keyframes sewa-hero-grid-pan {
+  0%   { background-position: 0 0, 0 0; }
+  100% { background-position: 0 -68px, 0 -68px; }
+}
+.sewa-hero-grid {
+  background-image:
+    linear-gradient(to right, rgba(153, 227, 158, 0.09) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(153, 227, 158, 0.09) 1px, transparent 1px);
+  background-size: 68px 68px, 68px 68px;
+  animation: sewa-hero-grid-pan 14s linear infinite;
+  /* Dibatasi ke paruh atas saja — paruh bawah sudah ditempati lantai
+     perspektif (.sewa-hero-floor), kalau dua grid bertumpuk jadi ramai. */
+  -webkit-mask-image: radial-gradient(ellipse 78% 48% at 50% 20%, #000 0%, transparent 100%);
+  mask-image: radial-gradient(ellipse 78% 48% at 50% 20%, #000 0%, transparent 100%);
+}
+
+/* Sapuan cahaya melintasi baris kedua judul (kinetic type). */
+@keyframes sewa-hero-sheen {
+  0%   { background-position: -160% 0; }
+  100% { background-position: 260% 0; }
+}
+.sewa-hero-gradient-text {
+  /* Basis warnanya SATURATED (emerald→teal), kilau putihnya cuma pita sempit
+     di tengah. Versi sebelumnya menaruh #ffffff di 46% dengan stop lebar,
+     sehingga sepanjang waktu separuh teks berwarna mint pucat — terbaca
+     seperti teks yang pudar, bukan gradient yang disengaja. */
+  background-image: linear-gradient(
+    100deg,
+    #6ee7b7 0%,
+    #34d399 22%,
+    #5eead4 44%,
+    #ffffff 50%,
+    #5eead4 56%,
+    #34d399 78%,
+    #6ee7b7 100%
+  );
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: sewa-hero-sheen 7s linear infinite;
+}
+
+/* Cincin gradien berputar di sekeliling kartu pencarian.
+   Sudutnya dianimasikan lewat @property supaya kotaknya sendiri tidak ikut
+   berputar (kalau elemennya yang di-rotate, sudut kartu akan terpotong).
+   Browser tanpa dukungan @property tetap dapat cincin statis. */
+@property --sewa-hero-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes sewa-hero-ring-spin {
+  to { --sewa-hero-angle: 360deg; }
+}
+.sewa-hero-ring::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--sewa-hero-angle),
+    transparent 0deg,
+    rgba(153, 227, 158, 0.9) 34deg,
+    rgba(29, 200, 205, 0.5) 74deg,
+    transparent 126deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: sewa-hero-ring-spin 9s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sewa-hero-blob-a,
+  .sewa-hero-blob-b,
+  .sewa-hero-blob-c,
+  .sewa-hero-grid,
+  .sewa-hero-gradient-text,
+  .sewa-hero-ring::before {
+    animation: none !important;
+  }
+}
+
+/* Garis pindai hero sewa — menyapu dari atas section sampai lewat bawahnya.
+   Elemennya setinggi 1/4 section, jadi 400% = tepat satu tinggi section. */
+@keyframes sewa-hero-scan {
+  0%        { transform: translateY(-100%); opacity: 0; }
+  12%, 88%  { opacity: 1; }
+  100%      { transform: translateY(400%); opacity: 0; }
+}
+.sewa-hero-scan { animation: sewa-hero-scan 9s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sewa-hero-scan { animation: none !important; opacity: 0; }
+}
+
+/* ── Sewa hero: lantai grid perspektif + horizon ──────────────────
+   Bidang grid direbahkan pakai rotateX dengan titik tumpu di tepi bawah,
+   jadi garisnya menyempit ke arah "horizon" di tengah hero. Animasinya
+   menggeser background-position ke bawah = garis terasa datang ke penonton. */
+@keyframes sewa-hero-floor-run {
+  from { background-position: 0 0; }
+  to   { background-position: 0 72px; }
+}
+.sewa-hero-floor {
+  background-image:
+    linear-gradient(to right, rgba(153, 227, 158, 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(153, 227, 158, 0.22) 1px, transparent 1px);
+  background-size: 72px 72px;
+  transform: perspective(260px) rotateX(64deg);
+  transform-origin: 50% 100%;
+  animation: sewa-hero-floor-run 4.5s linear infinite;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 42%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 42%, #000 100%);
+}
+
+/* Garis horizon yang bernapas, tepat di pangkal lantai grid. */
+@keyframes sewa-hero-horizon {
+  0%, 100% { opacity: 0.45; transform: scaleX(0.82); }
+  50%      { opacity: 0.9;  transform: scaleX(1); }
+}
+.sewa-hero-horizon { animation: sewa-hero-horizon 6s ease-in-out infinite; }
+
+/* Grain film halus — memecah gradient banding dan bikin latar terasa "berbahan". */
+.sewa-hero-noise {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  opacity: 0.055;
+  mix-blend-mode: overlay;
+}
+
+/* Partikel debu cahaya — naik perlahan lalu memudar. Posisi, durasi dan delay
+   di-set inline per partikel supaya tidak pernah bergerak serempak. */
+@keyframes sewa-hero-particle {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  15%  { opacity: 0.9; }
+  70%  { opacity: 0.5; }
+  100% { transform: translateY(-140px) scale(1.15); opacity: 0; }
+}
+.sewa-hero-particle { animation: sewa-hero-particle linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sewa-hero-floor,
+  .sewa-hero-horizon,
+  .sewa-hero-particle {
+    animation: none !important;
+  }
+  .sewa-hero-particle { opacity: 0.5; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   scrollbar-none — sembunyikan batang gulir pada baris yang memang digeser
+   jari/trackpad (chip radius, tab, carousel).
+
+   Dipindah ke sini karena sebelumnya hanya hidup di dalam <style jsx global>
+   milik satu halaman: kelasnya "global" hanya selama halaman itu ter-render,
+   jadi komponen bersama yang memakainya tampil benar di /properti/[slug] dan
+   tampil salah di /Jual — kerusakan yang cuma muncul di sebagian rute.
+   ────────────────────────────────────────────────────────────────────────── */
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   kursor-ketik — caret berkedip pada contoh pencarian yang mengetik sendiri.
+
+   `steps(1)` bukan transisi halus: caret sungguhan tidak pernah memudar, ia
+   ada atau tidak ada. Kedipan yang memudar terbaca sebagai animasi hiasan;
+   yang mematah terbaca sebagai kursor.
+   ────────────────────────────────────────────────────────────────────────── */
+@keyframes kedip-kursor {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.kursor-ketik {
+  animation: kedip-kursor 1.06s steps(1, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kursor-ketik { animation: none; opacity: 1; }
 }

@@ -6,6 +6,12 @@ const config: Config = {
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+    // src/lib ikut dipindai karena beberapa modul di sana menyimpan peta
+    // class (mis. warna gender kos di kosCard.ts, badge status di
+    // offerFeedback.ts). Tanpa baris ini class yang HANYA muncul di src/lib
+    // tidak pernah digenerate — dan gagalnya diam-diam: tidak ada error,
+    // elemennya cuma tampil tanpa warna.
+    "./src/lib/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
@@ -50,9 +56,44 @@ const config: Config = {
           "0%":   { transform: "translateX(-100%)" },
           "100%": { transform: "translateX(200%)" },
         },
+
+        // ── Penanda turun harga lelang (lihat PropertyCard) ──────────────
+        // Semuanya hanya menganimasikan `transform` & `opacity`: dua properti
+        // yang ditangani compositor GPU tanpa reflow/repaint. Card daftar bisa
+        // muncul 12–24 sekaligus, dan menganimasikan width/box-shadow di
+        // sebanyak itu akan terasa tersendat saat halaman di-scroll.
+
+        /** Chip masuk: kecil → sedikit melewati ukuran → mantap. */
+        "fomo-masuk": {
+          "0%":   { transform: "scale(0.72)", opacity: "0" },
+          "60%":  { transform: "scale(1.08)", opacity: "1" },
+          "100%": { transform: "scale(1)",    opacity: "1" },
+        },
+
+        /** Coretan digambar kiri→kanan: harga lama DIBATALKAN di depan mata. */
+        "fomo-coret": {
+          "0%":   { transform: "scaleX(0)" },
+          "100%": { transform: "scaleX(1)" },
+        },
+
+        /** Denyut cahaya sangat pelan — hanya untuk diskon terbesar. */
+        "fomo-nyala": {
+          "0%, 100%": { opacity: "0.35" },
+          "50%":      { opacity: "0.9" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s infinite",
+
+        // Sekali jalan, lalu diam. `backwards` menahan keadaan awal selama
+        // jeda, jadi chip tidak sempat berkedip di ukuran penuh sebelum
+        // animasinya mulai.
+        "fomo-masuk": "fomo-masuk 480ms cubic-bezier(0.34,1.56,0.64,1) 220ms backwards",
+        "fomo-coret": "fomo-coret 420ms cubic-bezier(0.22,1,0.36,1) 480ms backwards",
+
+        // 2,8 detik: cukup lambat untuk terbaca sebagai "bernapas", bukan
+        // kedipan yang menuntut. Ini satu-satunya animasi berulang di kartu.
+        "fomo-nyala": "fomo-nyala 2.8s ease-in-out infinite",
       },
       colors: {
         primary: "#99E39E",

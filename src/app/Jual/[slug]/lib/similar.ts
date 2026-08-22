@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { ambilLimitLelangSebelumnya } from "@/lib/auctionDiscount";
 import type { PropertyItem } from "@/app/properti/[slug]/types";
 
 /**
@@ -96,6 +97,15 @@ const SELECT = {
   kota: true,
   provinsi: true,
   kecamatan: true,
+  // kelurahan + sertifikat dibutuhkan mesin pencocokan aset lelang
+  // (auctionDiscount) untuk menentukan "aset ini pernah dilelang lebih mahal".
+  // Tanpa keduanya, penanda turun harga tidak akan pernah muncul di blok ini
+  // padahal muncul di halaman daftar — kartu yang sama tampil beda.
+  kelurahan: true,
+  legalitas: true,
+  nomor_legalitas: true,
+  latitude: true,
+  longitude: true,
   alamat_lengkap: true,
   harga: true,
   harga_promo: true,
@@ -207,6 +217,10 @@ export async function getSimilarItems(current: any): Promise<PropertyItem[]> {
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_RESULTS);
 
+    // Satu query terindeks untuk seluruh blok (maksimal 12 item), bukan dua
+    // query per kartu — lihat catatan biaya di src/lib/auctionDiscount.ts.
+    const limitAwal = await ambilLimitLelangSebelumnya(top.map((s) => s.c));
+
     return top.map(({ c }) => {
       const imgs = normalizeImages(c.gambar);
       const isLel = String(c.jenis_transaksi).toUpperCase() === "LELANG";
@@ -217,6 +231,8 @@ export async function getSimilarItems(current: any): Promise<PropertyItem[]> {
         slug: c.slug,
         judul: c.judul,
         kota: c.kota ?? "",
+        kecamatan: c.kecamatan ?? null,
+        kelurahan: c.kelurahan ?? null,
         alamat_lengkap: c.alamat_lengkap ?? "",
         harga: isLel ? num(c.nilai_limit_lelang) : h,
         harga_promo: !isLel && p > 0 && p < h ? p : null,
@@ -229,6 +245,7 @@ export async function getSimilarItems(current: any): Promise<PropertyItem[]> {
         kamar_tidur: c.kamar_tidur ?? 0,
         kamar_mandi: c.kamar_mandi ?? 0,
         tanggal_lelang: c.tanggal_lelang ? c.tanggal_lelang.toISOString() : null,
+        lelang_limit_awal: limitAwal.get(String(c.id_property)) ?? null,
         agent_name: c.agent?.pengguna?.nama_lengkap || "Agent Premier",
         agent_photo: normalizeAgentPhoto(c.agent?.foto_profil_url),
         agent_office: c.agent?.nama_kantor || "Premier Asset",

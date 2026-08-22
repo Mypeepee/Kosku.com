@@ -23,27 +23,42 @@ interface AuthCtx {
   isOwner: boolean;
 }
 
+/**
+ * Wewenang di sini menentukan siapa yang boleh membaca DAN menulis target agent
+ * lain, jadi `jabatan` dibaca langsung dari DB — bukan dari session.
+ *
+ * Dua alasan. Pertama, `session.user.role` yang dipakai sebelumnya isinya
+ * `peran_enum` (USER|AGENT), sehingga `role === "OWNER"` tidak pernah benar dan
+ * owner diam-diam ditolak saat membuka target agent lain. Kedua, JWT baru
+ * disegarkan tiap 5 menit — untuk endpoint yang menulis, jendela lima menit itu
+ * berarti wewenang yang baru dicabut masih bisa dipakai.
+ *
+ * Satu query tambahan lewat unique index `id_pengguna`, dan sekaligus
+ * menggantikan pencarian id_agent yang memang sudah dilakukan di sini.
+ */
 async function resolveAuth(): Promise<AuthCtx | NextResponse> {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
-  const user = session.user as { role?: string; agentId?: string; id?: string };
-  let agentId = user.agentId;
-  if (!agentId && user.id) {
-    const a = await prisma.agent.findFirst({
-      where: { id_pengguna: user.id as string },
-      select: { id_agent: true },
-    });
-    agentId = a?.id_agent ?? undefined;
-  }
+
+  const user = session.user as { agentId?: string; id?: string };
+  const agentRow = user.id
+    ? await prisma.agent.findUnique({
+        where: { id_pengguna: user.id },
+        select: { id_agent: true, jabatan: true },
+      })
+    : null;
+
+  const agentId = agentRow?.id_agent ?? user.agentId;
   if (!agentId) {
     return NextResponse.json(
       { ok: false, error: "Akun ini bukan agent" },
       { status: 403 },
     );
   }
-  return { agentId, isOwner: user.role === "OWNER" };
+
+  return { agentId, isOwner: agentRow?.jabatan === "OWNER" };
 }
 
 /** Bangun list (year, month) terakhir untuk window N bulan, akhir = current. */

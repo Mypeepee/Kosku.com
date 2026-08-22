@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
+import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const prisma = globalThis.__prisma__ ?? new PrismaClient();
-if (process.env.NODE_ENV !== "production") (globalThis as any).__prisma__ = prisma;
 
 function errJson(message: string, status = 400, extra?: any) {
   return NextResponse.json({ ok: false, message, ...extra }, { status });

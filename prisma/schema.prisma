@@ -36,57 +36,60 @@ model Pengguna {
 }
 
 model Agent {
-  id_agent               String                   @id @default(dbgenerated("('AG'::text || nextval('agent_code_seq'::regclass))")) @db.VarChar(20)
-  id_pengguna            String                   @unique(map: "agent_id_pengguna_unique") @db.VarChar(20)
-  nama_kantor            String                   @db.VarChar(100)
-  kota_area              String                   @db.VarChar(50)
-  jabatan                jabatan_agent_enum       @default(AGENT)
-  id_upline              String?                  @db.VarChar(20)
-  rating                 Decimal?                 @default(0.00) @db.Decimal(3, 2)
-  jumlah_closing         Int                      @default(0)
-  total_omset            Decimal?                 @default(0) @db.Decimal(18, 2)
-  nomor_whatsapp         String                   @db.VarChar(20)
-  poin                   Int                      @default(0)
-  foto_ktp_url           String?
-  foto_npwp_url          String?
-  foto_profil_url        String?
-  nama_bank              String?                  @db.VarChar(50)
-  nomor_rekening         String?                  @db.VarChar(50)
-  atas_nama_rekening     String?                  @db.VarChar(100)
-  link_instagram         String?                  @db.VarChar(100)
-  link_tiktok            String?                  @db.VarChar(100)
-  link_facebook          String?                  @db.VarChar(100)
-  status_keanggotaan     status_agent_enum        @default(PENDING)
-  tanggal_gabung         DateTime?                @default(dbgenerated("CURRENT_DATE")) @db.Date
-  dibuat_pada            DateTime?                @default(now()) @db.Timestamptz(6)
-  diperbarui_pada        DateTime?                @default(now()) @db.Timestamptz(6)
-  id_team_leader         String?                  @db.VarChar(20)
-  acara                  Acara[]
-  bookingSurvei          BookingSurvei[]
-  pengguna               Pengguna                 @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade)
-  teamLeader             Agent?                   @relation("AgentTeamLeader", fields: [id_team_leader], references: [id_agent])
-  teamLeaderMembers      Agent[]                  @relation("AgentTeamLeader")
-  upline                 Agent?                   @relation("AgentUpline", fields: [id_upline], references: [id_agent])
-  downlines              Agent[]                  @relation("AgentUpline")
-  berita                 Berita[]
-  detailTransaksi        DetailTransaksi[]
-  listings               Listing[]
-  penukaranPoin          PenukaranPoin[]
-  pesertaAcara           PesertaAcara[]
-  pilihanPemilu          PilihanPemilu[]
-  undanganAcara          UndanganAcara[]
-  projectDibuat          Project[]
-  projectInvestor        ProjectInvestor[]
-  projectSelesaiInvestor ProjectSelesaiInvestor[]
-  riwayatPoin            RiwayatPoin[]
-  mouAgent               Mou[]                    @relation("MouAgent")
-  leads                  Lead[]
-  leadsCobroke           Lead[]                   @relation("LeadCobroke")
-  klien                  Klien[]
-  propertyTitipKlaim     PropertyTitip[]          @relation("PropertyTitipKlaim")
+  id_agent                String                      @id @default(dbgenerated("('AG'::text || nextval('agent_code_seq'::regclass))")) @db.VarChar(20)
+  id_pengguna             String                      @unique(map: "agent_id_pengguna_unique") @db.VarChar(20)
+  nama_kantor             String                      @db.VarChar(100)
+  kota_area               String                      @db.VarChar(50)
+  jabatan                 jabatan_agent_enum          @default(AGENT)
+  id_upline               String?                     @db.VarChar(20)
+  rating                  Decimal?                    @default(0.00) @db.Decimal(3, 2)
+  jumlah_closing          Int                         @default(0)
+  total_omset             Decimal?                    @default(0) @db.Decimal(18, 2)
+  nomor_whatsapp          String                      @db.VarChar(20)
+  poin                    Int                         @default(0)
+  foto_ktp_url            String?
+  foto_npwp_url           String?
+  foto_profil_url         String?
+  nama_bank               String?                     @db.VarChar(50)
+  nomor_rekening          String?                     @db.VarChar(50)
+  atas_nama_rekening      String?                     @db.VarChar(100)
+  link_instagram          String?                     @db.VarChar(100)
+  link_tiktok             String?                     @db.VarChar(100)
+  link_facebook           String?                     @db.VarChar(100)
+  status_keanggotaan      status_agent_enum           @default(PENDING)
+  tanggal_gabung          DateTime?                   @default(dbgenerated("CURRENT_DATE")) @db.Date
+  dibuat_pada             DateTime?                   @default(now()) @db.Timestamptz(6)
+  diperbarui_pada         DateTime?                   @default(now()) @db.Timestamptz(6)
+  id_team_leader          String?                     @db.VarChar(20)
+  acara                   Acara[]
+  bookingSurvei           BookingSurvei[]
+  pengguna                Pengguna                    @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade)
+  teamLeader              Agent?                      @relation("AgentTeamLeader", fields: [id_team_leader], references: [id_agent])
+  teamLeaderMembers       Agent[]                     @relation("AgentTeamLeader")
+  upline                  Agent?                      @relation("AgentUpline", fields: [id_upline], references: [id_agent])
+  downlines               Agent[]                     @relation("AgentUpline")
+  berita                  Berita[]
+  detailTransaksi         DetailTransaksi[]
+  listings                Listing[]
+  penukaranPoin           PenukaranPoin[]
+  pesertaAcara            PesertaAcara[]
+  pilihanPemilu           PilihanPemilu[]
+  undanganAcara           UndanganAcara[]
+  projectDibuat           Project[]
+  projectInvestor         ProjectInvestor[]
+  projectSelesaiInvestor  ProjectSelesaiInvestor[]
+  riwayatPoin             RiwayatPoin[]
+  mouAgent                Mou[]                       @relation("MouAgent")
+  leads                   Lead[]
+  leadsCobroke            Lead[]                      @relation("LeadCobroke")
+  klien                   Klien[]
+  propertyTitipKlaim      PropertyTitip[]             @relation("PropertyTitipKlaim")
   propertyTitipDistribusi PropertyTitipDistribution[]
-  targetBulanan          TargetAgent[]            @relation("AgentTarget")
-  tugas                  Tugas[]
+  targetBulanan           TargetAgent[]               @relation("AgentTarget")
+  tugas                   Tugas[]
+  kiriman                 KirimanRekomendasi[]
+  ProspekDiabaikan        ProspekDiabaikan[]
+  email_asisten           EmailAsisten[]
 
   @@index([jabatan], map: "idx_agent_jabatan")
   @@index([nama_kantor], map: "idx_agent_kantor")
@@ -108,6 +111,14 @@ model Listing {
   harga              Decimal                @db.Decimal(20, 2)
   harga_per_meter    Decimal?               @db.Decimal(20, 2)
   harga_promo        Decimal?               @db.Decimal(20, 2)
+  /// TURUNAN — JANGAN DITULIS DARI APLIKASI. Harga yang benar-benar tampil di
+  /// kartu: harga_promo bila diskonnya sah, kalau tidak harga. Diisi otomatis
+  /// oleh trigger `trg_listing_harga_efektif` (prisma/migration_harga_efektif.sql)
+  /// pada setiap INSERT/UPDATE, jadi nilai apa pun yang dikirim akan ditimpa.
+  /// Ada sebagai kolom nyata semata-mata supaya bisa di-ORDER BY & di-index —
+  /// "urutkan termurah" harus memakai angka yang dibaca pemakai. Lihat
+  /// src/lib/listingSort.ts.
+  harga_efektif      Decimal?               @db.Decimal(20, 2)
   tanggal_lelang     DateTime?              @db.Timestamptz(6)
   uang_jaminan       Decimal?               @db.Decimal(20, 2)
   nilai_limit_lelang Decimal?               @db.Decimal(20, 2)
@@ -119,8 +130,22 @@ model Listing {
   kelurahan          String?                @db.VarChar(355)
   latitude           Decimal?               @db.Decimal(10, 8)
   longitude          Decimal?               @db.Decimal(11, 8)
+  /// Patokan/akses terdekat, mis. [{tipe:"KAMPUS",nama:"UNAIR",jarak:5,satuan:"MENIT"}].
+  /// Faktor keputusan utama penyewa kos ("5 menit ke kampus"). Disimpan
+  /// terstruktur (bukan teks bebas) supaya bisa dirender seragam & nanti
+  /// dipakai untuk filter "dekat kampus X". Berlaku untuk semua jenis
+  /// transaksi — rumah dijual juga relevan ("dekat tol/sekolah").
+  akses_terdekat     Json?
   luas_tanah         Decimal?               @db.Decimal(12, 2)
   luas_bangunan      Decimal?               @db.Decimal(12, 2)
+  /// TRUE = lot ini bukan properti (kendaraan, mesin, barang bergerak, hewan,
+  /// komoditas) atau datanya tidak layak direkomendasikan. Ada karena
+  /// `kategori` pada data hasil scraping lelang adalah EMBER TEMPAT LOT ITU
+  /// DIAMBIL, bukan jenis asetnya — scraper dijalankan `--kategori Rumah` dan
+  /// seluruh lot di putaran itu jadi RUMAH, termasuk sepeda motor dan sapi.
+  /// Diisi trigger `trg_listing_bukan_properti`, JANGAN ditulis dari aplikasi;
+  /// hakimnya luas, bukan kata di judul (lihat prisma/migration_listing_bukan_properti.sql).
+  bukan_properti     Boolean                @default(false)
   jumlah_lantai      Int                    @default(1)
   kamar_tidur        Int?
   kamar_mandi        Int?
@@ -148,6 +173,14 @@ model Listing {
   klien              Klien[]
   tugas              Tugas[]
   bookingSurvei      BookingSurvei[]
+  sewaDetail         ListingSewaDetail?
+  kamarTipe          ListingKamarTipe[]
+  riwayatStatus      RiwayatStatusListing[]
+  ketersediaan       ListingKetersediaan[]
+  voucher            ListingVoucher[]
+  sekitar            ListingSekitar?
+  tempatDekat        ListingTempat[]
+  kiriman            KirimanRekomendasi[]
 
   @@index([kota], map: "idx_property_lokasi")
   @@index([jenis_transaksi], map: "idx_property_jenis")
@@ -158,6 +191,583 @@ model Listing {
   @@index([status_tayang, jenis_transaksi, tanggal_dibuat(sort: Desc)], map: "idx_property_status_jenis_tgl")
   @@index([status_tayang, is_hot_deal, jenis_transaksi], map: "idx_property_status_hot_jenis")
   @@map("listing")
+}
+
+/// Hasil pemindaian "apa saja yang ada di sekitar aset ini" — SATU baris per
+/// listing, ditulis sekali lalu dipakai selamanya.
+///
+/// KENAPA ADA. Sebelumnya daftar fasilitas sekitar dicari ulang dari browser
+/// SETIAP kali halaman detail dibuka, langsung ke server publik Overpass. Dua
+/// akibatnya sama-sama buruk: hasilnya seperti undian (server publik sering
+/// menjawab 429/504, dan kegagalannya terlihat sebagai "tidak ada apa-apa di
+/// sekitar sini"), dan satu aset yang dilihat seribu kali berarti seribu
+/// permintaan untuk jawaban yang tidak pernah berubah. Warung tidak pindah
+/// tiap kali halaman dibuka.
+///
+/// ATURAN ISI. `lengkap` = pemindaian sudah menemukan minimal 3 tempat; hanya
+/// baris lengkap yang dianggap jawaban final dan tidak pernah dipindai ulang.
+/// Baris yang belum lengkap tetap disimpan — bukan sebagai jawaban, melainkan
+/// sebagai catatan percobaan supaya aset di tengah kebun tidak memicu
+/// pemindaian baru di setiap kunjungan; ia baru boleh dicoba lagi setelah
+/// jeda (lihat JEDA_ULANG_MS di src/lib/nearbyPlaces.server.ts).
+///
+/// Titiknya ikut disimpan karena tidak selalu berasal dari listing: aset lama
+/// & hasil scrape sering tidak punya koordinat, jadi alamatnya di-geocode
+/// sekali di server. `sumber_titik` membedakan keduanya supaya UI bisa jujur
+/// menyebut titik hasil geocode sebagai perkiraan.
+model ListingSekitar {
+  id_property   BigInt   @id
+  /// Titik yang dipakai saat memindai. NULL berarti alamatnya pun tidak bisa
+  /// di-geocode — barisnya murni catatan percobaan.
+  latitude      Decimal? @db.Decimal(10, 8)
+  longitude     Decimal? @db.Decimal(11, 8)
+  /// LISTING (koordinat dari agent) | GEOCODE (hasil pencarian alamat).
+  sumber_titik  String?  @db.VarChar(20)
+  /// Radius (meter) yang akhirnya dipakai. Naik bertahap sampai dapat ≥3
+  /// tempat, jadi aset pinggiran tidak selalu kosong seperti sebelumnya.
+  radius_meter  Int      @default(0)
+  jumlah        Int      @default(0)
+  lengkap       Boolean  @default(false)
+  /// Berapa kali aset ini pernah dipindai. Hanya untuk diagnosa & jeda ulang.
+  percobaan     Int      @default(1)
+  /// TempatTerdekat[] — lihat src/lib/nearbyPlaces.ts.
+  tempat        Json     @default("[]")
+  /// TempatTerdekat[] hasil SAPUAN LANDMARK 5 km — kampus, RS, mall, stasiun,
+  /// terminal, bandara, pasar, stadion. Dipisah dari `tempat` dengan sengaja:
+  /// yang itu daftar "apa yang ada di sekitar" bertajuk "Radius 800 m" untuk
+  /// dibaca manusia, dan menyelipkan bandara 4 km ke sana membuat tajuknya
+  /// bohong. Kolom ini bahan bakar indeks pencarian "dekat X" — tanpa ia,
+  /// kampus 4 km tidak pernah tercatat dan "deket unesa" tidak bisa bekerja.
+  landmark      Json     @default("[]")
+  /// Seberapa kasar titik yang dipakai: TITIK | ALAMAT | KELURAHAN |
+  /// KECAMATAN | KOTA. `sumber_titik` hanya membedakan pin agent dari hasil
+  /// geocode; ini membedakan geocode yang menemukan nama jalan dari yang
+  /// menyerah di tingkat kota. Peta memakainya untuk berkata jujur, dan
+  /// indeks "dekat X" menolak baris berpresisi KOTA.
+  presisi_titik String?  @db.VarChar(12)
+  dipindai_pada DateTime @default(now()) @db.Timestamptz(6)
+
+  listing Listing @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "listing_sekitar_listing_fk")
+
+  @@index([lengkap, dipindai_pada], map: "idx_listing_sekitar_lengkap")
+  @@map("listing_sekitar")
+}
+
+/// Cache "apa yang ada di sekitar KOORDINAT ini" — lapisan di bawah
+/// ListingSekitar. Lihat prisma/migration_sekitar_titik.sql (dijalankan
+/// manual per environment).
+///
+/// KENAPA ADA. ListingSekitar dikunci id_property, dan itu syarat yang tidak
+/// selalu bisa dipenuhi. Form tambah properti memindai sebelum listing-nya
+/// ada; tanpa tabel ini hasilnya terbuang dan titik yang sama dipindai lagi
+/// saat halaman detailnya dibuka. Beberapa unit di gedung yang sama juga
+/// berbagi satu titik — dikunci per listing itu jadi banyak pemindaian untuk
+/// jawaban yang identik.
+///
+/// Tidak ada relasi ke Listing: barisnya memang tidak dimiliki listing mana
+/// pun, dan tetap berguna setelah listing yang memicunya dihapus.
+model SekitarTitik {
+  /// "lat,lng" dibulatkan 3 desimal (±110 m) — lihat kunciTitik() di
+  /// src/lib/nearbyPlaces.server.ts.
+  kunci         String   @id @db.VarChar(32)
+  latitude      Decimal  @db.Decimal(10, 8)
+  longitude     Decimal  @db.Decimal(11, 8)
+  /// Radius (meter) yang akhirnya dipakai; 0 bila pemindaiannya putus.
+  radius_meter  Int      @default(0)
+  jumlah        Int      @default(0)
+  lengkap       Boolean  @default(false)
+  /// TempatTerdekat[] — lihat src/lib/nearbyPlaces.ts.
+  tempat        Json     @default("[]")
+  /// Hasil sapuan landmark 5 km — lihat ListingSekitar.landmark.
+  landmark      Json     @default("[]")
+  /// TITIK | ALAMAT | KELURAHAN | KECAMATAN | KOTA — lihat ListingSekitar.
+  presisi_titik String?  @db.VarChar(12)
+  dipindai_pada DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([dipindai_pada], map: "idx_sekitar_titik_dipindai")
+  @@map("sekitar_titik")
+}
+
+/// Kamus tempat yang bisa dicari orang — "deket UNESA", "deket RS Soetomo".
+///
+/// KENAPA ADA. Filter lokasi yang lama menjawab "di mana" secara
+/// administratif: provinsi/kota/kecamatan/kelurahan. Itu bukan cara orang
+/// mencari tempat tinggal. Nama kelurahan di sekitar UNESA (Lidah Wetan,
+/// Jeruk) justru tidak diketahui oleh orang yang paling membutuhkannya —
+/// pendatang yang baru diterima kuliah di sana.
+///
+/// DARI MANA ISINYA. Tidak diimpor massal dari gazetteer nasional, melainkan
+/// tumbuh dari dua hal yang sudah terjadi sendiri: hasil pindai
+/// `listing_sekitar` (yang jalan sekali saat halaman detail dibuka pertama
+/// kali) dan patokan yang diketik agent di `listing.akses_terdekat`.
+/// Konsekuensinya disengaja: sebuah tempat masuk kamus HANYA kalau ada aset
+/// di dekatnya — jadi saran autocomplete tidak pernah menawarkan tempat yang
+/// hasilnya nol, cacat yang selalu muncul pada kamus hasil impor massal.
+///
+/// Lihat prisma/migration_tempat_landmark.sql (dijalankan manual per
+/// environment) dan src/lib/tempat/.
+model Tempat {
+  id              BigInt   @id @default(autoincrement())
+  /// Kunci dedup — dihitung kunciTempat() di src/lib/tempat/normalisasi.ts.
+  /// Aturannya beda per jangkauan: LANDMARK dikunci per kota (satu UNESA per
+  /// kota walau dipindai dari 50 aset), HARIAN dikunci per koordinat (tiap
+  /// cabang Alfamart baris sendiri — digabung per kota, "dekat Alfamart"
+  /// berarti "di kota yang ada Alfamart-nya", yaitu semua kota).
+  kunci           String   @unique @db.VarChar(220)
+  /// Dipakai di URL (?dekat=unesa-surabaya). Stabil — tautan hasil pencarian
+  /// tersebar lewat WhatsApp, jadi mengubahnya mematikan tautan orang lain.
+  slug            String   @unique @db.VarChar(200)
+  nama            String   @db.VarChar(200)
+  /// Bentuk yang dicocokkan: huruf kecil, tanpa tanda baca & gelar.
+  nama_normal     String   @db.VarChar(200)
+  kelas           String   @db.VarChar(24)
+  /// LANDMARK (disapu 5 km — orang naik motor) | HARIAN (800 m — jalan kaki).
+  jangkauan       String   @db.VarChar(12)
+  latitude        Decimal? @db.Decimal(10, 8)
+  longitude       Decimal? @db.Decimal(11, 8)
+  kota            String?  @db.VarChar(120)
+  provinsi        String?  @db.VarChar(120)
+  /// Nama brand ternormalisasi, mis. "mie gacoan" untuk 12 cabangnya. NULL
+  /// untuk tempat tunggal. Membuat "deket mie gacoan" berarti "dekat cabang
+  /// mana pun" — user tidak dipaksa memilih cabang yang dia tak tahu ada.
+  brand_normal    String?  @db.VarChar(120)
+  /// TURUNAN, disegarkan penyerap/skrip. Hanya untuk PERINGKAT saran: kalau
+  /// "pasar" cocok ke 40 tempat, yang paling banyak asetnya tampil dulu.
+  jumlah_listing  Int      @default(0)
+  /// PINDAI | PATOKAN | KURATIF.
+  sumber          String   @default("PINDAI") @db.VarChar(16)
+  dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
+  disegarkan_pada DateTime @default(now()) @db.Timestamptz(6)
+
+  alias   TempatAlias[]
+  listing ListingTempat[]
+
+  @@index([jumlah_listing(sort: Desc)], map: "idx_tempat_populer")
+  @@index([brand_normal], map: "idx_tempat_brand")
+  @@map("tempat")
+}
+
+/// Nama lain untuk tempat yang sama — jantung fitur "deket UNESA".
+///
+/// "UNESA" dan "Universitas Negeri Surabaya" tidak punya kemiripan trigram
+/// sama sekali; tidak ada pencocokan fuzzy secanggih apa pun yang bisa
+/// menyatukan keduanya. Satu-satunya jalan adalah MENCATAT bahwa keduanya
+/// nama yang sama, dan itulah tabel ini.
+///
+/// `sumber` menentukan bobot saat memeringkat, dari yang paling dipercaya:
+/// OSM (tag short_name/alt_name dari pemeta setempat) → KURATIF (daftar
+/// tulis-tangan di src/lib/tempat/alias-kuratif.ts) → PATOKAN (nama yang
+/// diketik agent) → AKRONIM.
+///
+/// AKRONIM sengaja paling lemah dan tidak pernah boleh menang: huruf depan
+/// "Universitas Negeri Surabaya" adalah "uns", yang justru milik Universitas
+/// Sebelas Maret. Berguna untuk "RSUD Dr Soetomo", berbahaya untuk kampus.
+model TempatAlias {
+  id_tempat    BigInt @db.BigInt
+  alias        String @db.VarChar(200)
+  alias_normal String @db.VarChar(200)
+  sumber       String @db.VarChar(16)
+
+  tempat Tempat @relation(fields: [id_tempat], references: [id], onDelete: Cascade)
+
+  @@id([id_tempat, alias_normal])
+  @@map("tempat_alias")
+}
+
+/// Indeks terbalik: dari sebuah tempat, ke aset-aset di dekatnya.
+///
+/// Tanpa tabel ini, "dekat UNESA" harus membongkar kolom JSON di 120 ribu
+/// baris setiap kali ada yang mencari. Dengan tabel ini ia sebuah index scan
+/// pada (id_tempat, jarak_meter) yang sudah terurut dari yang paling dekat —
+/// persis urutan yang ingin dilihat pencarinya.
+model ListingTempat {
+  id_property BigInt @db.BigInt
+  id_tempat   BigInt @db.BigInt
+  jarak_meter Int
+  /// PINDAI (diukur haversine dari titik aset) | PATOKAN (diketik agent;
+  /// satuan MENIT dikonversi 600 m/menit — motor dalam kota ±36 km/jam).
+  sumber      String @db.VarChar(12)
+  /// Seberapa boleh dipercaya jaraknya: TITIK | ALAMAT | KELURAHAN |
+  /// KECAMATAN | PATOKAN. Presisi KOTA sengaja TIDAK PERNAH masuk sini —
+  /// titik yang cuma tahu "Kota Surabaya" tidak berhak mengklaim "1,2 km dari
+  /// UNESA". Aset seperti itu tetap ketemu lewat filter kota, yang memang
+  /// sebatas itu yang diketahui tentangnya.
+  presisi     String @db.VarChar(12)
+
+  listing Listing @relation(fields: [id_property], references: [id_property], onDelete: Cascade)
+  tempat  Tempat  @relation(fields: [id_tempat], references: [id], onDelete: Cascade)
+
+  @@id([id_property, id_tempat])
+  @@index([id_tempat, jarak_meter], map: "idx_listing_tempat_dekat")
+  @@index([id_property], map: "idx_listing_tempat_listing")
+  @@map("listing_tempat")
+}
+
+/// Detail khusus listing SEWA (kos/apartemen/rumah kontrakan dst) — dipisah
+/// dari Listing supaya kolom jual/lelang tidak numpuk dengan kolom yang cuma
+/// dipakai transaksi sewa. Relasi 1:1 lewat id_property (PK = FK).
+model ListingSewaDetail {
+  id_property         BigInt                 @id
+  // --- Identitas unit (APARTEMEN) ---
+  // Apartemen disewakan per unit, dan satu unit hanya bisa disebut dengan
+  // benar lewat gedungnya, lantainya, dan nomornya. Tanpa ini, dua listing di
+  // gedung yang sama tidak bisa dibedakan penyewa maupun agent — pola yang
+  // dipakai Travelio/Jendela360 untuk tiap unit. Nama tower, kalau perlu,
+  // ditulis menyatu di nama_gedung ("Educity Apartment Tower Amethyst").
+  // Lantai & nomor unit String (bukan Int) karena di lapangan nilainya memang
+  // bukan angka murni: "GF", "12A", "Lt. 3 Mezzanine".
+  nama_gedung         String?                @db.VarChar(150)
+  lantai_unit         String?                @db.VarChar(20)
+  nomor_unit          String?                @db.VarChar(30)
+  /// Studio / 1BR / 2BR / … — filter nomor satu di situs sewa apartemen.
+  tipe_unit           tipe_unit_enum?
+  // Harga per durasi — SEWA bisa menawarkan >1 durasi sekaligus (kos umumnya
+  // harian/mingguan/bulanan/tahunan dgn harga masing2). durasi_sewa = durasi
+  // mana yg jadi "harga utama" ditampilkan di card listing (nilainya disalin
+  // ke Listing.harga saat create/update untuk sort & filter generik).
+  durasi_sewa         durasi_sewa_enum?
+  harga_sewa_harian   Decimal?               @db.Decimal(20, 2)
+  harga_sewa_mingguan Decimal?               @db.Decimal(20, 2)
+  harga_sewa_bulanan  Decimal?               @db.Decimal(20, 2)
+  harga_sewa_tahunan  Decimal?               @db.Decimal(20, 2)
+  // Minimal sewa & deposit — syarat booking, bukan atribut fisik kamar
+  minimal_sewa_jumlah Int?
+  minimal_sewa_satuan durasi_sewa_enum?
+  deposit             Decimal?               @db.Decimal(20, 2)
+  /// Biaya di luar harga sewa & deposit, mis.
+  /// [{nama:"Listrik",nominal:150000,periode:"BULANAN"}].
+  /// Ini keluhan nomor satu penyewa kos: harga di iklan bukan yang dibayar.
+  /// Disimpan terstruktur (bukan teks bebas) supaya bisa dijumlahkan jadi
+  /// "estimasi total bulan pertama" dan dirender seragam di halaman detail.
+  biaya_tambahan      Json?
+  // Jam check-in/out — hanya bermakna kalau unit ditawarkan harian/mingguan
+  // (pola Booking/Agoda). Untuk sewa bulanan/tahunan dibiarkan null.
+  jam_check_in        String?                @db.VarChar(10)
+  jam_check_out       String?                @db.VarChar(10)
+  // Spesifikasi unit — relevan Kos/Apartemen, bukan luas tanah gedung
+  luas_kamar          Decimal?               @db.Decimal(12, 2)
+  kamar_mandi_tipe    kamar_mandi_tipe_enum?
+  termasuk_listrik    Boolean?
+  termasuk_air        Boolean?
+  akses_24_jam        Boolean?
+  jam_malam           String?                @db.VarChar(10)
+  // Fasilitas dipisah: yang didapat sendiri di dalam kamar vs yang dipakai
+  // bareng penghuni lain — pertanyaan pertama calon penyewa kos.
+  fasilitas_kamar     String?
+  fasilitas_bersama   String?
+  peraturan           String?
+  kos_gender          kos_gender_enum?
+  kapasitas_penghuni  Int?
+  // Ketersediaan kamar — sebuah listing kos mewakili SATU gedung dengan banyak
+  // kamar, jadi "tersedia/terjual" saja tidak cukup. total_kamar = kapasitas
+  // gedung, diisi agent lewat wizard.
+  total_kamar         Int?
+  /// TURUNAN — JANGAN DITULIS DARI APLIKASI. Sisa kamar HARI INI, yaitu
+  /// total_kamar dikurangi blok aktif di listing_ketersediaan (di-clamp ke
+  /// [0, total_kamar] karena listing_sewa_detail_kamar_check menegakkannya).
+  /// Ada sebagai kolom nyata semata-mata supaya pill "Sisa N kamar" di card
+  /// dan filter daftar listing tidak perlu join & agregat — duplikasi yang
+  /// disengaja, sama alasannya dengan Listing.harga_efektif.
+  ///
+  /// Ditulis ulang oleh src/app/api/listings/_lib/sewa-availability-write.ts
+  /// di tiap mutasi blok, dan sekali sehari oleh /api/cron/sewa-ketersediaan
+  /// (blok yang mulai/berakhir hari ini mengubah jawaban tanpa ada yang
+  /// menekan tombol). Halaman detail TIDAK membaca kolom ini — ia menghitung
+  /// langsung dari listing_ketersediaan, supaya cron yang terlewat hanya
+  /// membuat card basi, bukan membuat panel booking berbohong.
+  kamar_tersedia      Int?
+  listing             Listing                @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "listing_sewa_detail_listing_fk")
+
+  @@map("listing_sewa_detail")
+}
+
+/// Tipe kamar dalam satu listing KOS. Satu gedung kos jarang seragam: dari 10
+/// kamar bisa ada 2 kamar mandi dalam yang lebih luas & lebih mahal. Tanpa
+/// tabel ini pemilik dipaksa memilih satu luas/harga/jenis kamar mandi untuk
+/// seluruh gedung, dan calon penghuni datang survei dengan ekspektasi salah.
+///
+/// Opsional: kos yang semua kamarnya sama tidak punya baris di sini dan tetap
+/// memakai kolom tunggal di ListingSewaDetail (luas_kamar, kamar_mandi_tipe,
+/// total_kamar, dst). Kalau baris di sini ADA, kolom agregat di
+/// ListingSewaDetail (total_kamar, kamar_tersedia, harga_sewa_*) dihitung
+/// ulang dari tabel ini oleh API — lihat src/lib/kosRoomTypes.ts. Duplikasi
+/// itu disengaja supaya query daftar/filter listing tidak perlu join & agregat.
+model ListingKamarTipe {
+  id                  BigInt                 @id @default(autoincrement())
+  id_property         BigInt
+  nama                String                 @db.VarChar(80)
+  /// Urutan tampil, mengikuti urutan yang disusun agent di form.
+  urutan              Int                    @default(0)
+  jumlah_kamar        Int
+  /// TURUNAN dari listing_ketersediaan — lihat catatan lengkap di
+  /// ListingSewaDetail.kamar_tersedia. Aturannya identik, hanya cakupannya
+  /// yang menyempit ke satu tipe.
+  kamar_tersedia      Int                    @default(0)
+  luas_kamar          Decimal?               @db.Decimal(12, 2)
+  kamar_mandi_tipe    kamar_mandi_tipe_enum?
+  kapasitas_penghuni  Int?
+  /// Lantai tempat kamar tipe ini berada, mis. "2" atau "Lt. 2 & 3". Penghuni
+  /// menanyakannya sebelum survei (naik-turun tangga tiap hari), dan agent
+  /// butuh untuk mengarahkan calon penghuni ke kamar yang benar.
+  lantai_kamar        String?                @db.VarChar(20)
+  /// Nomor kamar milik tipe ini, mis. "A1, A2, A3". Bebas format karena
+  /// penomoran kos tidak seragam; gunanya menunjuk kamar saat survei.
+  nomor_kamar         String?                @db.VarChar(60)
+  harga_sewa_harian   Decimal?               @db.Decimal(20, 2)
+  harga_sewa_mingguan Decimal?               @db.Decimal(20, 2)
+  harga_sewa_bulanan  Decimal?               @db.Decimal(20, 2)
+  harga_sewa_tahunan  Decimal?               @db.Decimal(20, 2)
+  /// Fasilitas khas tipe ini saja (mis. AC, water heater) — di luar
+  /// fasilitas_kamar di ListingSewaDetail yang berlaku untuk semua tipe.
+  fasilitas_kamar     String?
+  /// Foto kamar untuk tipe ini. Formatnya CSV URL, SAMA PERSIS dengan
+  /// `listing.gambar`, supaya satu parser saja yang dipakai kedua tempat —
+  /// walau form hanya meminta satu foto per tipe (calon penghuni butuh tahu
+  /// wujud kamarnya; lebih dari satu foto per tipe membuat kartu tipe berubah
+  /// jadi galeri kedua yang menutupi perbandingan antar tipe).
+  gambar              String?
+  catatan             String?                @db.VarChar(255)
+  tanggal_dibuat      DateTime?              @default(now()) @db.Timestamptz(6)
+  tanggal_diupdate    DateTime?              @default(now()) @db.Timestamptz(6)
+  listing             Listing                @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "listing_kamar_tipe_listing_fk")
+  ketersediaan        ListingKetersediaan[]
+
+  @@index([id_property], map: "idx_listing_kamar_tipe_property")
+  @@map("listing_kamar_tipe")
+}
+
+/// Jejak audit setiap perubahan `listing.status_tayang` — siapa mengubah, dari
+/// status apa ke apa, kapan, dan ATAS DASAR WEWENANG APA.
+///
+/// Wajib ada sejak status listing bisa diubah dari halaman detail publik oleh
+/// tiga pihak berbeda (pemegang listing, OWNER, dan STOKER untuk aset lelang).
+/// Tanpa tabel ini, satu-satunya bukti "aset saya ditutup orang lain" adalah
+/// kolom tanggal_diupdate yang tidak menyebut pelakunya — pertanyaan "siapa
+/// yang menandai listing saya terjual?" jadi mustahil dijawab.
+///
+/// Identitas pelaku disimpan sebagai SNAPSHOT (id + nama + jabatan saat itu),
+/// bukan relasi ke tabel agent. Dua alasan: (1) jabatan berubah — stoker hari
+/// ini bisa jadi agent biasa bulan depan, dan audit harus mencatat wewenang
+/// yang dipakai SAAT kejadian, bukan wewenang hari ini; (2) baris audit harus
+/// selamat walau akun pelakunya dihapus. Karena itu tidak ada foreign key ke
+/// agent di sini — hanya ke listing, yang memang tidak berarti lagi kalau
+/// listingnya sendiri sudah tidak ada.
+///
+/// Tabelnya append-only: tidak pernah di-UPDATE maupun di-DELETE oleh aplikasi.
+///
+/// Butuh migrasi manual — lihat prisma/migration_riwayat_status_listing.sql.
+model RiwayatStatusListing {
+  id               BigInt               @id @default(autoincrement())
+  id_property      BigInt
+  /// Pelaku: id_agent yang menekan tombol.
+  id_agent         String               @db.VarChar(20)
+  /// Snapshot nama pelaku saat kejadian (nama bisa berubah/akun bisa hilang).
+  nama_pelaku      String?              @db.VarChar(150)
+  /// Snapshot `jabatan_agent_enum` pelaku saat kejadian. String, bukan enum,
+  /// supaya nilai jabatan yang kelak dihapus dari enum tetap terbaca di audit.
+  jabatan_pelaku   String               @db.VarChar(30)
+  /// Dasar izin yang dipakai: OWNER | PEMILIK | STOKER_LELANG.
+  /// Inilah yang membedakan "agent menutup listingnya sendiri" dari "stoker
+  /// menutup aset agent lain" — dua kejadian yang sangat berbeda bobotnya.
+  dasar_wewenang   String               @db.VarChar(20)
+  /// Snapshot pemegang listing saat kejadian (listing bisa dialihkan).
+  id_agent_pemilik String               @db.VarChar(20)
+  status_lama      status_properti_enum
+  status_baru      status_properti_enum
+  /// Dari mana aksinya datang: DETAIL (halaman detail) | DASHBOARD (aksi massal).
+  sumber           String               @db.VarChar(20)
+  dibuat_pada      DateTime             @default(now()) @db.Timestamptz(6)
+
+  listing Listing @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "riwayat_status_listing_listing_fk")
+
+  @@index([id_property, dibuat_pada(sort: Desc)], map: "idx_riwayat_status_listing_property")
+  @@index([id_agent, dibuat_pada(sort: Desc)], map: "idx_riwayat_status_listing_pelaku")
+  @@map("riwayat_status_listing")
+}
+
+/// Periode sebuah listing SEWA (atau satu tipe kamar di dalamnya) TIDAK
+/// tersedia — sumber kebenaran tunggal untuk ketersediaan sewa. Kolom
+/// kamar_tersedia di listing_sewa_detail & listing_kamar_tipe adalah TURUNAN
+/// dari tabel ini.
+///
+/// Kenapa interval, bukan satu baris per tanggal? Bahasa pengelola memang
+/// interval — "kamar 3 terisi 1 Sep sampai 1 Des" adalah satu baris, satu
+/// edit, satu hapus, dan jejak audit yang terbaca. Sewa di sini didominasi
+/// bulanan/tahunan, jadi baris-per-tanggal cuma menggelembungkan tabel tanpa
+/// menambah satu pun jawaban yang tidak bisa dihitung dari interval.
+///
+/// Satu model untuk dua bentuk inventaris:
+///   • KOS       → pooled; jumlah_kamar bisa >1, id_tipe menunjuk tipe kamar
+///                 (atau null bila kos itu tidak memakai tipe sama sekali).
+///   • non-KOS   → unit tunggal; id_tipe SELALU null & jumlah_kamar SELALU 1.
+/// Apartemen hanyalah kos berkapasitas 1 — memisahkannya jadi dua sistem
+/// adalah cara paling pasti mendapat dua himpunan bug untuk satu perhitungan.
+model ListingKetersediaan {
+  id              BigInt             @id @default(autoincrement())
+  id_property     BigInt
+  /// null = berlaku untuk seluruh listing (unit tunggal, atau kos tanpa tipe).
+  id_tipe         BigInt?
+  /// Rentang SETENGAH TERBUKA [tanggal_mulai, tanggal_selesai) — hari
+  /// `tanggal_selesai` sudah kosong lagi dan boleh dipakai penghuni berikutnya.
+  /// Konvensi ini menyamai useBooking (12 Agu + 8 hari = 20 Agu, "8 hari");
+  /// memakai rentang tertutup di sisi data akan membuat kamar tidak bisa
+  /// disewakan pada hari penghuni sebelumnya keluar.
+  tanggal_mulai   DateTime           @db.Date
+  /// null = terbuka, "sampai dibuka lagi" — bentuk penyimpanan dari tombol
+  /// "Tandai penuh". Setiap perulangan tanggal atasnya WAJIB di-clamp ke
+  /// horizon, kalau tidak ia tidak pernah berhenti.
+  tanggal_selesai DateTime?          @db.Date
+  jumlah_kamar    Int                @default(1)
+  alasan          alasan_blokir_enum @default(DISEWA)
+  catatan         String?            @db.VarChar(255)
+  /// id_agent yang membuat blok. Bisa OWNER yang memakai wewenangnya atas
+  /// listing agent lain, jadi bukan selalu sama dengan listing.id_agent.
+  dibuat_oleh     String             @db.VarChar(20)
+  dibuat_pada     DateTime           @default(now()) @db.Timestamptz(6)
+  diperbarui_pada DateTime           @default(now()) @db.Timestamptz(6)
+
+  listing Listing           @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "listing_ketersediaan_listing_fk")
+  tipe    ListingKamarTipe? @relation(fields: [id_tipe], references: [id], onDelete: Cascade, map: "listing_ketersediaan_tipe_fk")
+
+  @@index([id_property, tanggal_mulai, tanggal_selesai], map: "idx_ketersediaan_property_rentang")
+  @@index([id_tipe], map: "idx_ketersediaan_tipe")
+  @@map("listing_ketersediaan")
+}
+
+/// Voucher potongan sewa milik SATU listing, dibuat sendiri oleh agent
+/// pemegangnya lewat panel kontrol di halaman detail.
+///
+/// Sengaja TIDAK ada voucher global lintas listing. Potongan harga sewa
+/// dibayar oleh pemilik aset, bukan oleh platform — jadi hanya dia yang boleh
+/// memutuskan besarnya, dan hanya untuk asetnya sendiri. Voucher global akan
+/// memotong pendapatan orang yang tidak pernah menyetujuinya.
+model ListingVoucher {
+  id          BigInt @id @default(autoincrement())
+  id_property BigInt
+
+  /// Huruf besar tanpa spasi. Unik PER LISTING, bukan global: dua pemilik yang
+  /// berbeda boleh sama-sama memakai "HEMAT10" untuk asetnya masing-masing,
+  /// dan memaksakan keunikan global hanya akan membuat pemilik kedua ditolak
+  /// tanpa sebab yang bisa dia lihat.
+  kode      String  @db.VarChar(30)
+  nama      String  @db.VarChar(120)
+  deskripsi String? @db.VarChar(300)
+
+  jenis         jenis_voucher_enum @default(NOMINAL)
+  /// PERSEN → dibaca 0–100. NOMINAL → dibaca rupiah.
+  nilai         Decimal            @db.Decimal(14, 2)
+  /// Batas atas potongan untuk jenis PERSEN. null = tanpa batas.
+  potongan_maks BigInt?
+  /// Subtotal sewa minimum (deposit TIDAK ikut dihitung — lihat @/lib/voucher).
+  min_transaksi BigInt?
+
+  /// Kosong = berlaku untuk semua durasi yang ditawarkan listing.
+  durasi_berlaku durasi_sewa_enum[]
+  /// Id `listing_kamar_tipe` yang dilayani. Kosong = semua tipe.
+  ///
+  /// Sengaja tanpa foreign key (Postgres tidak bisa memasangnya per elemen
+  /// array, dan itu justru menguntungkan di sini): kalau tipe kamarnya dihapus,
+  /// id yang tertinggal tidak akan cocok dengan tipe mana pun sehingga
+  /// vouchernya BERHENTI cair — gagal-tertutup. Membersihkan id yang hilang
+  /// sampai arraynya kosong akan diam-diam mengubah promo "khusus Standard"
+  /// jadi promo untuk seluruh tipe, termasuk yang termahal.
+  tipe_berlaku   BigInt[]
+  /// Lama sewa minimum dalam satuan durasinya.
+  lama_min       Int?
+  /// Inklusif — voucher belum hidup SEBELUM tanggal ini. NULL = hidup sejak
+  /// dibuat. Adanya kolom ini yang membuat promo bisa disiapkan jauh hari:
+  /// tanpa itu, satu-satunya cara memasang promo untuk minggu depan adalah
+  /// mengingat sendiri untuk membuatnya minggu depan.
+  berlaku_mulai  DateTime?          @db.Date
+  /// Inklusif — voucher masih hidup pada tanggal ini.
+  berlaku_sampai DateTime?          @db.Date
+
+  /// Batas jumlah pemakaian. NULL = tanpa batas.
+  ///
+  /// Alat promosi, bukan sekadar pengaman: "sisa 5 dari 20" adalah alasan
+  /// penyewa memutuskan hari ini. Sekaligus batas kerugian yang bisa
+  /// dianggarkan pemilik di muka — promo tanpa kuota tidak punya angka
+  /// terbesar.
+  kuota_total    Int?
+  /// Counter, BUKAN COUNT(*) ke listing_voucher_pakai. Alasannya penguncian,
+  /// bukan kecepatan: penambahannya lewat satu UPDATE bersyarat (lihat
+  /// prisma/migration_listing_voucher_v2.sql) aman dari dua penyewa yang
+  /// menebus jatah terakhir pada detik yang sama.
+  kuota_terpakai Int  @default(0)
+
+  /// Dimatikan sementara tanpa dihapus: pemilik sering menghidupkan promo yang
+  /// sama tiap musim, dan menghapusnya berarti mengetik ulang seluruh syarat.
+  aktif   Boolean @default(true)
+  /// Tidak pernah muncul di daftar publik; hanya keluar bila kodenya diketik
+  /// persis. Untuk promo tertutup (kerja sama kampus, kode influencer).
+  rahasia Boolean @default(false)
+
+  /// id_agent pembuat. Bisa OWNER yang memakai wewenangnya atas listing agent
+  /// lain, jadi tidak selalu sama dengan listing.id_agent.
+  dibuat_oleh     String   @db.VarChar(20)
+  dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
+  diperbarui_pada DateTime @default(now()) @db.Timestamptz(6)
+
+  listing Listing               @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "listing_voucher_listing_fk")
+  pakai   ListingVoucherPakai[]
+
+  @@unique([id_property, kode], map: "uq_listing_voucher_kode")
+  @@index([id_property, aktif], map: "idx_listing_voucher_property_aktif")
+  @@map("listing_voucher")
+}
+
+/// Satu baris per pemakaian voucher.
+///
+/// `kuota_terpakai` menjawab "berapa sisa"; tabel ini menjawab "promo mana
+/// yang sebenarnya menghasilkan". Tanpa itu pemilik hanya bisa menebak —
+/// voucher yang tidak pernah dipakai dan yang dipakai 30 kali terlihat sama
+/// persis di daftar.
+///
+/// Angka pemesanannya DIBEKUKAN di sini, tidak dibaca ulang dari vouchernya:
+/// besaran promo boleh diubah kapan saja, dan riwayat yang ikut berubah
+/// ketika syaratnya diubah bukan riwayat.
+model ListingVoucherPakai {
+  id          BigInt @id @default(autoincrement())
+  id_voucher  BigInt
+  id_property BigInt
+
+  /// Disalin, bukan hanya di-join: kode inilah yang dilihat pemilik di
+  /// riwayat, dan kode voucher boleh diubah setelah dipakai.
+  kode          String  @db.VarChar(30)
+  nama_klien    String? @db.VarChar(160)
+  telepon_klien String? @db.VarChar(32)
+
+  /// Subtotal sewa saat itu (tanpa deposit) & rupiah yang benar-benar dipotong.
+  subtotal BigInt            @default(0)
+  potongan BigInt            @default(0)
+  durasi   durasi_sewa_enum?
+  lama     Int?
+
+  dipakai_pada DateTime @default(now()) @db.Timestamptz(6)
+
+  voucher ListingVoucher @relation(fields: [id_voucher], references: [id], onDelete: Cascade, map: "listing_voucher_pakai_voucher_fk")
+
+  @@index([id_voucher, dipakai_pada(sort: Desc)], map: "idx_listing_voucher_pakai_voucher")
+  @@map("listing_voucher_pakai")
+}
+
+/// PERSEN dibatasi `potongan_maks`; NOMINAL tidak perlu. Dipisah sebagai enum,
+/// bukan ditebak dari besar `nilai` (mis. "≤100 berarti persen"), karena
+/// potongan Rp 50 memang mustahil tapi bukan tugas skema untuk menebaknya.
+enum jenis_voucher_enum {
+  PERSEN
+  NOMINAL
+}
+
+/// Kenapa sebuah kamar/unit ditandai tidak tersedia. Bukan hiasan: "DISEWA"
+/// adalah kamar yang menghasilkan uang, "RENOVASI" adalah kamar yang tidak —
+/// dan hanya yang pertama yang boleh dianggap lead yang sudah tertutup.
+/// Nilainya TIDAK pernah dikirim ke pengunjung publik (informasi operasional).
+enum alasan_blokir_enum {
+  DISEWA
+  RENOVASI
+  DIPAKAI_SENDIRI
+  TUTUP
 }
 
 model Project {
@@ -598,27 +1208,27 @@ model Acara {
 
 /// Booking survei properti oleh calon pembeli/penyewa
 model BookingSurvei {
-  id_booking       BigInt    @id @default(autoincrement())
-  id_property      BigInt
-  id_agent         String    @db.VarChar(20)
-  id_klien         String?   @db.VarChar(20)
-  id_lead          BigInt?
-  nama_klien       String    @db.VarChar(255)
-  nomor_telepon    String    @db.VarChar(20)
-  tanggal_survei   DateTime  @db.Timestamptz(6)
-  status           String    @default("PENDING") @db.VarChar(20)
-  catatan          String?   @db.Text
-  tanggal_dibuat   DateTime  @default(now()) @db.Timestamptz(6)
+  id_booking     BigInt   @id @default(autoincrement())
+  id_property    BigInt
+  id_agent       String   @db.VarChar(20)
+  id_klien       String?  @db.VarChar(20)
+  id_lead        BigInt?
+  nama_klien     String   @db.VarChar(255)
+  nomor_telepon  String   @db.VarChar(20)
+  tanggal_survei DateTime @db.Timestamptz(6)
+  status         String   @default("PENDING") @db.VarChar(20)
+  catatan        String?  @db.Text
+  tanggal_dibuat DateTime @default(now()) @db.Timestamptz(6)
 
-  listing   Listing   @relation(fields: [id_property], references: [id_property], onDelete: Cascade)
-  agent     Agent     @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
-  pengguna  Pengguna? @relation(fields: [id_klien], references: [id_pengguna], onDelete: SetNull)
-  lead      Lead?     @relation(fields: [id_lead], references: [id_lead], onDelete: SetNull)
+  listing  Listing   @relation(fields: [id_property], references: [id_property], onDelete: Cascade)
+  agent    Agent     @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
+  pengguna Pengguna? @relation(fields: [id_klien], references: [id_pengguna], onDelete: SetNull)
+  lead     Lead?     @relation(fields: [id_lead], references: [id_lead], onDelete: SetNull)
 
-  @@index([id_agent],    map: "idx_booking_survei_agent")
+  @@index([id_agent], map: "idx_booking_survei_agent")
   @@index([id_property], map: "idx_booking_survei_property")
-  @@index([id_klien],    map: "idx_booking_survei_klien")
-  @@index([id_lead],     map: "idx_booking_survei_id_lead")
+  @@index([id_klien], map: "idx_booking_survei_klien")
+  @@index([id_lead], map: "idx_booking_survei_id_lead")
   @@index([tanggal_survei], map: "idx_booking_survei_tanggal")
   @@map("booking_survei")
 }
@@ -629,14 +1239,14 @@ model BookingSurvei {
 /// kalender: acara hanya tampil di kalender agent kalau dia owner
 /// (Acara.id_agent) atau ada di tabel ini.
 model UndanganAcara {
-  id_undangan     BigInt              @id @default(autoincrement())
+  id_undangan     BigInt               @id @default(autoincrement())
   id_acara        BigInt
-  id_agent        String              @db.VarChar(20)
+  id_agent        String               @db.VarChar(20)
   status_undangan status_undangan_enum @default(DIUNDANG)
-  diundang_pada   DateTime            @default(now()) @db.Timestamptz(6)
-  direspon_pada   DateTime?           @db.Timestamptz(6)
-  acara           Acara               @relation(fields: [id_acara], references: [id_acara], onDelete: Cascade)
-  agent           Agent               @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
+  diundang_pada   DateTime             @default(now()) @db.Timestamptz(6)
+  direspon_pada   DateTime?            @db.Timestamptz(6)
+  acara           Acara                @relation(fields: [id_acara], references: [id_acara], onDelete: Cascade)
+  agent           Agent                @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
 
   @@unique([id_acara, id_agent])
   @@index([id_agent], map: "idx_undangan_agent")
@@ -787,15 +1397,15 @@ model Lead {
   client_phone String? @db.VarChar(20)
   client_email String? @db.VarChar(150)
 
-  penawaran  BigInt?
-  diskon     Decimal?                @db.Decimal(5, 2)
-  pembayaran metode_pembayaran_enum?
-  catatan    String?                 @db.VarChar(1000)
-  id_pengguna String? @db.VarChar(20)
+  penawaran   BigInt?
+  diskon      Decimal?                @db.Decimal(5, 2)
+  pembayaran  metode_pembayaran_enum?
+  catatan     String?                 @db.VarChar(1000)
+  id_pengguna String?                 @db.VarChar(20)
 
   status_penawaran  status_penawaran_enum?
-  catatan_agent     String?                 @db.VarChar(500)
-  tanggal_keputusan DateTime?               @db.Timestamptz(6)
+  catatan_agent     String?                @db.VarChar(500)
+  tanggal_keputusan DateTime?              @db.Timestamptz(6)
 
   id_agent_cobroke String? @db.VarChar(20)
 
@@ -804,12 +1414,12 @@ model Lead {
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
-  agent       Agent     @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "leads_agent_fk")
-  listing     Listing   @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "leads_property_fk")
-  pengguna    Pengguna? @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: SetNull, map: "leads_pengguna_fk")
-  agentCobroke Agent?   @relation("LeadCobroke", fields: [id_agent_cobroke], references: [id_agent], onDelete: SetNull, map: "leads_agent_cobroke_fk")
-  klien   Klien?
-  tugas   Tugas[]
+  agent         Agent           @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "leads_agent_fk")
+  listing       Listing         @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "leads_property_fk")
+  pengguna      Pengguna?       @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: SetNull, map: "leads_pengguna_fk")
+  agentCobroke  Agent?          @relation("LeadCobroke", fields: [id_agent_cobroke], references: [id_agent], onDelete: SetNull, map: "leads_agent_cobroke_fk")
+  klien         Klien?
+  tugas         Tugas[]
   bookingSurvei BookingSurvei[]
 
   @@index([id_agent, status], map: "idx_leads_agent_status")
@@ -824,20 +1434,20 @@ model Lead {
 
 // ── Klien CRM: data kontak & preferensi klien ────────────────────────────────
 model Klien {
-  id_klien    String  @id @default(dbgenerated("('KL'::text || lpad((nextval('klien_code_seq'::regclass))::text, 5, '0'::text))")) @db.VarChar(20)
-  id_agent    String  @db.VarChar(20)
-  id_pengguna String? @db.VarChar(20)
-  id_lead_asal    BigInt? @unique
+  id_klien         String  @id @default(dbgenerated("('KL'::text || lpad((nextval('klien_code_seq'::regclass))::text, 5, '0'::text))")) @db.VarChar(20)
+  id_agent         String  @db.VarChar(20)
+  id_pengguna      String? @db.VarChar(20)
+  id_lead_asal     BigInt? @unique
   id_properti_asal BigInt?
 
   nama           String  @db.VarChar(150)
   nomor_whatsapp String? @db.VarChar(20)
   email          String? @db.VarChar(150)
 
-  sumber             sumber_klien_enum      @default(wa_organik)
-  metode_pembayaran  metode_pembayaran_enum?
-  bank_kpr           String?                @db.VarChar(50)
-  tenor_kpr          Int?                   @db.SmallInt
+  sumber            sumber_klien_enum       @default(wa_organik)
+  metode_pembayaran metode_pembayaran_enum?
+  bank_kpr          String?                 @db.VarChar(50)
+  tenor_kpr         Int?                    @db.SmallInt
 
   tanggal_masuk           DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
   tanggal_kontak_terakhir DateTime? @db.Timestamptz(6)
@@ -849,12 +1459,14 @@ model Klien {
   dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
   diperbarui_pada DateTime @default(now()) @db.Timestamptz(6)
 
-  agent        Agent         @relation(fields: [id_agent], references: [id_agent], onDelete: Restrict, map: "klien_agent_fk")
-  pengguna     Pengguna?     @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: SetNull, map: "klien_pengguna_fk")
-  leadAsal     Lead?         @relation(fields: [id_lead_asal], references: [id_lead], onDelete: SetNull, map: "klien_lead_fk")
-  propertiAsal Listing?      @relation(fields: [id_properti_asal], references: [id_property], onDelete: SetNull, map: "klien_properti_fk")
+  agent         Agent                @relation(fields: [id_agent], references: [id_agent], onDelete: Restrict, map: "klien_agent_fk")
+  pengguna      Pengguna?            @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: SetNull, map: "klien_pengguna_fk")
+  leadAsal      Lead?                @relation(fields: [id_lead_asal], references: [id_lead], onDelete: SetNull, map: "klien_lead_fk")
+  propertiAsal  Listing?             @relation(fields: [id_properti_asal], references: [id_property], onDelete: SetNull, map: "klien_properti_fk")
   preferensi    PreferensiKlien[]
-  followUpAcara Acara[]           @relation("KlienFollowUpAcara")
+  followUpAcara Acara[]              @relation("KlienFollowUpAcara")
+  kiriman       KirimanRekomendasi[]
+  tugas         Tugas[]
 
   @@index([id_agent], map: "idx_klien_agent")
   @@index([id_agent, status], map: "idx_klien_status")
@@ -865,64 +1477,250 @@ model Klien {
 }
 
 model PreferensiKlien {
-  id_preferensi  BigInt                 @id @default(autoincrement())
-  id_klien       String                 @db.VarChar(20)
+  id_preferensi BigInt @id @default(autoincrement())
+  id_klien      String @db.VarChar(20)
 
-  tipe_properti   kategori_properti_enum
-  jenis_transaksi jenis_transaksi_enum?
-  lokasi_dicari   String?               @db.VarChar(255)
-  loc_provinsi    String?               @db.VarChar(150)
-  loc_kota        String?               @db.VarChar(150)
-  loc_kecamatan   String?               @db.VarChar(150)
-  loc_kelurahan   String?               @db.VarChar(150)
-  budget_min      Decimal?              @db.Decimal(20, 2)
-  budget_max     Decimal?               @db.Decimal(20, 2)
-  luas_min       Decimal?               @db.Decimal(12, 2)
-  luas_max       Decimal?               @db.Decimal(12, 2)
-  tujuan_beli    tujuan_beli_enum?
-  catatan        String?
+  /// NULL = SEMUA tipe. Bawaan yang paling sering benar: klien menyebut
+  /// daerah & anggaran lebih dulu daripada menyebut rumah atau ruko. Yang
+  /// WAJIB adalah lokasi — ditegakkan formulir & API, bukan NOT NULL, karena
+  /// lokasinya tersebar di empat kolom yang mana pun boleh terisi.
+  tipe_properti     kategori_properti_enum?
+  /// BELI atau SEWA. Ada karena `jenis_transaksi` boleh kosong ("rumah di
+  /// Gresik maks 500 jt") sementara mesin pencocokan tetap wajib tahu ini
+  /// orang mau beli atau menyewa — rumah yang sama bisa terdaftar sebagai dua
+  /// listing berbeda. BELI membuka PRIMARY/SECONDARY/LELANG/CESSIE; SEWA
+  /// hanya membuka SEWA. Keselarasannya dengan jenis_transaksi ditegakkan
+  /// CHECK `preferensi_maksud_selaras` di database, bukan cuma di aplikasi.
+  /// Butuh migrasi manual — prisma/migration_rekomendasi_klien.sql.
+  maksud            maksud_preferensi_enum  @default(BELI)
+  jenis_transaksi   jenis_transaksi_enum?
+  lokasi_dicari     String?                 @db.VarChar(255)
+  loc_provinsi      String?                 @db.VarChar(150)
+  loc_kota          String?                 @db.VarChar(150)
+  loc_kecamatan     String?                 @db.VarChar(150)
+  loc_kelurahan     String?                 @db.VarChar(150)
+  budget_min        Decimal?                @db.Decimal(20, 2)
+  budget_max        Decimal?                @db.Decimal(20, 2)
+  luas_min          Decimal?                @db.Decimal(12, 2)
+  luas_max          Decimal?                @db.Decimal(12, 2)
+  tujuan_beli       tujuan_beli_enum?
+  /// Sertifikat yang diminta klien. NULL = tidak mempermasalahkan — keadaan
+  /// bawaan dan yang paling sering benar. Satu-satunya kriteria tambahan yang
+  /// bisa dijawab data listing (99,9% terisi); kamar tidur & luas bangunan
+  /// hanya terisi 4–5 baris dari 120 ribu, jadi sengaja TIDAK jadi kriteria.
+  /// Butuh migrasi manual — prisma/migration_preferensi_legalitas.sql.
+  legalitas         sertifikat_enum?
+  /// Token tempat, SAMA PERSIS dengan param `?dekat=` di searchbar (slug,
+  /// "brand:x", "cocok:x", atau "kelas:X"). Disimpan sebagai token, bukan
+  /// id_tempat: satu pilihan bisa mewakili banyak baris kamus, pilihan "jenis
+  /// tempat" sama sekali bukan id, dan id bisa berubah saat kamus disegarkan.
+  /// Diterjemahkan `bacaTempatTerpilih()` saat pencocokan.
+  /// Butuh migrasi manual — prisma/migration_preferensi_dekat.sql.
+  dekat_nilai       String?                 @db.VarChar(220)
+  /// Radius meter. NULL = pakai bawaan kelas tempatnya.
+  dekat_radius      Int?
+  /// Patokan berupa teks alamat — nama jalan / perumahan yang tidak ada di
+  /// kamus tempat. Dicocokkan ke listing.alamat_lengkap.
+  alamat_teks       String?                 @db.VarChar(160)
+  catatan           String?
+  /// NULL = kriteria ini belum pernah diadu dengan persediaan yang SUDAH ADA.
+  /// Tanpa kolom ini, klien yang preferensinya baru dibuat tidak pernah
+  /// dikabari soal aset lama yang cocok — pemindai hanya melihat listing baru,
+  /// dan aset yang sudah lama ada di database tidak pernah jadi "baru" lagi.
+  /// Diisi sekali oleh cron sesudah pencocokan penuh + email pertama.
+  /// Butuh migrasi manual — prisma/migration_asisten_pemindaian.sql.
+  terakhir_dipindai DateTime?               @db.Timestamptz(6)
 
   dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
   diperbarui_pada DateTime @default(now()) @db.Timestamptz(6)
 
-  klien Klien @relation(fields: [id_klien], references: [id_klien], onDelete: Cascade, map: "preferensi_klien_fk")
+  klien   Klien                @relation(fields: [id_klien], references: [id_klien], onDelete: Cascade, map: "preferensi_klien_fk")
+  kiriman KirimanRekomendasi[]
 
   @@index([id_klien], map: "idx_preferensi_klien")
   @@map("preferensi_klien")
 }
 
+/// Nisan prospek: penanda bahwa agent SENGAJA membuang seorang calon klien,
+/// supaya sinkron prospek tidak menghidupkannya kembali beberapa detik
+/// kemudian. Menyimpan waktu, bukan sekadar daftar hitam — aktivitas sumber
+/// yang LEBIH BARU dari nisannya tetap masuk, karena calon pembeli yang
+/// menghubungi lagi bukan sampah lama.
+/// Butuh migrasi manual — prisma/migration_prospek_diabaikan.sql.
+model ProspekDiabaikan {
+  id             BigInt   @id @default(autoincrement())
+  id_agent       String   @db.VarChar(20)
+  /// Nomor ternormalisasi (62xxx) atau "lead:<id>". Bentuknya ditentukan
+  /// src/lib/prospek.ts dan HARUS sama dengan yang dipakai sinkron.
+  kunci          String   @db.VarChar(64)
+  diabaikan_pada DateTime @default(now()) @db.Timestamptz(6)
+  nama_terakhir  String?  @db.VarChar(150)
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "prospek_diabaikan_agent_fk")
+
+  @@unique([id_agent, kunci], map: "prospek_diabaikan_unik")
+  @@index([id_agent], map: "idx_prospek_diabaikan_agent")
+  @@map("prospek_diabaikan")
+}
+
+/// Sampai mana tiap pemindai latar sudah benar-benar memproses.
+///
+/// Ada karena jendela geser ("listing 26 jam terakhir") KEHILANGAN kejadian
+/// secara diam-diam: proses yang mati tiga jam membuat listing di jam-jam itu
+/// berada di luar jendela pada putaran berikutnya, dan tidak akan pernah masuk
+/// jendela mana pun lagi. Tanda air maju HANYA setelah putaran berhasil, jadi
+/// proses yang sempat mati mengejar ketinggalannya sendiri.
+/// Butuh migrasi manual — prisma/migration_asisten_pemindaian.sql.
+model CronWatermark {
+  kunci           String   @id @db.VarChar(64)
+  waktu           DateTime @db.Timestamptz(6)
+  /// Pemecah seri: impor borongan menulis ratusan baris dengan cap waktu yang
+  /// sama persis, dan batas "> waktu" saja akan melewatkan sebagian di
+  /// antaranya atau memprosesnya dua kali.
+  id_terakhir     BigInt?
+  diperbarui_pada DateTime @default(now()) @db.Timestamptz(6)
+  catatan         String?
+
+  @@map("cron_watermark")
+}
+
+/// ── REM EMAIL ASISTEN ─────────────────────────────────────────────────────
+/// Satu baris = satu email asisten yang sudah dikirim ke seorang agent untuk
+/// satu slot waktu. Yang menegakkan "paling banyak sekian email per hari"
+/// adalah unik (id_agent, kunci) di database, BUKAN pemeriksaan di kode:
+/// pemindaian bisa berjalan dua kali bersamaan, dan rem berupa baca-lalu-tulis
+/// bocor persis di celah itu. INSERT yang berhasil = izin mengirim.
+/// Butuh migrasi manual — prisma/migration_email_asisten.sql.
+model EmailAsisten {
+  id           BigInt   @id @default(autoincrement())
+  id_agent     String   @db.VarChar(20)
+  /// 'ASETBARU:<YYYY-MM-DD>:<slot>' — lihat KUNCI_SLOT di cron rekomendasi.
+  kunci        String   @db.VarChar(80)
+  dikirim_pada DateTime @default(now()) @db.Timestamptz(6)
+  jumlah_klien Int      @default(0)
+  jumlah_aset  Int      @default(0)
+  /// Baris ditulis SEBELUM SMTP dicoba (itulah yang membuatnya jadi rem), jadi
+  /// kolom ini yang membedakan "sudah benar-benar sampai" dari "slot sudah
+  /// diambil tapi pengirimannya gagal".
+  terkirim     Boolean  @default(false)
+
+  agent Agent @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "email_asisten_agent_fk")
+
+  @@unique([id_agent, kunci], map: "email_asisten_unik")
+  @@index([dikirim_pada(sort: Desc)], map: "idx_email_asisten_waktu")
+  @@map("email_asisten")
+}
+
+/// ── BUKU KIRIMAN ──────────────────────────────────────────────────────────
+/// Satu baris per (klien × aset) yang PERNAH dikirim, seumur hidup. Tiga
+/// pekerjaan sekaligus:
+///   1. Anti-dobel. Unik (id_klien, id_property) — aturan "jangan kirim aset
+///      yang sama dua kali" ditegakkan database, jadi klik ganda, dua tab, dan
+///      dua agent yang memegang klien sama tidak bisa menembusnya.
+///   2. Titik banding. Snapshot harga saat kirim adalah SATU-SATUNYA dasar
+///      kalimat "harganya turun" — tanpa itu sistem cuma menebak.
+///   3. Umpan balik. Tanggapan klien (suka / tidak cocok / minta survei / deal)
+///      berikut alasannya adalah data paling berharga di seluruh CRM ini.
+/// Butuh migrasi manual — prisma/migration_rekomendasi_klien.sql.
+model KirimanRekomendasi {
+  id_kiriman    BigInt  @id @default(autoincrement())
+  id_klien      String  @db.VarChar(20)
+  id_property   BigInt
+  id_agent      String  @db.VarChar(20)
+  /// Preferensi yang melahirkan kiriman ini. Boleh yatim: preferensi kerap
+  /// dihapus saat kriteria klien berubah, sementara fakta "aset ini pernah
+  /// dikirim" tidak boleh ikut hilang.
+  id_preferensi BigInt?
+  kanal         String  @default("WHATSAPP") @db.VarChar(20)
+
+  harga_saat_kirim  Decimal              @db.Decimal(20, 2)
+  status_saat_kirim status_properti_enum
+  /// Harga yang TERAKHIR DIKETAHUI KLIEN — bergerak setiap kali agent
+  /// meneruskan kabar perubahan. Dipisahkan dari harga_saat_kirim supaya aset
+  /// yang turun tiga kali tidak selamanya dilaporkan sebagai "turun dari harga
+  /// pertama".
+  harga_diketahui   Decimal              @db.Decimal(20, 2)
+
+  jumlah_kirim     Int      @default(1)
+  pertama_dikirim  DateTime @default(now()) @db.Timestamptz(6)
+  terakhir_dikirim DateTime @default(now()) @db.Timestamptz(6)
+
+  tanggapan        tanggapan_kiriman_enum @default(MENUNGGU)
+  tanggapan_pada   DateTime?              @db.Timestamptz(6)
+  alasan_tanggapan String?
+
+  klien      Klien              @relation(fields: [id_klien], references: [id_klien], onDelete: Cascade, map: "kiriman_klien_fk")
+  listing    Listing            @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "kiriman_listing_fk")
+  agent      Agent              @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "kiriman_agent_fk")
+  preferensi PreferensiKlien?   @relation(fields: [id_preferensi], references: [id_preferensi], onDelete: SetNull, map: "kiriman_pref_fk")
+  perubahan  PerubahanKiriman[]
+
+  @@unique([id_klien, id_property], map: "kiriman_unik")
+  @@index([id_klien, terakhir_dikirim(sort: Desc)], map: "idx_kiriman_klien")
+  @@index([id_agent, terakhir_dikirim(sort: Desc)], map: "idx_kiriman_agent")
+  @@index([id_property], map: "idx_kiriman_listing")
+  @@map("kiriman_rekomendasi")
+}
+
+/// Antrean kabar: apa yang berubah pada aset yang SUDAH terlanjur dikirim.
+/// Harga turun adalah peluang; terjual adalah kabar buruk yang harus sampai ke
+/// klien sebelum ia menanyakannya sendiri. Keduanya sama pentingnya.
+/// Butuh migrasi manual — prisma/migration_rekomendasi_klien.sql.
+model PerubahanKiriman {
+  id             BigInt                       @id @default(autoincrement())
+  id_kiriman     BigInt
+  jenis          jenis_perubahan_kiriman_enum
+  harga_lama     Decimal?                     @db.Decimal(20, 2)
+  harga_baru     Decimal?                     @db.Decimal(20, 2)
+  selisih_persen Decimal?                     @db.Decimal(7, 2)
+
+  terdeteksi_pada DateTime  @default(now()) @db.Timestamptz(6)
+  /// Agent sudah meneruskan kabar ini ke klien.
+  diteruskan_pada DateTime? @db.Timestamptz(6)
+  /// Agent sengaja melewatinya (mis. naik 1%, tidak layak diganggu).
+  /// Dipisahkan dari diteruskan_pada supaya "sudah dikerjakan" bisa dibedakan
+  /// dari "sengaja dilewati" saat menilai apakah asisten ini membantu atau
+  /// justru berisik.
+  diabaikan_pada  DateTime? @db.Timestamptz(6)
+
+  kiriman KirimanRekomendasi @relation(fields: [id_kiriman], references: [id_kiriman], onDelete: Cascade, map: "perubahan_kiriman_fk")
+
+  @@index([id_kiriman, terdeteksi_pada(sort: Desc)], map: "idx_perubahan_kiriman")
+  @@map("perubahan_kiriman")
+}
+
 model PropertyTitip {
-  id_titip           BigInt    @id @default(autoincrement())
+  id_titip BigInt @id @default(autoincrement())
 
-  jenis_properti     jenis_properti_titip_enum
-  alamat_lengkap     String
-  provinsi           String    @db.VarChar(100)
-  kota               String    @db.VarChar(100)
-  kecamatan          String?   @db.VarChar(100)
-  kelurahan          String?   @db.VarChar(100)
-  latitude           Decimal?  @db.Decimal(10, 8)
-  longitude          Decimal?  @db.Decimal(11, 8)
-  estimasi_harga     Decimal?  @db.Decimal(20, 2)
+  jenis_properti jenis_properti_titip_enum
+  alamat_lengkap String
+  provinsi       String                    @db.VarChar(100)
+  kota           String                    @db.VarChar(100)
+  kecamatan      String?                   @db.VarChar(100)
+  kelurahan      String?                   @db.VarChar(100)
+  latitude       Decimal?                  @db.Decimal(10, 8)
+  longitude      Decimal?                  @db.Decimal(11, 8)
+  estimasi_harga Decimal?                  @db.Decimal(20, 2)
 
-  pengirim_nama      String    @db.VarChar(150)
-  pengirim_phone     String    @db.VarChar(20)
+  pengirim_nama      String                        @db.VarChar(150)
+  pengirim_phone     String                        @db.VarChar(20)
   status_kepemilikan status_kepemilikan_titip_enum
 
   status             status_titip_enum @default(pending)
-  diklaim_oleh_agent String?   @db.VarChar(20)
-  diklaim_pada       DateTime? @db.Timestamptz(6)
-  kedaluwarsa_pada   DateTime  @default(dbgenerated("(now() + interval '48 hours')")) @db.Timestamptz(6)
+  diklaim_oleh_agent String?           @db.VarChar(20)
+  diklaim_pada       DateTime?         @db.Timestamptz(6)
+  kedaluwarsa_pada   DateTime          @default(dbgenerated("(now() + interval '48 hours')")) @db.Timestamptz(6)
 
-  ip_address         String?   @db.Inet
-  user_agent         String?
-  session_id         String?   @db.VarChar(64)
-  referrer           String?
+  ip_address String? @db.Inet
+  user_agent String?
+  session_id String? @db.VarChar(64)
+  referrer   String?
 
-  dibuat_pada        DateTime  @default(now()) @db.Timestamptz(6)
-  diperbarui_pada    DateTime  @default(now()) @db.Timestamptz(6)
+  dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
+  diperbarui_pada DateTime @default(now()) @db.Timestamptz(6)
 
-  agent              Agent?    @relation("PropertyTitipKlaim", fields: [diklaim_oleh_agent], references: [id_agent], onDelete: SetNull, map: "property_titip_agent_fk")
-  distribusi         PropertyTitipDistribution[]
+  agent      Agent?                      @relation("PropertyTitipKlaim", fields: [diklaim_oleh_agent], references: [id_agent], onDelete: SetNull, map: "property_titip_agent_fk")
+  distribusi PropertyTitipDistribution[]
 
   @@index([status], map: "idx_property_titip_status")
   @@index([kedaluwarsa_pada], map: "idx_property_titip_expires")
@@ -933,15 +1731,15 @@ model PropertyTitip {
 }
 
 model PropertyTitipDistribution {
-  id             BigInt    @id @default(autoincrement())
-  id_titip       BigInt
-  id_agent       String    @db.VarChar(20)
-  status         status_titip_distribution_enum @default(pending)
-  direspon_pada  DateTime? @db.Timestamptz(6)
-  dibuat_pada    DateTime  @default(now()) @db.Timestamptz(6)
+  id            BigInt                         @id @default(autoincrement())
+  id_titip      BigInt
+  id_agent      String                         @db.VarChar(20)
+  status        status_titip_distribution_enum @default(pending)
+  direspon_pada DateTime?                      @db.Timestamptz(6)
+  dibuat_pada   DateTime                       @default(now()) @db.Timestamptz(6)
 
-  titip          PropertyTitip @relation(fields: [id_titip], references: [id_titip], onDelete: Cascade, map: "property_titip_distribution_titip_fk")
-  agent          Agent         @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "property_titip_distribution_agent_fk")
+  titip PropertyTitip @relation(fields: [id_titip], references: [id_titip], onDelete: Cascade, map: "property_titip_distribution_titip_fk")
+  agent Agent         @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "property_titip_distribution_agent_fk")
 
   @@unique([id_titip, id_agent], map: "property_titip_distribution_unique")
   @@index([id_agent, status], map: "idx_titip_dist_agent_status")
@@ -953,16 +1751,16 @@ model PropertyTitipDistribution {
 /// Dipakai untuk card "Target vs Realisasi" — perbandingan target tetap
 /// vs aktual yang dihitung on-the-fly dari detail_transaksi.
 model TargetAgent {
-  id_target        BigInt   @id @default(autoincrement())
-  id_agent         String   @db.VarChar(20)
-  tahun            Int
-  bulan            Int
-  target_komisi    Decimal  @db.Decimal(20, 2)
-  dibuat_oleh      String   @db.VarChar(20)
-  dibuat_pada      DateTime @default(now()) @db.Timestamptz(6)
-  diperbarui_pada  DateTime @default(now()) @db.Timestamptz(6)
+  id_target       BigInt   @id @default(autoincrement())
+  id_agent        String   @db.VarChar(20)
+  tahun           Int
+  bulan           Int
+  target_komisi   Decimal  @db.Decimal(20, 2)
+  dibuat_oleh     String   @db.VarChar(20)
+  dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
+  diperbarui_pada DateTime @default(now()) @db.Timestamptz(6)
 
-  agent            Agent    @relation("AgentTarget", fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "target_agent_agent_fk")
+  agent Agent @relation("AgentTarget", fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "target_agent_agent_fk")
 
   @@unique([id_agent, tahun, bulan], map: "target_agent_unique")
   @@index([id_agent, tahun(sort: Desc), bulan(sort: Desc)], map: "target_agent_agent_period_idx")
@@ -1052,6 +1850,35 @@ enum kategori_properti_enum {
   HOTEL_DAN_VILLA
   TOKO
   PABRIK
+  KOS
+}
+
+enum durasi_sewa_enum {
+  HARIAN
+  MINGGUAN
+  BULANAN
+  TAHUNAN
+}
+
+enum kos_gender_enum {
+  PUTRA
+  PUTRI
+  CAMPUR
+}
+
+enum kamar_mandi_tipe_enum {
+  DALAM
+  LUAR
+}
+
+/// Tipe unit apartemen. Nama simbol tidak boleh diawali angka, jadi "1BR"
+/// ditulis SATU_KAMAR — labelnya ("1 Kamar · 1BR") ada di types/listing.ts.
+enum tipe_unit_enum {
+  STUDIO
+  SATU_KAMAR
+  DUA_KAMAR
+  TIGA_KAMAR
+  EMPAT_KAMAR_PLUS
 }
 
 enum sertifikat_enum {
@@ -1262,39 +2089,53 @@ enum status_transaksi_enum {
 
 // ── Tugas Agen ───────────────────────────────────────────────────────────────
 model Tugas {
-  id_tugas          String                @id @default(cuid())
-  id_agent          String                @db.VarChar(20)
+  id_tugas String @id @default(cuid())
+  id_agent String @db.VarChar(20)
 
-  judul             String                @db.VarChar(500)
-  catatan           String?
-  kategori          kategori_tugas_enum   @default(UMUM)
-  prioritas         prioritas_tugas_enum  @default(SEDANG)
-  status            status_tugas_enum     @default(BELUM)
+  judul     String               @db.VarChar(500)
+  catatan   String?
+  kategori  kategori_tugas_enum  @default(UMUM)
+  prioritas prioritas_tugas_enum @default(SEDANG)
+  status    status_tugas_enum    @default(BELUM)
 
-  tanggal_mulai     DateTime?             @db.Timestamptz(6)
-  tanggal_selesai   DateTime?             @db.Timestamptz(6)
-  selesai_pada      DateTime?             @db.Timestamptz(6)
-  jam_terjadwal     String?               @db.VarChar(10)
+  tanggal_mulai   DateTime? @db.Timestamptz(6)
+  tanggal_selesai DateTime? @db.Timestamptz(6)
+  selesai_pada    DateTime? @db.Timestamptz(6)
+  jam_terjadwal   String?   @db.VarChar(10)
 
-  target            Int?
-  progress          Int                   @default(0)
-  alasan            String?
-  komisi_potensial  BigInt?
+  target           Int?
+  progress         Int     @default(0)
+  alasan           String?
+  komisi_potensial BigInt?
 
-  id_lead           BigInt?
-  id_listing        BigInt?
-  id_transaksi      String?               @db.VarChar(50)
+  id_lead      BigInt?
+  id_listing   BigInt?
+  id_transaksi String? @db.VarChar(50)
+  /// Klien yang jadi sebab tugas ini ada. Diisi oleh asisten follow-up supaya
+  /// tugas "Follow-up Budi" bisa membuka kartu Budi, bukan cuma menyebut
+  /// namanya di judul.
+  id_klien     String? @db.VarChar(20)
 
-  is_overdue        Boolean               @default(false)
-  is_auto_generated Boolean               @default(false)
+  /// KUNCI ANTI-DOBEL untuk tugas buatan mesin, mis.
+  /// `SEPI:KL00007:2026-08-19` atau `PERUBAHAN:412`.
+  /// Cron berjalan tiap 15 menit; tanpa kunci ini satu klien yang sepi
+  /// menghasilkan 96 tugas identik sehari dan halaman Tugas berubah jadi
+  /// tempat sampah — cara tercepat membuat agent berhenti mempercayai
+  /// asistennya. Unik parsial: tugas manual (NULL) tidak tersentuh.
+  kunci_otomatis String? @db.VarChar(160)
 
-  dibuat_pada       DateTime              @default(now()) @db.Timestamptz(6)
-  diperbarui_pada   DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
+  is_overdue        Boolean @default(false)
+  is_auto_generated Boolean @default(false)
 
-  agent             Agent                 @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
-  lead              Lead?                 @relation(fields: [id_lead], references: [id_lead], onDelete: SetNull)
-  listing           Listing?              @relation(fields: [id_listing], references: [id_property], onDelete: SetNull)
-  transaksi         Transaksi?            @relation(fields: [id_transaksi], references: [id_transaksi], onDelete: SetNull)
+  dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
+  diperbarui_pada DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  agent         Agent      @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
+  lead          Lead?      @relation(fields: [id_lead], references: [id_lead], onDelete: SetNull)
+  listing       Listing?   @relation(fields: [id_listing], references: [id_property], onDelete: SetNull)
+  transaksi     Transaksi? @relation(fields: [id_transaksi], references: [id_transaksi], onDelete: SetNull)
+  Klien         Klien?     @relation(fields: [klienId_klien], references: [id_klien])
+  klienId_klien String?    @db.VarChar(20)
 
   @@index([id_agent, status])
   @@index([id_agent, tanggal_selesai])
@@ -1326,15 +2167,15 @@ enum kategori_tugas_enum {
 
 // ── Notifikasi sistem (bell di topbar dashboard) ────────────────────────────
 model Notifikasi {
-  id_notifikasi BigInt              @id @default(autoincrement())
-  id_pengguna   String              @db.VarChar(20)
+  id_notifikasi BigInt               @id @default(autoincrement())
+  id_pengguna   String               @db.VarChar(20)
   tipe          tipe_notifikasi_enum
-  judul         String              @db.VarChar(255)
-  pesan         String              @db.VarChar(500)
-  link          String?             @db.VarChar(255)
-  id_agent_ref  String?             @db.VarChar(20)
-  dibaca        Boolean             @default(false)
-  dibuat_pada   DateTime            @default(now()) @db.Timestamptz(6)
+  judul         String               @db.VarChar(255)
+  pesan         String               @db.VarChar(500)
+  link          String?              @db.VarChar(255)
+  id_agent_ref  String?              @db.VarChar(20)
+  dibaca        Boolean              @default(false)
+  dibuat_pada   DateTime             @default(now()) @db.Timestamptz(6)
 
   pengguna Pengguna @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: Cascade)
 
@@ -1350,6 +2191,34 @@ enum tipe_notifikasi_enum {
   CO_BROKE_ACCEPTED
   CO_BROKE_REJECTED
   KLIEN_REFERRAL
+  REKOMENDASI_ASET
+  PERUBAHAN_ASET
+}
+
+/// Maksud klien atas sebuah preferensi. Gerbang paling keras di mesin
+/// pencocokan: BELI tidak pernah melihat listing SEWA, dan sebaliknya.
+/// Namanya mengikuti tipe yang SUDAH ada di database (sisa upaya terdahulu),
+/// bukan nama baru — dua enum dengan nilai identik hanya menunggu untuk
+/// menyimpang.
+enum maksud_preferensi_enum {
+  BELI
+  SEWA
+}
+
+enum tanggapan_kiriman_enum {
+  MENUNGGU
+  SUKA
+  TIDAK_COCOK
+  MINTA_SURVEI
+  DEAL
+}
+
+enum jenis_perubahan_kiriman_enum {
+  HARGA_TURUN
+  HARGA_NAIK
+  TERJUAL
+  DITARIK
+  LELANG_DEKAT
 }
 
 enum status_tugas_enum {

@@ -1,25 +1,69 @@
 "use client";
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import dynamic from "next/dynamic";
+
+/**
+ * Galeri foto listing jual — SALINAN PERSIS galeri Sewa
+ * (`src/app/Sewa/[id]/components/ImageGallery.tsx`). Tata letak, transisi, dan
+ * lightbox-nya sengaja tidak dibedakan sedikit pun: pembeli yang pindah dari
+ * halaman Sewa ke Jual tidak boleh merasa sedang memakai aplikasi lain.
+ *
+ * Yang berbeda hanya sumber datanya. Foto listing jual bisa masuk sebagai
+ * fileId Google Drive telanjang (bukan URL), jadi ada langkah normalisasi di
+ * depan yang tidak dibutuhkan halaman Sewa.
+ *
+ * Jumlah foto di luar kendali kita — agent bisa mengunggah 1 sampai 20. Karena
+ * itu grid desktop TIDAK memakai jumlah tetap lalu menambal kekurangannya
+ * dengan mengulang foto terakhir (cara lama): foto yang sama muncul dua kali
+ * terbaca sebagai properti yang malas didokumentasikan. Yang dilakukan di sini,
+ * bentuk gridnya yang menyesuaikan jumlah foto.
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { Icon } from "@iconify/react";
 
-const LightboxPortal = dynamic(() => import("./LightboxPortal"), { ssr: false });
+interface Props {
+  images: string[];
+  /** Judul listing — dipakai sebagai kepala lightbox. */
+  judul: string;
+  isSold?: boolean;
+  soldLabel?: string;
+}
 
-// --- HELPERS GAMBAR ---
+const PLACEHOLDER = "/images/hero/banner.jpg";
+
+/**
+ * Span tiap sel pada grid 4 kolom × 2 baris, per jumlah foto. Kelas ditulis
+ * utuh (bukan dirakit dari template string) supaya Tailwind bisa memindainya.
+ */
+const TATA_LETAK: Record<number, string[]> = {
+  1: ["col-span-4 row-span-2"],
+  2: ["col-span-2 row-span-2", "col-span-2 row-span-2"],
+  3: ["col-span-2 row-span-2", "col-span-2 row-span-1", "col-span-2 row-span-1"],
+  4: [
+    "col-span-2 row-span-2",
+    "col-span-2 row-span-1",
+    "col-span-1 row-span-1",
+    "col-span-1 row-span-1",
+  ],
+  5: [
+    "col-span-2 row-span-2",
+    "col-span-1 row-span-1",
+    "col-span-1 row-span-1",
+    "col-span-1 row-span-1",
+    "col-span-1 row-span-1",
+  ],
+};
+
 function isValidImageUrl(url: string): boolean {
   if (!url || url.trim() === "") return false;
   const trimmed = url.trim().toLowerCase();
 
-  if (
+  return (
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
     trimmed.startsWith("/")
-  ) {
-    return true;
-  }
-
-  return false;
+  );
 }
 
 function normalizeImages(rawImages: string[] | undefined | null): string[] {
@@ -28,273 +72,513 @@ function normalizeImages(rawImages: string[] | undefined | null): string[] {
   return rawImages
     .map((s) => (s || "").trim())
     .filter((s) => s.length > 0)
-    .map((s) => {
-      if (isValidImageUrl(s)) return s;
-      // selain itu anggap fileId Google Drive
-      return `https://drive.google.com/thumbnail?id=${s}`;
-    });
+    .map((s) =>
+      // Selain URL utuh, anggap fileId Google Drive.
+      isValidImageUrl(s) ? s : `https://drive.google.com/thumbnail?id=${s}`,
+    );
 }
 
-export default function ImageGallery({ images }: { images: string[] }) {
-  // Normalisasi semua URL yang masuk (file.lelang.go.id, drive, fileId, dll)
-  const normalizedImages = normalizeImages(images);
-  const safeImages =
-    normalizedImages.length > 0
-      ? normalizedImages
-      : ["/images/hero/banner.jpg"];
+export default function ImageGallery({
+  images,
+  judul,
+  isSold = false,
+  soldLabel = "Terjual",
+}: Props) {
+  const normalized = normalizeImages(images);
+  const foto = normalized.length > 0 ? normalized : [PLACEHOLDER];
+  const grid = foto.slice(0, 5);
+  const tataLetak = TATA_LETAK[grid.length] ?? TATA_LETAK[5];
 
-  // --- STATE ---
-  const [isOpen, setIsOpen] = useState(false);
-  const [photoIndex, setPhotoIndex] = useState(0);
+  const [terbuka, setTerbuka] = useState(false);
+  const [indeks, setIndeks] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [slideAktif, setSlideAktif] = useState(0);
+  /** Dipisah dari `terbuka` supaya transisi masuk sempat berjalan satu frame. */
+  const [tampil, setTampil] = useState(false);
+  const [arah, setArah] = useState<1 | -1>(1);
+  /** Indeks foto yang sudah selesai dimuat — penentu tampil/tidaknya spinner. */
+  const [dimuat, setDimuat] = useState<Record<number, boolean>>({});
+  const sliderRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const tutupRef = useRef<HTMLButtonElement>(null);
+  const sentuhX = useRef<number | null>(null);
 
-  // State Khusus Mobile Slider
-  const [mobileActiveIndex, setMobileActiveIndex] = useState(0);
+  useEffect(() => setMounted(true), []);
 
-  // Ref
-  const mobileSliderRef = useRef<HTMLDivElement>(null);
+  const buka = (i: number) => {
+    setIndeks(i);
+    setArah(1);
+    setTerbuka(true);
+  };
 
-  // Pastikan minimal ada 5 gambar untuk Grid Desktop
-  const displayImagesGrid =
-    safeImages.length >= 5
-      ? safeImages.slice(0, 5)
-      : [
-          ...safeImages,
-          ...Array(5 - safeImages.length).fill(
-            safeImages[safeImages.length - 1] ||
-              "/images/hero/banner.jpg"
-          ),
-        ];
-
-  const mobileImages =
-    safeImages.length > 0 ? safeImages : ["/images/hero/banner.jpg"];
-
-  useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
+  const tutup = useCallback(() => {
+    setTampil(false);
+    // Tunggu transisi keluar selesai sebelum melepas DOM-nya; kalau langsung
+    // di-unmount, lightbox terlihat "hilang" mendadak dan mata kehilangan
+    // jejak posisi foto yang tadi dilihat.
+    setTimeout(() => setTerbuka(false), 220);
   }, []);
 
-  // --- LIGHTBOX HANDLERS (Cinema Mode) ---
-  const openLightbox = (index: number) => {
-    setPhotoIndex(index);
-    setIsOpen(true);
-  };
+  const berikutnya = useCallback(() => {
+    setArah(1);
+    setIndeks((p) => (p + 1) % foto.length);
+  }, [foto.length]);
 
-  const closeLightbox = () => setIsOpen(false);
+  const sebelumnya = useCallback(() => {
+    setArah(-1);
+    setIndeks((p) => (p - 1 + foto.length) % foto.length);
+  }, [foto.length]);
 
-  const nextPhoto = useCallback(() => {
-    setPhotoIndex((prev) => (prev + 1) % safeImages.length);
-  }, [safeImages.length]);
+  const keFoto = useCallback(
+    (i: number) => {
+      setArah(i > indeks ? 1 : -1);
+      setIndeks(i);
+    },
+    [indeks],
+  );
 
-  const prevPhoto = useCallback(() => {
-    setPhotoIndex(
-      (prev) => (prev + safeImages.length - 1) % safeImages.length
-    );
-  }, [safeImages.length]);
+  const tandaiDimuat = useCallback(
+    (i: number) => setDimuat((d) => (d[i] ? d : { ...d, [i]: true })),
+    [],
+  );
 
-  // --- MOBILE SLIDER LOGIC ---
-  const handleScrollUpdate = () => {
-    if (mobileSliderRef.current) {
-      const { scrollLeft, clientWidth } = mobileSliderRef.current;
-      const newIndex = Math.round(scrollLeft / clientWidth);
-      setMobileActiveIndex(newIndex);
-    }
-  };
+  /**
+   * Foto sebelum & sesudah yang ikut dirender diam-diam. Hanya dua — cukup
+   * untuk menutupi kecepatan jari, dan tidak membuat browser mengunduh seluruh
+   * album beresolusi penuh sekaligus di koneksi seluler.
+   */
+  const tetangga = React.useMemo(() => {
+    if (foto.length < 2) return [];
+    const maju = (indeks + 1) % foto.length;
+    const mundur = (indeks - 1 + foto.length) % foto.length;
+    return Array.from(new Set([maju, mundur])).filter((i) => i !== indeks);
+  }, [indeks, foto.length]);
 
-  const scrollMobile = (direction: "left" | "right") => {
-    if (!mobileSliderRef.current) return;
+  useEffect(() => {
+    if (!terbuka) return;
 
-    const { clientWidth, scrollLeft } = mobileSliderRef.current;
-    const currentIndex = Math.round(scrollLeft / clientWidth);
+    // Scrollbar hilang saat body dikunci → lebar viewport bertambah dan header
+    // di belakang bergeser. Lebarnya diganti padding supaya tidak ada lompatan.
+    const asalOverflow = document.body.style.overflow;
+    const asalPad = document.body.style.paddingRight;
+    const lebarScrollbar = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (lebarScrollbar > 0) document.body.style.paddingRight = `${lebarScrollbar}px`;
 
-    let targetIndex =
-      direction === "left" ? currentIndex - 1 : currentIndex + 1;
-    targetIndex = Math.max(
-      0,
-      Math.min(targetIndex, mobileImages.length - 1)
-    );
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") tutup();
+      else if (e.key === "ArrowRight") berikutnya();
+      else if (e.key === "ArrowLeft") sebelumnya();
+      else if (e.key === "Home") keFoto(0);
+      else if (e.key === "End") keFoto(foto.length - 1);
+    };
+    window.addEventListener("keydown", onKey);
 
-    mobileSliderRef.current.scrollTo({
-      left: targetIndex * clientWidth,
-      behavior: "smooth",
+    const id = requestAnimationFrame(() => {
+      setTampil(true);
+      tutupRef.current?.focus();
     });
 
-    setMobileActiveIndex(targetIndex);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      cancelAnimationFrame(id);
+      document.body.style.overflow = asalOverflow;
+      document.body.style.paddingRight = asalPad;
+    };
+  }, [terbuka, berikutnya, sebelumnya, keFoto, tutup, foto.length]);
+
+  // Thumbnail aktif selalu ditarik ke dalam pandangan — tanpa ini, setelah
+  // beberapa kali panah kanan, penanda aktif berada di luar rail dan pengguna
+  // kehilangan orientasi "saya di foto ke berapa".
+  useEffect(() => {
+    if (!terbuka) return;
+    railRef.current
+      ?.querySelector<HTMLElement>(`[data-thumb="${indeks}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [indeks, terbuka]);
+
+  const geserMobile = (arah: "kiri" | "kanan") => {
+    const el = sliderRef.current;
+    if (!el) return;
+    const target = Math.max(
+      0,
+      Math.min(
+        Math.round(el.scrollLeft / el.clientWidth) + (arah === "kiri" ? -1 : 1),
+        foto.length - 1,
+      ),
+    );
+    el.scrollTo({ left: target * el.clientWidth, behavior: "smooth" });
+    setSlideAktif(target);
   };
 
-  // Keyboard Support (Arrow Keys)
-  useEffect(() => {
-    if (!isOpen) return;
-    document.body.style.overflow = "hidden";
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeLightbox();
-      if (e.key === "ArrowRight") nextPhoto();
-      if (e.key === "ArrowLeft") prevPhoto();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "auto";
-    };
-  }, [isOpen, nextPhoto, prevPhoto]);
+  const OverlayTerjual = () =>
+    isSold ? (
+      <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 backdrop-blur-[1px] pointer-events-none">
+        <span className="rounded-2xl border border-rose-400/30 bg-black/70 px-6 py-3 text-sm font-black uppercase tracking-[0.2em] text-rose-300 shadow-2xl">
+          {soldLabel}
+        </span>
+      </div>
+    ) : null;
 
   return (
-    <div className="w-full relative">
-      {/* 1. DESKTOP GRID VIEW */}
-      <div className="hidden lg:grid grid-cols-4 grid-rows-2 gap-3 h-[450px] rounded-2xl overflow-hidden">
-        {/* Main Image */}
-        <div
-          className="col-span-2 row-span-2 relative cursor-pointer group overflow-hidden"
-          onClick={() => openLightbox(0)}
-        >
-          <Image
-            src={displayImagesGrid[0]}
-            alt="Main View"
-            fill
-            sizes="(max-width: 1024px) 0px, 60vw"
-            className="object-cover transition-transform duration-700 group-hover:scale-110"
-            priority
-          />
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-500" />
-        </div>
-
-        {/* Small Images */}
-        {displayImagesGrid.slice(1, 5).map((img, idx) => (
-          <div
-            key={idx}
-            className="relative cursor-pointer group col-span-1 row-span-1 overflow-hidden"
-            onClick={() => openLightbox(idx + 1)}
-          >
-            <Image
-              src={img}
-              alt={`Gallery ${idx}`}
-              fill
-              sizes="(max-width: 1024px) 0px, 30vw"
-              className="object-cover transition-transform duration-700 group-hover:scale-110"
-            />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-500" />
-
-            {/* Tombol Lihat Semua di Gambar Terakhir */}
-            {idx === 3 && safeImages.length > 5 && (
-              <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openLightbox(4);
-                  }}
-                  className="bg-white text-black px-4 py-2 rounded-lg text-xs font-bold shadow-lg flex items-center gap-2 hover:bg-gray-200 transition-colors active:scale-95"
-                >
-                  <Icon icon="solar:gallery-bold-duotone" />
-                  Lihat Semua ({safeImages.length})
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* 2. MOBILE SLIDER VIEW */}
-      <div className="lg:hidden relative w-full h-[280px] sm:h-[320px] rounded-2xl overflow-hidden shadow-sm group mt-4">
-        <div
-          ref={mobileSliderRef}
-          onScroll={handleScrollUpdate}
-          className="flex h-full w-full overflow-x-auto snap-x snap-mandatory scrollbar-hide touch-pan-x"
-        >
-          {mobileImages.map((img, idx) => (
-            <div
-              key={idx}
-              className="relative h-full min-w-full snap-center bg-gray-900"
-              onClick={() => openLightbox(idx)}
+    <div className="relative w-full">
+      {/* ── DESKTOP ── */}
+      <div className="relative hidden lg:block">
+        <div className="grid grid-cols-4 grid-rows-2 gap-2.5 h-[460px] rounded-[1.75rem] overflow-hidden">
+          {grid.map((src, i) => (
+            <button
+              key={`${src}-${i}`}
+              onClick={() => buka(i)}
+              className={`group relative overflow-hidden bg-[#151515] ${tataLetak[i]}`}
+              aria-label={`Buka foto ${i + 1}`}
             >
               <Image
-                src={img}
-                alt={`Slide ${idx}`}
+                src={src}
+                alt={`${judul} — foto ${i + 1}`}
                 fill
-                sizes="100vw"
-                className="object-cover"
-                priority={idx === 0}
+                priority={i === 0}
+                sizes={i === 0 ? "50vw" : "25vw"}
+                className={`object-cover transition-transform duration-700 group-hover:scale-[1.07] ${
+                  isSold ? "grayscale" : ""
+                }`}
               />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 pointer-events-none" />
-            </div>
+              <div className="absolute inset-0 bg-black/0 transition-colors duration-500 group-hover:bg-black/25" />
+            </button>
           ))}
         </div>
 
-        {/* Arrow Kiri / Kanan */}
-        {mobileActiveIndex > 0 && (
+        <OverlayTerjual />
+
+        {foto.length > 1 && (
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              scrollMobile("left");
-            }}
-            className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/70 text-white p-2.5 rounded-full shadow-xl active:scale-95 transition-all z-20 border border-white/20"
+            onClick={() => buka(0)}
+            className="absolute bottom-5 right-5 z-30 flex items-center gap-2 rounded-xl border border-white/15 bg-black/70 px-4 py-2.5 text-xs font-bold text-white backdrop-blur-md transition-all hover:bg-white hover:text-black active:scale-95"
           >
-            <Icon
-              icon="solar:alt-arrow-left-linear"
-              className="text-xl"
-            />
+            <Icon icon="solar:gallery-wide-bold-duotone" className="text-base" />
+            Lihat semua {foto.length} foto
           </button>
         )}
-
-        {mobileActiveIndex < mobileImages.length - 1 && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              scrollMobile("right");
-            }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/70 text-white p-2.5 rounded-full shadow-xl active:scale-95 transition-all z-20 border border-white/20"
-          >
-            <Icon
-              icon="solar:alt-arrow-right-linear"
-              className="text-xl"
-            />
-          </button>
-        )}
-
-        {/* Badge Counter */}
-        <div className="absolute bottom-4 right-4 bg-black/75 px-3 py-1.5 rounded-lg text-xs font-bold text-white backdrop-blur-md border border-white/10 pointer-events-none z-10 shadow-lg">
-          {mobileActiveIndex + 1} / {mobileImages.length} Foto
-        </div>
-
-        {/* Indikator Dots */}
-        <div className="absolute bottom-4 left-4 flex gap-1.5 z-10">
-          {mobileImages.slice(0, 5).map((_, i) => (
-            <div
-              key={i}
-              className={`h-1.5 rounded-full backdrop-blur-sm transition-all duration-300 ${
-                i === mobileActiveIndex
-                  ? "bg-white w-4"
-                  : "bg-white/40 w-1.5"
-              }`}
-            />
-          ))}
-          {mobileImages.length > 5 && (
-            <div className="text-white/70 text-[10px] font-semibold ml-1 self-center">
-              +{mobileImages.length - 5}
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* 3. CINEMA MODE (LIGHTBOX) — lazy-loaded, framer-motion dimuat hanya saat dibuka */}
-      {mounted && isOpen && (
-        <LightboxPortal
-          images={safeImages}
-          photoIndex={photoIndex}
-          onClose={closeLightbox}
-          onNext={nextPhoto}
-          onPrev={prevPhoto}
-        />
-      )}
+      {/* ── MOBILE / TABLET ── */}
+      {/* Tingginya ikut lebar layar lewat clamp, bukan lompat-lompat per
+          breakpoint: di HP sempit (320–390px) tinggi tetap 300px bikin foto
+          landscape kelihatan terpotong parah, sedangkan di tablet 380px terlalu
+          pendek. Batas bawah 240px menjaga foto tetap terbaca di layar terkecil. */}
+      <div className="relative h-[clamp(240px,66vw,400px)] w-full overflow-hidden rounded-2xl sm:rounded-3xl lg:hidden">
+        <div
+          ref={sliderRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setSlideAktif(Math.round(el.scrollLeft / el.clientWidth));
+          }}
+          className="flex h-full w-full snap-x snap-mandatory overflow-x-auto hide-scrollbar touch-pan-x"
+        >
+          {foto.map((src, i) => (
+            <div
+              key={`${src}-${i}`}
+              onClick={() => buka(i)}
+              className="relative h-full min-w-full snap-center bg-[#151515]"
+            >
+              <Image
+                src={src}
+                alt={`${judul} — foto ${i + 1}`}
+                fill
+                priority={i === 0}
+                sizes="100vw"
+                className={`object-cover ${isSold ? "grayscale" : ""}`}
+              />
+            </div>
+          ))}
+        </div>
 
-      <style jsx>{`
-        .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-        }
-        .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-      `}</style>
+        <OverlayTerjual />
+
+        {slideAktif > 0 && (
+          <button
+            onClick={() => geserMobile("kiri")}
+            className="absolute left-3 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/10 bg-black/60 p-2.5 text-white backdrop-blur-md active:scale-95"
+            aria-label="Foto sebelumnya"
+          >
+            <Icon icon="solar:alt-arrow-left-linear" className="text-lg" />
+          </button>
+        )}
+        {slideAktif < foto.length - 1 && (
+          <button
+            onClick={() => geserMobile("kanan")}
+            className="absolute right-3 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/10 bg-black/60 p-2.5 text-white backdrop-blur-md active:scale-95"
+            aria-label="Foto berikutnya"
+          >
+            <Icon icon="solar:alt-arrow-right-linear" className="text-lg" />
+          </button>
+        )}
+
+        <div className="pointer-events-none absolute bottom-4 right-4 z-30 rounded-lg border border-white/10 bg-black/70 px-3 py-1.5 text-[11px] font-bold text-white backdrop-blur-md">
+          {slideAktif + 1} / {foto.length}
+        </div>
+
+        {foto.length > 1 && (
+          <div className="pointer-events-none absolute bottom-4 left-4 z-30 flex gap-1.5">
+            {foto.slice(0, 6).map((_, i) => (
+              <span
+                key={i}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  i === slideAktif ? "w-5 bg-white" : "w-1.5 bg-white/40"
+                }`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── LIGHTBOX ──
+          Latar TIDAK memakai class opacity Tailwind. `bg-black/98` sempat
+          dipakai di sini dan hasilnya lightbox tembus pandang: 98 bukan langkah
+          yang ada di skala opacity bawaan, jadi class-nya tidak pernah
+          digenerate — tanpa error, tanpa peringatan. Warna latar sekarang
+          ditulis eksplisit lewat `style` supaya tidak bisa gagal diam-diam. */}
+      {mounted &&
+        terbuka &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Galeri foto ${judul}`}
+            // Kolom flex, BUKAN grid. Versi grid sebelumnya melebar melewati
+            // layar HP: item grid punya `min-width: auto`, jadi baris rail
+            // thumbnail menolak menyusut di bawah lebar min-content-nya
+            // (8 thumbnail ≈ 530px) dan menyeret SELURUH dialog jadi lebih
+            // lebar dari viewport. Akibatnya semua yang ditambatkan ke tepi
+            // kanan — tombol ✕ dan panah kanan — terdorong keluar layar, dan
+            // fotonya kelihatan terpotong. Di flex kolom lebar anak ditentukan
+            // `stretch` ke lebar wadah, jadi isi yang kepanjangan meluber di
+            // dalam kotaknya sendiri (rail-nya yang scroll), bukan membesarkan
+            // kotaknya. `min-w-0` di rail menutup celah yang sama dari sisi
+            // flex item.
+            //
+            // `h-[100dvh]` ditulis bersama `inset-0`, bukan menggantikannya:
+            // dvh mengikuti viewport VISUAL sehingga rail tidak tersembunyi di
+            // balik toolbar browser mobile, dan kalau browser tidak mengenal
+            // satuannya deklarasi itu diabaikan lalu `bottom: 0` dari inset-0
+            // yang mengambil alih — tingginya tetap benar.
+            className="fixed inset-0 z-[100000] flex h-[100dvh] flex-col overflow-hidden overscroll-contain"
+            style={{
+              background:
+                "radial-gradient(120% 90% at 50% 0%, #131316 0%, #08080A 55%, #050506 100%)",
+              opacity: tampil ? 1 : 0,
+              transition: "opacity 220ms ease",
+            }}
+            onTouchStart={(e) => (sentuhX.current = e.touches[0].clientX)}
+            onTouchEnd={(e) => {
+              if (sentuhX.current === null) return;
+              const delta = e.changedTouches[0].clientX - sentuhX.current;
+              if (Math.abs(delta) > 55) delta < 0 ? berikutnya() : sebelumnya();
+              sentuhX.current = null;
+            }}
+          >
+            {/* ── Bar atas ── */}
+            <div className="flex shrink-0 items-center justify-between gap-3 px-3 pb-2 pt-[max(0.6rem,env(safe-area-inset-top))] sm:gap-4 sm:px-7 sm:pb-3 sm:pt-6">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-extrabold tracking-tight text-white sm:text-[15px]">
+                  {judul}
+                </p>
+                <p className="mt-0.5 text-[11px] font-semibold tabular-nums text-white/35">
+                  Foto {indeks + 1} dari {foto.length}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                {/* Pintasan papan ketik (← → Esc) tetap aktif, cuma tidak
+                    dipajang — petunjuknya makan tempat di bar atas. */}
+                {/* Satu-satunya jalan keluar yang terlihat setelah petunjuk
+                    keyboard dilepas — jadi dibuat mencolok, bukan abu-abu yang
+                    menyatu dengan latar. */}
+                <button
+                  ref={tutupRef}
+                  onClick={tutup}
+                  className="group grid h-10 w-10 shrink-0 place-items-center rounded-full border border-red-400/50 bg-red-500/20 text-red-300 shadow-[0_0_18px_rgba(239,68,68,0.45)] outline-none backdrop-blur-md transition-all duration-200 hover:border-red-400 hover:bg-red-500 hover:text-white hover:shadow-[0_0_28px_rgba(239,68,68,0.7)] focus-visible:ring-2 focus-visible:ring-red-400 active:scale-95"
+                  aria-label="Tutup galeri"
+                >
+                  <Icon
+                    icon="solar:close-circle-bold"
+                    className="text-xl transition-transform duration-200 group-hover:rotate-90"
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* ── Panggung foto ──
+                Tidak ada klik-di-luar-untuk-menutup. Dengan object-contain,
+                area kosong di kiri/kanan foto potret itu LUAS, dan di sanalah
+                jempol biasanya mendarat saat orang menggeser — galeri yang
+                menutup sendiri di tengah pengamatan terasa seperti kesalahan
+                aplikasi. Penutup tetap eksplisit: tombol ✕ dan Esc. */}
+            <div className="relative min-h-0 flex-1 px-3 py-1 sm:px-6 sm:py-2">
+              {/* Foto tetangga ikut dirender penuh (transparan) — inilah yang
+                  membuat panah terasa instan. Versi sebelumnya "meng-preload"
+                  dengan width={16}: itu URL optimizer yang BERBEDA dari yang
+                  dipakai foto besar, jadi tidak pernah menghangatkan cache yang
+                  benar. Ukuran & sizes-nya harus persis sama seperti di bawah. */}
+              {tetangga.map((i) => (
+                <div
+                  key={`pra-${i}`}
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 opacity-0"
+                >
+                  <Image
+                    src={foto[i]}
+                    alt=""
+                    fill
+                    quality={92}
+                    sizes="100vw"
+                    className="object-contain"
+                    onLoad={() => tandaiDimuat(i)}
+                  />
+                </div>
+              ))}
+
+              <div
+                key={indeks}
+                className="animate-lightbox-masuk relative h-full w-full"
+                style={{
+                  ["--lightbox-arah" as string]: arah === 1 ? "28px" : "-28px",
+                }}
+              >
+                <Image
+                  src={foto[indeks]}
+                  alt={`${judul} — foto ${indeks + 1}`}
+                  fill
+                  quality={92}
+                  priority
+                  sizes="100vw"
+                  className="object-contain"
+                  onLoad={() => tandaiDimuat(indeks)}
+                />
+              </div>
+
+              {/* Foto besar diambil ulang lewat optimizer saat pertama dibuka,
+                  dan itu bisa lebih dari satu detik. Tanpa penanda, layar hitam
+                  kosong terbaca sebagai galeri yang rusak — bukan sebagai
+                  "sedang memuat". Hanya muncul untuk foto yang memang belum
+                  pernah selesai dimuat, jadi navigasi bolak-balik tetap mulus. */}
+              {!dimuat[indeks] && (
+                <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <span className="h-8 w-8 animate-spin rounded-full border-2 border-white/15 border-t-[#86efac]" />
+                    <span className="text-[11px] font-semibold tracking-wide text-white/30">
+                      Memuat foto…
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Panah melayang HANYA dari sm ke atas. Di layar lebar, foto
+                  potret menyisakan area kosong lebar di kiri/kanan, jadi panah
+                  di sana tidak menutupi apa pun. Di HP sebaliknya: foto potret
+                  memenuhi hampir seluruh lebar layar, dan panah melayang pasti
+                  mendarat di atas fotonya. Versi mobile-nya pindah ke bar bawah
+                  bersama rail — lihat di bawah. */}
+              {foto.length > 1 && (
+                <>
+                  <button
+                    onClick={sebelumnya}
+                    className="absolute left-6 top-1/2 z-30 hidden h-12 w-12 -translate-y-1/2 place-items-center rounded-full border border-white/[0.08] bg-black/50 text-white backdrop-blur-md transition-all hover:bg-white hover:text-black active:scale-95 sm:grid"
+                    aria-label="Foto sebelumnya"
+                  >
+                    <Icon icon="solar:alt-arrow-left-linear" className="text-2xl" />
+                  </button>
+                  <button
+                    onClick={berikutnya}
+                    className="absolute right-6 top-1/2 z-30 hidden h-12 w-12 -translate-y-1/2 place-items-center rounded-full border border-white/[0.08] bg-black/50 text-white backdrop-blur-md transition-all hover:bg-white hover:text-black active:scale-95 sm:grid"
+                    aria-label="Foto berikutnya"
+                  >
+                    <Icon icon="solar:alt-arrow-right-linear" className="text-2xl" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* ── Bar bawah: panah (mobile) + rail thumbnail ──
+                Penanda aktif digambar DI DALAM thumbnail (ring-inset di atas
+                foto), bukan sebagai ring+offset di luar kotak. Rail ini
+                `overflow-x-auto`, dan CSS memaksa sumbu-y ikut jadi `auto` —
+                apa pun yang melewati tepi atas/bawah kotak ikut terpotong.
+                Itu sebabnya versi sebelumnya cuma kelihatan hijau di kiri dan
+                kanan. `py-1.5` di rail menyisakan ruang untuk skala & glow. */}
+            {foto.length > 1 ? (
+              <div className="shrink-0 pb-[max(0.55rem,env(safe-area-inset-bottom))] pt-1.5 sm:pt-2">
+                <div className="flex items-center gap-2 px-2 sm:px-7">
+                  {/* Panah versi mobile. Ditaruh mengapit rail, bukan melayang
+                      di tepi foto: selain tidak menutupi foto, tepi tengah
+                      layar 6 inci itu jauh dari jempol sementara area bawah
+                      justru yang paling gampang dijangkau. */}
+                  <button
+                    onClick={sebelumnya}
+                    aria-label="Foto sebelumnya"
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/85 backdrop-blur-md transition-all active:scale-95 sm:hidden"
+                  >
+                    <Icon icon="solar:alt-arrow-left-linear" className="text-lg" />
+                  </button>
+
+                  <div
+                    ref={railRef}
+                    className="hide-scrollbar flex min-w-0 flex-1 justify-start gap-2 overflow-x-auto py-1.5 sm:justify-center sm:gap-2.5 sm:py-2"
+                  >
+                    {foto.map((src, i) => {
+                      const aktif = i === indeks;
+                      return (
+                        <button
+                          key={`${src}-thumb-${i}`}
+                          data-thumb={i}
+                          onClick={() => keFoto(i)}
+                          aria-label={`Lihat foto ${i + 1}`}
+                          aria-current={aktif}
+                          className={`relative h-11 w-14 shrink-0 overflow-hidden rounded-lg outline-none transition-all duration-300 sm:h-16 sm:w-24 sm:rounded-xl ${
+                            aktif
+                              ? "scale-105 opacity-100 shadow-[0_6px_20px_-6px_rgba(134,239,172,0.55)]"
+                              : "opacity-40 grayscale hover:scale-105 hover:opacity-90 hover:grayscale-0"
+                          }`}
+                        >
+                          <Image
+                            src={src}
+                            alt=""
+                            fill
+                            sizes="96px"
+                            className="object-cover"
+                          />
+
+                          {/* Bingkai penanda — mengelilingi keempat sisi karena
+                              berada di dalam kotak yang di-clip, bukan di luarnya. */}
+                          <span
+                            className={`pointer-events-none absolute inset-0 rounded-lg ring-inset transition-all duration-300 sm:rounded-xl ${
+                              aktif
+                                ? "ring-2 ring-[#86efac]"
+                                : "ring-1 ring-white/10"
+                            }`}
+                          />
+                          {aktif && (
+                            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 rounded-b-lg bg-gradient-to-t from-[#86efac]/25 to-transparent sm:rounded-b-xl" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={berikutnya}
+                    aria-label="Foto berikutnya"
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-white/85 backdrop-blur-md transition-all active:scale-95 sm:hidden"
+                  >
+                    <Icon icon="solar:alt-arrow-right-linear" className="text-lg" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]" />
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

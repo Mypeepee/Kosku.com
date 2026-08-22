@@ -19,16 +19,23 @@ interface RadioGroupProps {
   className?: string;
   compact?: boolean; // ✅ Compact mode for smaller cards
   columns?: 1 | 2 | 3 | 4; // ✅ Flexible grid columns
+  /**
+   * Badge centang di pojok kanan. Untuk pilihan singkat (Putra/Putri/Campur,
+   * Dalam/Luar) badge ini redundan — titik radio + border hijau sudah cukup
+   * menandakan pilihan aktif.
+   */
+  showCheck?: boolean;
 }
 
-export function RadioGroup({ 
-  options, 
-  value, 
-  onChange, 
-  name, 
+export function RadioGroup({
+  options,
+  value,
+  onChange,
+  name,
   className,
   compact = false,
-  columns = 2 
+  columns = 2,
+  showCheck = true
 }: RadioGroupProps) {
   const gridCols = {
     1: 'grid-cols-1',
@@ -148,7 +155,7 @@ export function RadioGroup({
             </div>
             
             {/* Check icon on selected */}
-            {isSelected && (
+            {showCheck && isSelected && (
               <motion.div
                 initial={{ scale: 0, rotate: -180 }}
                 animate={{ scale: 1, rotate: 0 }}

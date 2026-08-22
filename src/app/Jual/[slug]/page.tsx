@@ -1,8 +1,9 @@
 import React from "react";
 import { cache } from "react";
 import { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { bacaSekitarTersimpan } from "@/lib/nearbyPlaces.server";
 import DetailClient from "./DetailClient";
 import { getSimilarItems } from "./lib/similar";
 import { getServerSession } from "next-auth";
@@ -118,7 +119,7 @@ const getProperty = cache(async (id: bigint) => {
   });
 
   if (!product) return null;
-  if (product.status_tayang !== "TERSEDIA") return null;
+  if (product.status_tayang === "TARIK_LISTING") return null;
 
   return product;
 });
@@ -246,15 +247,15 @@ export default async function DetailPage({ params }: Props) {
 
     if (expectedSlug !== params.slug) {
       if (currentAgentId) {
-        return redirect(`/Jual/${expectedSlug}/${currentAgentId}`);
+        return permanentRedirect(`/Jual/${expectedSlug}/${currentAgentId}`);
       }
-      return redirect(`/Jual/${expectedSlug}`);
+      return permanentRedirect(`/Jual/${expectedSlug}`);
     }
   }
 
   // Kalau slug sudah benar dan agent sedang login → paksa URL pakai /[slug]/[agentId]
   if (currentAgentId) {
-    return redirect(`/Jual/${params.slug}/${currentAgentId}`);
+    return permanentRedirect(`/Jual/${params.slug}/${currentAgentId}`);
   }
 
   const canonicalUrl = `https://premierasset.com/Jual/${params.slug}`;
@@ -265,6 +266,13 @@ export default async function DetailPage({ params }: Props) {
   const finalFotoArray = [firstImage];
 
   const similarItems = await getSimilarItems(product);
+
+  // Hasil pemindaian "apa yang ada di sekitar" yang SUDAH tersimpan. Dibaca
+  // sekali di server supaya aset yang pernah dipindai tampil lengkap di HTML
+  // pertama — tanpa spinner dan tanpa satu pun permintaan dari browser. Aset
+  // yang belum pernah dipindai mengembalikan null, dan komponennya yang
+  // meminta pemindaian lewat /api/listing/{id}/sekitar.
+  const sekitar = await bacaSekitarTersimpan(product.id_property);
 
   const serializedProduct = {
     ...serializeListing(product),
@@ -316,7 +324,7 @@ export default async function DetailPage({ params }: Props) {
   };
 
   return (
-    <main className="bg-[#0F0F0F] min-h-screen text-white">
+    <main className="bg-[#070A11] min-h-screen text-white">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -332,6 +340,7 @@ export default async function DetailPage({ params }: Props) {
 
       <DetailClient
         product={serializedProduct as any}
+        sekitar={sekitar}
         currentAgentId={null}
         similarProperties={similarItems}
       />

@@ -4,6 +4,23 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import prisma from "@/lib/prisma";
 import { GoogleDriveService } from "@/lib/services/google-drive.service";
 import { scrapeJobManager, type LogEvent } from "@/lib/scrape-job";
+import {
+  bacaBukti,
+  extractKota,
+  extractLuas,
+  gabungBukti,
+  parseTanggalId,
+  parseWilayahFromAlamat,
+  provinsiDariKota,
+} from "@/lib/lelang/parse.mjs";
+import {
+  idsDariUrlLelang,
+  kumpulanLampiran,
+  namaDariUrl,
+  tampakPdf,
+  unduhBuffer,
+  urlLampiranDariApi,
+} from "@/lib/lelang/lampiran.mjs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,117 +49,157 @@ function mapKategori(tipe: string): string {
   return map[tipe.toLowerCase()] ?? "RUMAH";
 }
 
-function mapLegalitas(s: string | null): string | null {
-  if (!s) return null;
-  const u = s.toUpperCase();
-  if (u.includes("SHM")) return "SHM";
-  if (u.includes("HGB")) return "HGB";
-  if (u.includes("HGU")) return "HGU";
-  if (u.includes("STRATA")) return "STRATA_TITLE";
-  if (u.includes("PPJB")) return "PPJB";
-  if (u.includes("AJB")) return "AJB";
-  if (u.includes("HP") || u.includes("HAK PAKAI")) return "HP";
-  return "LAINNYA";
-}
-
-function parseTanggal(raw: string | null): Date | null {
-  if (!raw) return null;
-  try {
-    const bulan: Record<string, number> = {
-      januari: 1, februari: 2, pebruari: 2, maret: 3, april: 4, mei: 5,
-      juni: 6, juli: 7, agustus: 8, september: 9, oktober: 10,
-      nopember: 11, november: 11, desember: 12,
-    };
-    let s = raw.replace(/\b(pukul|jam|wib|wita|wit)\b\.?:?/gi, "").replace(/,/g, " ").replace(/\s+/g, " ").trim();
-    const m = s.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/);
-    if (m) {
-      const bl = bulan[m[2].toLowerCase()];
-      if (bl) {
-        const t = s.match(/(\d{1,2})[.:](\d{2})/);
-        return new Date(+m[3], bl - 1, +m[1], t ? +t[1] : 23, t ? +t[2] : 59);
-      }
-    }
-    const d = new Date(raw);
-    return isNaN(d.getTime()) ? null : d;
-  } catch { return null; }
-}
-
-function extractKota(judul: string, alamat: string): string {
-  const jm = judul.match(/\bdi\s+(Kota(?:\s+Adm(?:inistrasi)?\.?)?|Kab(?:\.|upaten)?)\s+([A-Za-z.\s]+?)(?=[,;.]|$)/i);
-  if (jm) {
-    const lbl = jm[1].toLowerCase();
-    const nama = jm[2].trim().replace(/\s+\b(Prov|Prop|Kec|Kab|Kota)\b.*/i, "").trim();
-    if (lbl.includes("adm")) return `Kota Adm. ${nama}`;
-    if (lbl.includes("kota")) return `Kota ${nama}`;
-    return `Kab. ${nama}`;
-  }
-  const am = alamat.match(/\b(Kota|Kabupaten|Kab\.?)\s+([A-Za-z\s]+?)(?=,|\.|Kec|Prov|$)/i);
-  if (am) return `${am[1]} ${am[2].trim()}`;
-  // Ambil KAB dari alamat teks: "KEC KABAT KAB BANYUWANGI"
-  const kabM = alamat.match(/\bKAB\s+([A-Z][A-Za-z\s]+?)(?:\s+PROV|\s*$)/i);
-  if (kabM) return `Kab. ${kabM[1].trim()}`;
-  return "Tidak Diketahui";
-}
-
-interface WilayahParsed {
-  provinsi: string | null;
-  kecamatan: string | null;
-  kelurahan: string | null;
-}
-
-function parseWilayahFromAlamat(alamat: string): WilayahParsed {
-  if (!alamat) return { provinsi: null, kecamatan: null, kelurahan: null };
-
-  const s = alamat.replace(/\s+/g, " ").trim();
-
-  const clean = (v: string | undefined): string | null => {
-    if (!v) return null;
-    return v
-      .trim()
-      .replace(/\s*\([^)]*\)/g, "")   // hilangkan "(dahulu ...)" dll
-      .replace(/\s+/g, " ")
-      .replace(/\s*\d{5}\s*$/, "")     // hilangkan kode pos di akhir
-      .replace(/[,.\s]+$/, "")
-      .trim() || null;
-  };
-
-  // Stop boundary: koma/titik/kurung, kode pos 5 digit, atau keyword admin berikutnya
-  const KW_STOP =
-    "(?=\\s*[,.(]|\\s*\\d{5}|\\s+(?:Kec(?:amatan)?|Kab(?:upaten)?|Kota\\b|Prov(?:insi)?|Propinsi|Prop\\b)|\\s*$)";
-
-  // ── Provinsi ──
-  const provRe = new RegExp(
-    `(?:Provinsi|Propinsi|Prov\\.?|Prop\\.?)\\s+([A-Za-z][A-Za-z\\s]+?)${KW_STOP}`,
-    "i"
-  );
-  const provinsi = clean(s.match(provRe)?.[1]);
-
-  // ── Kecamatan ──
-  const kecRe = new RegExp(
-    `(?:Kecamatan|Kec\\.?)\\s+([A-Za-z0-9][A-Za-z0-9\\s]+?)${KW_STOP}`,
-    "i"
-  );
-  const kecamatan = clean(s.match(kecRe)?.[1]);
-
-  // ── Kelurahan / Desa ──
-  const kelRe = new RegExp(
-    `(?:Desa\\/Kelurahan|Desa\\/Kel\\.|Kelurahan|Kel\\.?|Desa|DS\\.?)\\s+([A-Za-z0-9][A-Za-z0-9\\s]+?)${KW_STOP}`,
-    "i"
-  );
-  const kelurahan = clean(s.match(kelRe)?.[1]);
-
-  return { provinsi, kecamatan, kelurahan };
-}
-
-function extractLuas(teks: string): number | null {
-  // Dari "Luas: 3270 M²" atau judul "105 m2"
-  const m = teks.match(/(?:Luas[:\s]+)?(\d+(?:[.,]\d+)?)\s*[Mm](?:2|²)/);
-  if (!m) return null;
-  return Math.floor(parseFloat(m[1].replace(",", ".")));
-}
-
 function sseMsg(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+/** Kelas yang menandai satu tautan lampiran di halaman detail lot. */
+const KELAS_TAUTAN_LAMPIRAN = ["cursor-pointer", "text-xs", "underline"];
+const KATA_KUNCI_TAB = /lampiran|pengumuman|dokumen|berkas|salinan|risalah/i;
+
+/**
+ * Klik setiap tautan lampiran di halaman detail lot, dan kembalikan berapa yang
+ * benar-benar terklik.
+ *
+ * Tautannya bukan `<a href>`: teksnya menyerupai URL tapi kosong saat di-inspect,
+ * dan berkasnya baru lahir dari handler JS setelah elemen ditekan. Jadi tidak ada
+ * URL yang bisa dibaca duluan — satu-satunya jalan lewat DOM memang menekannya.
+ *
+ * Panelnya lazy-render, jadi tab nav diklik lebih dulu; tab yang namanya
+ * menyebut lampiran/pengumuman didahulukan supaya kasus normal selesai di
+ * putaran pertama, tapi tab lain tetap dikunjungi karena penamaannya tidak
+ * seragam antar-KPKNL. Sidik teks tiap panel mencegah panel yang isinya sama
+ * (nav ganda `li` + `a`) diklik dua kali.
+ */
+async function klikSemuaLampiran(
+  tab: any,
+  push: (event: LogEvent) => void,
+): Promise<number> {
+  const navTeks: string[] = await tab.evaluate(() => {
+    let kandidat = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'));
+    if (kandidat.length === 0) {
+      kandidat = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".p-tabview-nav-link, .p-tabview-nav li, .p-tabview-header",
+        ),
+      );
+    }
+    const terlihat = new Set<string>();
+    const unik: HTMLElement[] = [];
+    for (const k of kandidat) {
+      const teks = (k.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (!teks || terlihat.has(teks)) continue;
+      terlihat.add(teks);
+      unik.push(k);
+    }
+    (window as any).__navLampiran = unik;
+    return unik.map((k) => (k.textContent ?? "").replace(/\s+/g, " ").trim().substring(0, 60));
+  });
+
+  const urutan = navTeks
+    .map((teks, idx) => ({ idx, teks }))
+    .sort((a, b) => Number(KATA_KUNCI_TAB.test(b.teks)) - Number(KATA_KUNCI_TAB.test(a.teks)));
+  // Tanpa tab sama sekali (layout lama): tetap sekali jalan, scan langsung.
+  const kunjungan = urutan.length > 0 ? urutan : [{ idx: -1, teks: "" }];
+
+  let diklik = 0;
+  const sidikPanel = new Set<string>();
+
+  for (const nav of kunjungan) {
+    try {
+      if (nav.idx >= 0) {
+        await tab.evaluate((idx: number) => {
+          const el = ((window as any).__navLampiran ?? [])[idx] as HTMLElement | undefined;
+          if (!el) return;
+          el.scrollIntoView({ block: "center" });
+          const target =
+            el.matches('[role="tab"]') || el.tagName === "A" || el.tagName === "BUTTON"
+              ? el
+              : el.querySelector<HTMLElement>('a[role="tab"], a, button, [role="tab"]') ?? el;
+          // Urutan event penuh — handler Vue/React sering mengabaikan `click` polos.
+          const opts = { bubbles: true, cancelable: true, view: window, button: 0 };
+          for (const jenis of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+            target.dispatchEvent(new MouseEvent(jenis, opts as any));
+          }
+          try {
+            target.click();
+          } catch {}
+        }, nav.idx);
+        await tab
+          .waitForFunction(
+            `Array.from(document.querySelectorAll('div')).some(el => {
+              const c = String(el.className || '');
+              return ${JSON.stringify(KELAS_TAUTAN_LAMPIRAN)}.every(k => c.includes(k));
+            })`,
+            { timeout: 6000 },
+          )
+          .catch(() => {});
+        await new Promise((r) => setTimeout(r, 900));
+      }
+
+      const jumlah: number = await tab.evaluate((kelas: string[]) => {
+        const cocok = (el: Element) => {
+          const c = String((el as HTMLElement).className || "");
+          return kelas.every((k) => c.includes(k));
+        };
+        const wadah = Array.from(document.querySelectorAll<HTMLElement>("div")).filter((el) =>
+          String(el.className || "").includes("bg-primary-100/5"),
+        );
+        const sumber: HTMLElement[] = wadah.length > 0 ? wadah : [document.body];
+        const terlihat = new Set<HTMLElement>();
+        const hasil: HTMLElement[] = [];
+        for (const w of sumber) {
+          for (const el of Array.from(w.querySelectorAll<HTMLElement>("div, a, span"))) {
+            if (!cocok(el) || terlihat.has(el)) continue;
+            terlihat.add(el);
+            hasil.push(el);
+          }
+        }
+        (window as any).__tautanLampiran = hasil;
+        return hasil.length;
+      }, KELAS_TAUTAN_LAMPIRAN);
+
+      if (jumlah === 0) continue;
+
+      const sidik: string = await tab.evaluate(() =>
+        (((window as any).__tautanLampiran ?? []) as HTMLElement[])
+          .map((el) => (el.textContent ?? "").trim())
+          .join("|"),
+      );
+      if (sidikPanel.has(sidik)) continue;
+      sidikPanel.add(sidik);
+
+      for (let i = 0; i < jumlah; i++) {
+        try {
+          const pegangan = await tab.evaluateHandle((idx: number) => {
+            const el = ((window as any).__tautanLampiran ?? [])[idx] as HTMLElement | undefined;
+            el?.scrollIntoView({ block: "center" });
+            return el ?? null;
+          }, i);
+          const el = pegangan.asElement();
+          if (el) {
+            // Klik asli Puppeteer (event tepercaya) dulu; `.click()` sintetis
+            // hanya cadangan kalau elemennya tertutup elemen lain.
+            await el.click({ delay: 30 }).catch(async () => {
+              await tab.evaluate((idx: number) => {
+                (((window as any).__tautanLampiran ?? [])[idx] as HTMLElement | undefined)?.click();
+              }, i);
+            });
+            diklik++;
+          }
+          await pegangan.dispose().catch(() => {});
+          await new Promise((r) => setTimeout(r, 1200));
+        } catch {}
+      }
+    } catch (err: any) {
+      push({
+        type: "log",
+        msg: `      ⚠️ Tab "${nav.teks}": ${String(err?.message ?? err).substring(0, 80)}`,
+      });
+    }
+  }
+
+  return diklik;
 }
 
 // ─── Main route ───────────────────────────────────────────────────────────────
@@ -235,6 +292,25 @@ async function runScrapeJob(
 
           const detailTab = await browser.newPage();
           await detailTab.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36");
+
+          // Sadap URL PDF apa pun yang lewat — dipasang SEBELUM goto supaya
+          // pengumuman yang di-request saat halaman dimuat ikut tertangkap,
+          // bukan cuma yang muncul setelah tautannya diklik.
+          const urlPdfTersadap: string[] = [];
+          const sadapPdf = (res: any) => {
+            try {
+              const u = res.url();
+              if (!tampakPdf(u, res.headers?.()?.["content-type"] ?? "")) return;
+              if (!urlPdfTersadap.includes(u)) urlPdfTersadap.push(u);
+            } catch {}
+          };
+          detailTab.on("response", sadapPdf);
+          detailTab.on("request", (req: any) => {
+            try {
+              const u = req.url();
+              if (tampakPdf(u) && !urlPdfTersadap.includes(u)) urlPdfTersadap.push(u);
+            } catch {}
+          });
 
           try {
             await detailTab.goto(detailUrl, { waitUntil: "networkidle2", timeout: 90000 });
@@ -363,279 +439,80 @@ async function runScrapeJob(
                 return getText(4) ?? getText(3) ?? null;
               })();
 
-              // ── Sertifikat & Nomor Legalitas ────────────────────────────────
-              const { sertifikat: detectedType, nomorLegalitas } = (() => {
-                const CERT_TYPE_RE = /\b(SHM|SHGB|HGB|HPL|HP|HAK\s*PAKAI|HAK\s*MILIK)\b/i;
-                let primaryType: string | null = null;
-                const allNumbers: string[] = [];
-                const seenNums = new Set<string>();
-                const addNum = (n: string) => {
-                  let c = n.trim().replace(/[.,;:]+$/, "");
-                  // Strip suffix kode kelurahan/desa setelah "/" — user hanya minta nomor.
-                  // Contoh: "09/WGb" → "09", "590/W.Gb" → "590", "00254/Belimbing" → "00254"
-                  const slashIdx = c.indexOf("/");
-                  if (slashIdx >= 0) c = c.substring(0, slashIdx).trim();
-                  if (c && !seenNums.has(c)) { allNumbers.push(c); seenNums.add(c); }
+              // ── Bukti kepemilikan: KUMPULKAN TEKS, jangan menafsir di sini ──
+              //
+              // Versi lama menafsirkan sertifikat langsung di dalam browser
+              // lewat enam strategi DOM bertingkat, dan setiap strategi
+              // `return` begitu dapat SATU hasil. Itu sebabnya lot 10 bidang
+              // hanya pernah menyimpan satu nomor: strategi pertama menemukan
+              // bidang ke-1, lalu lima sumber sisanya tidak pernah dibaca.
+              // Ditambah `String.match` tanpa /g yang memang hanya bisa cocok
+              // sekali per blok teks.
+              //
+              // Sekarang halaman hanya menyetor TEKS MENTAH dari semua sudut
+              // yang mungkin memuat bukti kepemilikan — tanpa memilih, tanpa
+              // berhenti — dan penafsirannya dilakukan di Node oleh
+              // src/lib/lelang/parse.mjs yang punya uji sendiri
+              // (scripts/test-lelang-parse.mjs). Logika parsing yang bisa diuji
+              // offline jauh lebih murah diperbaiki daripada regex yang hanya
+              // hidup di dalam page.evaluate.
+              const buktiTexts = (() => {
+                const keluar: string[] = [];
+                const lihat = new Set<string>();
+                const tambah = (v: string | null | undefined) => {
+                  const t = (v ?? "").replace(/\s+/g, " ").trim();
+                  if (t.length > 1 && t.length < 4000 && !lihat.has(t)) {
+                    lihat.add(t);
+                    keluar.push(t);
+                  }
                 };
 
-                // Parse satu blok teks → ekstrak tipe sertifikat & nomornya.
-                // Pola valid: "SHM No: 09/WGb", "HGB No.: 1234", "SHGB No 05", "SHM 09/WGb",
-                //   plus variasi: "Sertifikat Hak Milik", "Sertipikat" (ejaan lama),
-                //   "S.H.M" (dotted), "Hak Milik Atas Satuan Rumah Susun" (strata).
-                const parseCertText = (raw: string): boolean => {
-                  if (!raw) return false;
-
-                  // Normalisasi: collapse semua variasi penulisan tipe ke token kanonik
-                  // sebelum di-regex. Urutan penting: yang lebih panjang dulu.
-                  const text = raw
-                    .replace(/\bHak\s+Milik\s+Atas\s+Satuan\s+Rumah\s+Susun\b/gi, "STRATA")
-                    .replace(/\bSerti[fp]ikat\s+Hak\s+Milik\b/gi, "SHM")
-                    .replace(/\bSerti[fp]ikat\s+Hak\s+Guna\s+Bangunan\b/gi, "SHGB")
-                    .replace(/\bSerti[fp]ikat\s+Hak\s+Pakai\b/gi, "HP")
-                    .replace(/\bS\.?\s*H\.?\s*G\.?\s*B\.?\b/gi, "SHGB")
-                    .replace(/\bS\.?\s*H\.?\s*M\.?\b/gi, "SHM");
-
-                  // Pattern A: <TYPE> [No/Nomor][./:]? <NUMBER>
-                  const m1 = text.match(
-                    /\b(SHM|SHGB|HGB|HPL|HP|STRATA|HAK\s*PAKAI|HAK\s*MILIK)\b\s*(?:No\.?|Nomor)\s*[:.]?\s*([0-9]+(?:\/[A-Za-z0-9.\-]+)?)/i
+                // (a) Kolom yang berlabel "Bukti Kepemilikan" — struktur utama
+                //     lelang.go.id: satu div.flex.flex-col berisi label + satu
+                //     baris teks PER BIDANG.
+                const labels = Array.from(document.querySelectorAll<HTMLElement>("div, span, p, td, th"))
+                  .filter(
+                    (el) =>
+                      el.children.length === 0 &&
+                      /^Bukti\s*Kepemilikan$/i.test((el.textContent || "").trim()),
                   );
-                  if (m1) {
-                    if (!primaryType) primaryType = m1[1].replace(/\s+/g, "").toUpperCase();
-                    addNum(m1[2]);
-                    return true;
-                  }
-                  // Pattern B: <TYPE> <NUMBER> (space, tanpa No/Nomor)
-                  const m2 = text.match(
-                    /\b(SHM|SHGB|HGB|HPL|HP|STRATA)\b\s+([0-9]+(?:\/[A-Za-z0-9.\-]+)?)\b/i
-                  );
-                  if (m2) {
-                    if (!primaryType) primaryType = m2[1].replace(/\s+/g, "").toUpperCase();
-                    addNum(m2[2]);
-                    return true;
-                  }
-                  // Pattern C: type-only (kalau tipe muncul tanpa nomor di string ini)
-                  if (!primaryType) {
-                    const tm = text.match(
-                      /\b(SHM|SHGB|HGB|HPL|HP|STRATA|HAK\s*PAKAI|HAK\s*MILIK)\b/i
-                    );
-                    if (tm) {
-                      primaryType = tm[1].replace(/\s+/g, "").toUpperCase();
-                      return true;
-                    }
-                  }
-                  return false;
-                };
-
-                // ── Strategi 0 (PRIMARY): Label "Bukti Kepemilikan" → siblings ──
-                // Struktur eksplisit yang dipakai lelang.go.id:
-                //   div.grid.grid-cols-1.gap-5.md:grid-cols-3.md:grid-cols-4
-                //     └ div.flex.w-full.flex-col           ← kolom Bukti Kepemilikan
-                //         ├ div.mb-3.text-sm.font-bold    "Bukti Kepemilikan"
-                //         ├ div.text-xs                   "SHM No. 02007 No:"  ← tipe + nomor
-                //         └ div.text-xs                   "26 Jan 1998"        ← tanggal
-                // Scope sempit (cuma siblings label) → aman parse lenient,
-                // dan iterasi semua text-xs (tanpa break) → support multi-bidang.
-                const buktiLabels = Array.from(
-                  document.querySelectorAll<HTMLElement>("div")
-                ).filter(
-                  (el) =>
-                    el.children.length === 0 &&
-                    /^Bukti\s*Kepemilikan$/i.test((el.textContent || "").trim())
-                );
-
-                for (const lbl of buktiLabels) {
-                  const parent = lbl.parentElement; // div.flex.w-full.flex-col
-                  if (!parent) continue;
-
-                  // (a) Query semua text-xs di kolom ini (handle nested bidang)
-                  const textXs = Array.from(
-                    parent.querySelectorAll<HTMLElement>("div.text-xs, div[class*='text-xs']")
-                  );
-                  const textXsRaws = textXs
-                    .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
-                    .filter(Boolean);
-                  for (const raw of textXsRaws) parseCertText(raw);
-
-                  // (b) Combined parse — handle type & number split across siblings
-                  //     contoh: div 1 = "SHM", div 2 = "No. 02007"
-                  //     Trigger kapanpun salah satu masih kosong (bukan hanya kedua-duanya).
-                  if ((!primaryType || allNumbers.length === 0) && textXsRaws.length > 1) {
-                    parseCertText(textXsRaws.join(" "));
-                  }
-
-                  // (c) Direct children fallback (untuk struktur yang tidak pakai text-xs)
-                  if (!primaryType || allNumbers.length === 0) {
-                    const kids = Array.from(parent.children);
-                    const idx = kids.indexOf(lbl);
-                    const sibTexts: string[] = [];
-                    for (let i = idx + 1; i < kids.length; i++) {
-                      const t = (kids[i] as HTMLElement).textContent
-                        ?.replace(/\s+/g, " ")
-                        .trim() ?? "";
-                      if (t) sibTexts.push(t);
-                    }
-                    for (const t of sibTexts) parseCertText(t);
-                    if ((!primaryType || allNumbers.length === 0) && sibTexts.length > 0) {
-                      parseCertText(sibTexts.join(" "));
-                    }
-                  }
-
-                  // (d) Last resort: parent textContent (include label, full)
-                  if (!primaryType || allNumbers.length === 0) {
-                    const full = (parent.textContent ?? "").replace(/\s+/g, " ").trim();
-                    if (full) parseCertText(full);
-                  }
-
-                  // (e) Type ada tapi nomor null → scan standalone number,
-                  //     skip teks yang tampak tanggal (e.g., "26 Jan 1998")
-                  if (primaryType && allNumbers.length === 0) {
-                    const DATE_RE =
-                      /\b\d{1,2}\s+(jan|feb|mar|apr|mei|jun|jul|agu|sep|okt|nov|des)[a-z]*\.?\s*\d{0,4}\b/i;
-                    for (const t of textXsRaws) {
-                      if (DATE_RE.test(t)) continue;
-                      const cleaned = t.replace(DATE_RE, " ");
-                      const nm = cleaned.match(/\b(\d{2,7}(?:\/[A-Za-z0-9.\-]+)?)\b/);
-                      if (nm) { addNum(nm[1]); break; }
-                    }
-                  }
-                }
-
-                if (primaryType || allNumbers.length > 0) {
-                  return {
-                    sertifikat: primaryType,
-                    nomorLegalitas: allNumbers.length ? allNumbers.join(",") : null,
-                  };
-                }
-
-                // ── Strategi 1 (FALLBACK): container bg-primary-100/5 ──
-                // Target: div.h-auto.overflow-auto.rounded-lg.bg-primary-100/5
-                // Setiap bidang tanah punya div.text-xs sendiri berisi "SHM No: 09/WGb"
-                const containers = Array.from(
-                  document.querySelectorAll<HTMLElement>("div")
-                ).filter((el) => {
-                  const cls = String(el.className || "");
-                  return (
-                    cls.includes("overflow-auto") &&
-                    cls.includes("rounded-lg") &&
-                    cls.includes("bg-primary-100/5")
-                  );
-                });
-
-                const certContainer =
-                  containers.find((c) => /Bukti\s*Kepemilikan/i.test(c.textContent ?? "")) ?? null;
-
-                if (certContainer) {
-                  const certEls = Array.from(
-                    certContainer.querySelectorAll<HTMLElement>("div.text-xs")
-                  );
-                  for (const el of certEls) {
-                    const raw = (el.textContent ?? "").replace(/\s+/g, " ").trim();
-                    parseCertText(raw);
-                  }
-                  if (primaryType || allNumbers.length > 0) {
-                    return {
-                      sertifikat: primaryType,
-                      nomorLegalitas: allNumbers.length ? allNumbers.join(",") : null,
-                    };
-                  }
-                }
-
-                // ── Strategi 2 (FALLBACK): semua grid rows (border-t + first row) ──
-                const dataRows = Array.from(
-                  document.querySelectorAll<HTMLElement>("div[class*='grid-cols']")
-                ).filter((el) => {
-                  const cls = String(el.className || "");
-                  return cls.includes("grid") && /Bukti\s*Kepemilikan|SHM|HGB|SHGB|HPL/i.test(el.textContent ?? "");
-                });
-
-                for (const row of dataRows) {
-                  // Coba per kolom dulu, lalu fallback ke seluruh row
-                  const cols = Array.from(row.children) as HTMLElement[];
-                  let matched = false;
-                  for (const col of cols) {
-                    const raw = (col.textContent ?? "").replace(/\s+/g, " ").trim();
-                    if (parseCertText(raw)) { matched = true; break; }
-                  }
-                  if (!matched) {
-                    const raw = (row.textContent ?? "").replace(/\s+/g, " ").trim();
-                    parseCertText(raw);
-                  }
-                }
-
-                if (primaryType || allNumbers.length > 0) {
-                  return {
-                    sertifikat: primaryType,
-                    nomorLegalitas: allNumbers.length ? allNumbers.join(",") : null,
-                  };
-                }
-
-                // ── Strategi 3 (FALLBACK): label "Bukti Kepemilikan" → sibling ──
-                const kepLabels = Array.from(
-                  document.querySelectorAll<HTMLElement>("div, span, p, td, th")
-                ).filter(
-                  (el) =>
-                    el.children.length === 0 &&
-                    /^Bukti\s*Kepemilikan$/i.test(el.textContent?.trim() ?? "")
-                );
-
-                for (const lbl of kepLabels) {
+                for (const lbl of labels) {
                   const parent = lbl.parentElement;
                   if (!parent) continue;
-                  const kids = Array.from(parent.children);
+                  // Semua turunan teks kecil di kolom itu — SEMUA, bukan yang pertama.
+                  parent
+                    .querySelectorAll<HTMLElement>("div, span, p, td")
+                    .forEach((el) => {
+                      if (el.children.length === 0) tambah(el.textContent);
+                    });
+                  // Saudara langsung, untuk struktur tabel yang labelnya <th>.
+                  const kids = Array.from(parent.children) as HTMLElement[];
                   const idx = kids.indexOf(lbl);
-                  for (let i = idx + 1; i < kids.length; i++) {
-                    const raw = (kids[i] as HTMLElement).textContent?.replace(/\s+/g, " ").trim() ?? "";
-                    if (raw && parseCertText(raw)) break;
-                  }
+                  for (let i = idx + 1; i < kids.length; i++) tambah(kids[i].textContent);
+                  tambah(parent.textContent);
                 }
 
-                if (primaryType || allNumbers.length > 0) {
-                  return {
-                    sertifikat: primaryType,
-                    nomorLegalitas: allNumbers.length ? allNumbers.join(",") : null,
-                  };
-                }
+                // (b) Baris tabel/grid mana pun yang menyebut jenis sertifikat.
+                const PUNYA_TIPE =
+                  /\b(SHM|SHGB|HGB|HGU|HPL|HP|SHMSRS|Serti[fp]ikat|Hak\s+(Milik|Guna|Pakai|Pengelolaan)|Girik|Letter\s*C)\b/i;
+                document
+                  .querySelectorAll<HTMLElement>("tr, div[class*='grid'], div[class*='flex']")
+                  .forEach((row) => {
+                    if (row.children.length === 0) return;
+                    const teks = row.textContent ?? "";
+                    if (teks.length > 4000 || !PUNYA_TIPE.test(teks)) return;
+                    // Per sel supaya bidang tidak saling menempel.
+                    Array.from(row.children).forEach((sel) =>
+                      tambah((sel as HTMLElement).textContent),
+                    );
+                  });
 
-                // ── Strategi 4 (FALLBACK): label alternatif ──
-                for (const labelTxt of ["Sertifikat", "Jenis Hak", "Jenis Sertifikat", "Bukti Hak"]) {
-                  const el = Array.from(
-                    document.querySelectorAll<HTMLElement>("div, span, td, th, p")
-                  ).find(
-                    (e) =>
-                      e.children.length === 0 &&
-                      new RegExp(`^${labelTxt}$`, "i").test(e.textContent?.trim() ?? "")
-                  );
-                  if (el) {
-                    const sib = el.nextElementSibling ?? el.parentElement?.nextElementSibling;
-                    const raw = (sib as HTMLElement | null)?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-                    if (parseCertText(raw)) break;
-                  }
-                }
+                // (c) Seluruh teks halaman sebagai jaring terakhir — dipakai
+                //     hanya kalau (a) & (b) tidak menghasilkan apa pun, tapi
+                //     tetap dikirim supaya keputusan itu diambil di Node.
+                tambah(document.body?.textContent?.slice(0, 20000));
 
-                if (primaryType || allNumbers.length > 0) {
-                  return {
-                    sertifikat: primaryType,
-                    nomorLegalitas: allNumbers.length ? allNumbers.join(",") : null,
-                  };
-                }
-
-                // ── Strategi 5 (FALLBACK): regex pada seluruh bodyText ──
-                const bodyText = document.body.textContent ?? "";
-                const CERT_RE =
-                  /\b(SHM|SHGB|HGB|HPL|Hak\s+Pakai)\s*(?:No\.?\s*|Nomor\s*)?[:\s]*([0-9]+(?:\/[A-Za-z0-9.\-]+)?)/gi;
-                let cm: RegExpExecArray | null;
-                while ((cm = CERT_RE.exec(bodyText)) !== null) {
-                  if (!primaryType) primaryType = cm[1].replace(/\s+/g, "").toUpperCase();
-                  addNum(cm[2]);
-                }
-                if (!primaryType) {
-                  const typeOnly = bodyText.match(CERT_TYPE_RE);
-                  if (typeOnly) primaryType = typeOnly[1].replace(/\s+/g, "").toUpperCase();
-                }
-                return {
-                  sertifikat: primaryType,
-                  nomorLegalitas: allNumbers.length ? allNumbers.join(",") : null,
-                };
+                return keluar;
               })();
 
               // ── Alamat ──────────────────────────────────────────────────────
@@ -666,32 +543,6 @@ async function runScrapeJob(
                 .find((el) => /Luas\s*:/i.test(el.textContent ?? ""));
               const luasText = luasEl?.textContent ?? judul ?? "";
 
-              // ── Lampiran (dikosongkan sementara) ──
-              const lampiran: string | null = null;
-
-              // ── Debug: dump teks section Bukti Kepemilikan (untuk audit NULL cases) ──
-              const buktiDebug = (() => {
-                const labels = Array.from(
-                  document.querySelectorAll<HTMLElement>("div")
-                ).filter(
-                  (el) =>
-                    el.children.length === 0 &&
-                    /^Bukti\s*Kepemilikan$/i.test((el.textContent || "").trim())
-                );
-                if (labels.length === 0) return "[label 'Bukti Kepemilikan' tidak ditemukan di DOM]";
-                return labels
-                  .slice(0, 3)
-                  .map((lbl) => {
-                    const parent = lbl.parentElement;
-                    if (!parent) return "[no parent]";
-                    return (parent.textContent ?? "")
-                      .replace(/\s+/g, " ")
-                      .trim()
-                      .substring(0, 250);
-                  })
-                  .join(" || ");
-              })();
-
               return {
                 judul,
                 nilai_limit: nilaiLimit,
@@ -699,13 +550,10 @@ async function runScrapeJob(
                 penjual,
                 batas_penawaran: batasPenawaran,
                 batas_jaminan: batasJaminan,
-                sertifikat: detectedType,
-                nomor_legalitas: nomorLegalitas,
+                bukti_texts: buktiTexts,
                 alamat,
                 luas_text: luasText,
                 gambar: imgs,
-                lampiran,
-                bukti_debug: buktiDebug,
               };
             });
 
@@ -714,28 +562,57 @@ async function runScrapeJob(
               continue;
             }
 
-            // Log field-field yang null agar mudah debug
-            const nullFields = (["sertifikat", "nomor_legalitas", "alamat", "batas_penawaran"] as const)
-              .filter((f) => !data[f as keyof typeof data]);
-            if (nullFields.length > 0)
-              push({ type: "log", msg: `    ℹ️ Null: ${nullFields.join(", ")}` });
-
-            // Dump teks Bukti Kepemilikan kalau sertifikat/nomor null — audit 3 kasus NULL
-            if (!data.sertifikat || !data.nomor_legalitas) {
-              push({
-                type: "log",
-                msg: `    🔍 Bukti section: "${(data.bukti_debug ?? "?").substring(0, 200)}"`,
-              });
-            }
+            // ── Bukti kepemilikan: tafsirkan SEMUA teks yang dipanen ──
+            // Union dari seluruh sumber, bukan "sumber pertama yang berhasil".
+            // Satu lot bisa menaruh bidang ke-1 di kolom tabel dan bidang ke-2
+            // di baris berikutnya; membaca keduanya adalah bedanya antara
+            // "SHM 427" dan "SHM 427,382".
+            const bukti = gabungBukti((data.bukti_texts ?? []).map(bacaBukti));
 
             // Parsing wilayah
             const alamat = data.alamat ?? "";
-            const kota = extractKota(data.judul, alamat);
-            const { provinsi, kecamatan, kelurahan } = parseWilayahFromAlamat(alamat);
-            const luas = extractLuas(data.luas_text ?? data.judul ?? "");
-            const tanggalLelang = parseTanggal(data.batas_penawaran);
-            const legalitas = mapLegalitas(data.sertifikat) as any;
+            // Kolom `kota` NOT NULL — "Tidak Diketahui" adalah nilai sengaja,
+            // bukan kelalaian: listing tanpa kota tetap harus bisa disimpan
+            // dan kelihatan di audit sebagai yang perlu dilengkapi.
+            const kota = extractKota(data.judul, alamat) ?? "Tidak Diketahui";
+            const wilayah = parseWilayahFromAlamat(alamat);
+            const { kecamatan, kelurahan } = wilayah;
+            // Provinsi punya tiga sumber. Yang ketiga (peta kota) menutup
+            // sebagian besar kekosongan: alamat lelang sering menyebut kota
+            // dengan jelas tapi tidak pernah menulis provinsinya.
+            const provinsi = wilayah.provinsi ?? provinsiDariKota(kota);
+            // Luas: teks "Luas: ..." lebih dipercaya, judul sebagai cadangan —
+            // judul lot multi-bidang menyebut TOTAL luas, jadi tetap masuk akal.
+            const luas = extractLuas(data.luas_text ?? "") ?? extractLuas(data.judul ?? "");
+            const tanggalLelang = parseTanggalId(data.batas_penawaran);
+            const legalitas = bukti.legalitas as any;
             const kategoriEnum = mapKategori(kategori) as any;
+
+            // Lapor kolom yang masih kosong + tunjukkan bahan mentahnya, supaya
+            // penyebabnya bisa dilihat saat itu juga alih-alih ditemukan
+            // berbulan-bulan kemudian di halaman detail.
+            const kosong: string[] = [];
+            if (!legalitas) kosong.push("legalitas");
+            if (!bukti.nomorGabungan) kosong.push("nomor_legalitas");
+            if (!alamat) kosong.push("alamat");
+            if (!data.batas_penawaran) kosong.push("tanggal_lelang");
+            if (!luas) kosong.push("luas_tanah");
+            // `kota` tidak pernah falsy (ada nilai cadangan), jadi yang dihitung
+            // kosong adalah nilai cadangannya itu sendiri.
+            if (kota === "Tidak Diketahui") kosong.push("kota");
+            if (!provinsi) kosong.push("provinsi");
+            if (kosong.length > 0) {
+              push({ type: "log", msg: `    ℹ️ Kosong: ${kosong.join(", ")}` });
+              if (!bukti.nomorGabungan) {
+                const contoh = (data.bukti_texts ?? []).slice(0, 3).join(" || ").slice(0, 220);
+                push({ type: "log", msg: `    🔍 Teks bukti: "${contoh || "(tidak ada)"}"` });
+              }
+            } else if (bukti.jumlahBidang > 1) {
+              push({
+                type: "log",
+                msg: `    📄 ${bukti.jumlahBidang} bidang: ${bukti.nomorGabungan}`,
+              });
+            }
 
             const slugFinal = `${slugify(data.judul)}-${Date.now()}`;
             const em: Record<string, string> = {
@@ -744,452 +621,155 @@ async function runScrapeJob(
             };
             const deskripsi = `${em[kategori.toLowerCase()] ?? "✨"} Lelang ${kategori} – LT ${luas ?? "?"} m² – ${kota}`;
 
-            // ── Download Lampiran (PDF) → Upload ke Google Drive ─────────────
-            // Target struktur (confirmed):
-            //   div.p-tabview-panel[aria-labelledby="pr_id_X_header_Y"]
-            //     └ div.bg-primary-100/5
-            //         └ div.cursor-pointer.text-xs.underline (× N — tiap link PDF)
+            // ── Lampiran (PDF pengumuman) → Google Drive ─────────────────────
             //
-            // Strategi:
-            //   1. Cari panel via aria-labelledby (header ID) — relasi panel↔header
-            //   2. Aktifkan tiap panel pakai Puppeteer REAL click (#headerId), bukan
-            //      synthetic .click() — Vue/React event handler lebih konsisten
-            //   3. Re-query link PDF di panel aktif, klik via ElementHandle real click
-            //   4. Capture response PDF dari main tab + popup (kalau buka new tab)
+            // Tautan lampiran di halaman ini bukan `<a href>`: teksnya terlihat
+            // seperti URL tapi di-inspect isinya kosong, dan berkasnya baru
+            // lahir setelah elemen diklik. Karena itu pengambilannya berlapis,
+            // dari yang paling deterministik ke yang paling rapuh, dan berhenti
+            // di lapis pertama yang menghasilkan PDF:
+            //
+            //   1. API publik (permohonan → pengumumans) — tanpa DOM, tanpa klik
+            //   2. Klik di browser + unduhan asli Chromium (jalur yang dijelaskan
+            //      user); selesainya dipastikan lewat event CDP, bukan menebak
+            //      kapan berkas `.crdownload` berhenti berubah
+            //   3. URL PDF yang tersadap dari lalu lintas halaman — menangkap
+            //      kasus klik yang membuka PDF di tab baru alih-alih mengunduh
+            //
+            // Versi lama hanya punya lapis 2 dan menganggap "tidak ada berkas di
+            // folder" sebagai "lot ini memang tidak punya lampiran". Itu sebabnya
+            // kolom `lampiran` kosong 100% di seluruh tabel.
+            const kumpulan = kumpulanLampiran();
             const lampiranUrls: string[] = [];
             let tmpDir: string | null = null;
+            const fsp = await import("fs/promises");
+            const pathMod = await import("path");
+            const os = await import("os");
+
+            // ── Lapis 1: API publik ──
             try {
-              const fsp = await import("fs/promises");
-              const pathMod = await import("path");
-              const os = await import("os");
+              const { lotLelangId } = idsDariUrlLelang(detailUrl);
+              const urlApi = await urlLampiranDariApi({ lotLelangId });
+              for (const u of urlApi) {
+                const buf = await unduhBuffer(u, { referer: detailUrl });
+                kumpulan.tambah(buf, namaDariUrl(u), "api");
+              }
+            } catch (aerr: any) {
+              push({
+                type: "log",
+                msg: `    ⚠️ Lampiran (API): ${String(aerr?.message ?? aerr).substring(0, 80)}`,
+              });
+            }
 
-              // Buat tmp dir unik per listing — semua PDF download masuk sini
-              tmpDir = await fsp.mkdtemp(pathMod.join(os.tmpdir(), "lelang-pdf-"));
-
-              // Izinkan Chromium download PDF ke disk (bukan deny / response capture)
+            // ── Lapis 2: klik di browser → unduhan asli Chromium ──
+            if (kumpulan.jumlah === 0) {
               try {
-                const cdp = await detailTab.target().createCDPSession();
-                await cdp.send("Page.setDownloadBehavior", {
-                  behavior: "allow",
+                tmpDir = await fsp.mkdtemp(pathMod.join(os.tmpdir(), "lelang-pdf-"));
+
+                // Sesi CDP di level BROWSER, bukan per-page: unduhan yang
+                // dipicu popup/tab baru ikut terkena aturan yang sama tanpa
+                // perlu memasang handler `popup` sendiri.
+                const cdp = await browser.target().createCDPSession();
+                const unduhan = new Map<string, "aktif" | "selesai" | "gagal">();
+                cdp.on("Browser.downloadWillBegin", (e: any) => {
+                  unduhan.set(e.guid, "aktif");
+                });
+                cdp.on("Browser.downloadProgress", (e: any) => {
+                  if (e.state === "completed") unduhan.set(e.guid, "selesai");
+                  else if (e.state === "canceled") unduhan.set(e.guid, "gagal");
+                });
+                // `allowAndName` menamai berkas dengan GUID unduhannya, jadi
+                // event dan berkas di disk berpasangan persis — tidak ada lagi
+                // tebak-tebakan nama atau polling `.crdownload`.
+                await cdp.send("Browser.setDownloadBehavior", {
+                  behavior: "allowAndName",
                   downloadPath: tmpDir,
+                  eventsEnabled: true,
                 });
-              } catch {}
 
-              // Popup → set download behavior yang sama (kalau link buka new window)
-              const popupHandler = async (popup: any) => {
-                try {
-                  const pcdp = await popup.target().createCDPSession();
-                  await pcdp.send("Page.setDownloadBehavior", {
-                    behavior: "allow",
-                    downloadPath: tmpDir!,
-                  });
-                } catch {}
-              };
-              detailTab.on("popup", popupHandler);
+                const diklik = await klikSemuaLampiran(detailTab, push);
 
-              // ── DIAGNOSTIC: dump apa yang ada di DOM dulu ──
-              const diag = await detailTab.evaluate(() => {
-                const filterClass = (selector: string, ...needed: string[]) =>
-                  Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(
-                    (el) => {
-                      const c = String(el.className || "");
-                      return needed.every((n) => c.includes(n));
-                    }
-                  ).length;
-                return {
-                  tabPanels: document.querySelectorAll(
-                    ".p-tabview-panel, [role='tabpanel']"
-                  ).length,
-                  tabNavItems: document.querySelectorAll(
-                    ".p-tabview-nav li, .p-tabview-nav-link, [role='tab']"
-                  ).length,
-                  bgPrimaryContainers: filterClass("div", "bg-primary-100/5"),
-                  underlineLinks: filterClass(
-                    "div",
-                    "cursor-pointer",
-                    "text-xs",
-                    "underline"
-                  ),
-                };
-              });
-              push({
-                type: "log",
-                msg: `    🔬 DOM: panels=${diag.tabPanels} navItems=${diag.tabNavItems} bgPrimary=${diag.bgPrimaryContainers} underlineLinks=${diag.underlineLinks}`,
-              });
-
-              // ── Phase 1: Cari tab NAV items (li/anchor) — selalu ada di DOM ──
-              // walaupun panelnya lazy-load. Klik nav → trigger render panel.
-              // Prefer [role="tab"] (anchor/button), fallback ke li, dedup by text.
-              type Nav = { idx: number; text: string };
-              const navItems: Nav[] = await detailTab.evaluate(() => {
-                // Strategi: prioritaskan [role="tab"] (clickable target Vue handler)
-                let candidates = Array.from(
-                  document.querySelectorAll<HTMLElement>('[role="tab"]')
-                );
-                if (candidates.length === 0) {
-                  candidates = Array.from(
-                    document.querySelectorAll<HTMLElement>(".p-tabview-nav-link")
-                  );
-                }
-                if (candidates.length === 0) {
-                  candidates = Array.from(
-                    document.querySelectorAll<HTMLElement>(
-                      ".p-tabview-nav li, .p-tabview-header"
-                    )
-                  );
-                }
-                // Dedup by text content (collapses duplikat li+a)
-                const seenText = new Set<string>();
-                const dedup: HTMLElement[] = [];
-                for (const c of candidates) {
-                  const txt = (c.textContent ?? "").replace(/\s+/g, " ").trim();
-                  if (!txt) continue;
-                  if (seenText.has(txt)) continue;
-                  seenText.add(txt);
-                  dedup.push(c);
-                }
-                (window as any).__navItems = dedup;
-                return dedup.map((h, i) => ({
-                  idx: i,
-                  text: (h.textContent ?? "").replace(/\s+/g, " ").trim().substring(0, 60),
-                }));
-              });
-
-              push({
-                type: "log",
-                msg: `    🧭 Tab nav: ${navItems.length} [${navItems.map((t) => `"${t.text}"`).join(", ")}]`,
-              });
-
-              // Filter — visit semua jika ada >1 nav item, atau yang match keyword
-              const KW = /lampiran|pengumuman|dokumen|berkas/i;
-              let itemsToVisit = navItems.filter((n) => KW.test(n.text));
-              if (itemsToVisit.length === 0) itemsToVisit = navItems; // visit ALL
-
-              // Helper: global scan untuk link lampiran (dalam bg-primary-100/5)
-              const scanLinks = async (): Promise<number> => {
-                return detailTab.evaluate(() => {
-                  const containers = Array.from(
-                    document.querySelectorAll<HTMLElement>("div")
-                  ).filter((el) =>
-                    String(el.className || "").includes("bg-primary-100/5")
-                  );
-                  const links: HTMLElement[] = [];
-                  const seenL = new Set<HTMLElement>();
-                  for (const c of containers) {
-                    Array.from(c.querySelectorAll<HTMLElement>("div")).forEach((el) => {
-                      const cls = String(el.className || "");
-                      if (
-                        cls.includes("cursor-pointer") &&
-                        cls.includes("text-xs") &&
-                        cls.includes("underline") &&
-                        !seenL.has(el)
-                      ) {
-                        seenL.add(el);
-                        links.push(el);
-                      }
-                    });
+                if (diklik > 0) {
+                  // Tunggu sampai tidak ada unduhan yang masih berjalan. Batas
+                  // 60 detik; pengumuman lelang kadang puluhan MB.
+                  const batas = Date.now() + 60000;
+                  while (Date.now() < batas) {
+                    const keadaan = [...unduhan.values()];
+                    if (keadaan.length > 0 && !keadaan.includes("aktif")) break;
+                    await new Promise((r) => setTimeout(r, 1000));
                   }
-                  // Fallback: jika tidak ada container bg-primary-100/5, scan global
-                  if (links.length === 0) {
-                    Array.from(
-                      document.querySelectorAll<HTMLElement>("div")
-                    ).forEach((el) => {
-                      const cls = String(el.className || "");
-                      if (
-                        cls.includes("cursor-pointer") &&
-                        cls.includes("text-xs") &&
-                        cls.includes("underline") &&
-                        !seenL.has(el)
-                      ) {
-                        seenL.add(el);
-                        links.push(el);
-                      }
-                    });
+
+                  for (const [guid, keadaan] of unduhan) {
+                    if (keadaan !== "selesai") continue;
+                    const buf = await fsp
+                      .readFile(pathMod.join(tmpDir, guid))
+                      .catch(() => null);
+                    kumpulan.tambah(buf, `${slugify(data.judul ?? "lelang")}-${guid.slice(0, 8)}.pdf`, "klik");
                   }
-                  (window as any).__currentLinks = links;
-                  return links.length;
+                }
+
+                await cdp.detach().catch(() => {});
+              } catch (kerr: any) {
+                push({
+                  type: "log",
+                  msg: `    ⚠️ Lampiran (klik): ${String(kerr?.message ?? kerr).substring(0, 80)}`,
                 });
-              };
+              } finally {
+                if (tmpDir) {
+                  await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+                  tmpDir = null;
+                }
+              }
+            }
 
-              // ── Phase 2: Klik tiap tab nav → wait render → scan → klik PDF links ──
-              const visitedPanels = new Set<string>();
-              for (const item of itemsToVisit) {
-                try {
-                  // Snapshot DOM SEBELUM klik (untuk wait-for-change)
-                  const prePanels: number = await detailTab.evaluate(
-                    () =>
-                      document.querySelectorAll(".p-tabview-panel, [role='tabpanel']")
-                        .length
-                  );
+            // ── Lapis 3: URL PDF hasil sadapan jaringan ──
+            if (kumpulan.jumlah === 0 && urlPdfTersadap.length > 0) {
+              for (const u of urlPdfTersadap) {
+                const buf = await unduhBuffer(u, { referer: detailUrl });
+                kumpulan.tambah(buf, namaDariUrl(u), "sadap");
+              }
+            }
 
-                  // (a) Aktifkan tab dengan multi-strategy click
-                  await detailTab.evaluate((idx: number) => {
-                    const items = ((window as any).__navItems ?? []) as HTMLElement[];
-                    const el = items[idx];
-                    if (!el) return;
-                    el.scrollIntoView({ block: "center" });
-                    // Cari target click paling spesifik
-                    const target =
-                      el.matches('[role="tab"]') || el.tagName === "A" || el.tagName === "BUTTON"
-                        ? el
-                        : el.querySelector<HTMLElement>('a[role="tab"], a, button, [role="tab"]') ?? el;
-                    // Dispatch full mouse sequence — Vue/React lebih reliabel respon
-                    const opts = { bubbles: true, cancelable: true, view: window, button: 0 };
-                    target.dispatchEvent(new MouseEvent("pointerdown", opts as any));
-                    target.dispatchEvent(new MouseEvent("mousedown", opts));
-                    target.dispatchEvent(new MouseEvent("pointerup", opts as any));
-                    target.dispatchEvent(new MouseEvent("mouseup", opts));
-                    target.dispatchEvent(new MouseEvent("click", opts));
-                    // Fallback native .click() untuk handler attribute-style
-                    try {
-                      target.click();
-                    } catch {}
-                  }, item.idx);
+            detailTab.off("response", sadapPdf);
 
-                  // (b) Wait sampai panel baru ter-render ATAU underlineLinks muncul
-                  await detailTab
-                    .waitForFunction(
-                      `(() => {
-                        const p = document.querySelectorAll('.p-tabview-panel, [role="tabpanel"]').length;
-                        const l = Array.from(document.querySelectorAll('div')).filter(el => {
-                          const c = String(el.className || '');
-                          return c.includes('cursor-pointer') && c.includes('text-xs') && c.includes('underline');
-                        }).length;
-                        return p > ${prePanels} || l > 0;
-                      })()`,
-                      { timeout: 8000 }
-                    )
-                    .catch(() => {});
-                  await new Promise((r) => setTimeout(r, 1200));
-
-                  // Diagnostic post-click: kelihatan apa yang ada di panel aktif
-                  const postDiag: { panels: number; underlineLinks: number; preview: string } =
-                    await detailTab.evaluate(() => {
-                      const panels = Array.from(
-                        document.querySelectorAll<HTMLElement>(
-                          ".p-tabview-panel, [role='tabpanel']"
-                        )
-                      );
-                      const active =
-                        panels.find((p) => {
-                          const ah = p.getAttribute("aria-hidden");
-                          return ah === null || ah === "false";
-                        }) ?? panels[panels.length - 1];
-                      const underlineLinks = Array.from(
-                        document.querySelectorAll<HTMLElement>("div")
-                      ).filter((el) => {
-                        const c = String(el.className || "");
-                        return (
-                          c.includes("cursor-pointer") &&
-                          c.includes("text-xs") &&
-                          c.includes("underline")
-                        );
-                      }).length;
-                      const preview = (active?.textContent ?? "")
-                        .replace(/\s+/g, " ")
-                        .trim()
-                        .substring(0, 120);
-                      return { panels: panels.length, underlineLinks, preview };
+            // ── Unggah ke Google Drive ──
+            if (kumpulan.jumlah > 0) {
+              try {
+                const drive = new GoogleDriveService();
+                const slugBase = slugify(data.judul ?? "lelang").substring(0, 60);
+                for (let i = 0; i < kumpulan.daftar.length; i++) {
+                  const berkas = kumpulan.daftar[i];
+                  try {
+                    const namaDrive = `${slugBase}_${Date.now()}_${i + 1}_${berkas.nama}`.substring(0, 200);
+                    const rawUrl = await drive.uploadFile(
+                      berkas.buffer,
+                      namaDrive,
+                      "application/pdf",
+                      LAMPIRAN_FOLDER_ID
+                    );
+                    const fileId = rawUrl.match(/id=([^&]+)/)?.[1];
+                    lampiranUrls.push(
+                      fileId ? `https://drive.google.com/file/d/${fileId}/view` : rawUrl
+                    );
+                  } catch (uerr: any) {
+                    push({
+                      type: "log",
+                      msg: `      ⚠️ Upload lampiran ${i + 1}: ${String(uerr?.message ?? uerr).substring(0, 80)}`,
                     });
-                  push({
-                    type: "log",
-                    msg: `      🔬 Post-klik "${item.text}": panels=${postDiag.panels} ulinks=${postDiag.underlineLinks} preview="${postDiag.preview.substring(0, 80)}..."`,
-                  });
-
-                  // (c) Scan link lampiran setelah tab aktif
-                  const linkCount = await scanLinks();
-                  push({
-                    type: "log",
-                    msg: `      · Tab "${item.text}": ${linkCount} link`,
-                  });
-
-                  if (linkCount === 0) continue;
-
-                  // Dedup: cek jika sama dengan tab sebelumnya (link reference sama)
-                  const fingerprint: string = await detailTab.evaluate(() => {
-                    const links = ((window as any).__currentLinks ?? []) as HTMLElement[];
-                    return links
-                      .map((el) => (el.textContent ?? "").trim())
-                      .join("|");
-                  });
-                  if (visitedPanels.has(fingerprint)) {
-                    push({ type: "log", msg: `        (link sama dgn tab sebelumnya, skip)` });
-                    continue;
                   }
-                  visitedPanels.add(fingerprint);
-
-                  // (c) Klik tiap link via ElementHandle real click
-                  for (let i = 0; i < linkCount; i++) {
-                    try {
-                      const handle = await detailTab.evaluateHandle((idx: number) => {
-                        const links =
-                          ((window as any).__currentLinks ?? []) as HTMLElement[];
-                        const el = links[idx];
-                        if (el) el.scrollIntoView({ block: "center" });
-                        return el ?? null;
-                      }, i);
-
-                      const el = handle.asElement();
-                      if (el) {
-                        await el.click().catch(async () => {
-                          await detailTab.evaluate((idx: number) => {
-                            const links =
-                              ((window as any).__currentLinks ?? []) as HTMLElement[];
-                            links[idx]?.click();
-                          }, i);
-                        });
-                      }
-                      await handle.dispose().catch(() => {});
-
-                      await new Promise((r) => setTimeout(r, 3500));
-                    } catch (cerr: any) {
-                      push({
-                        type: "log",
-                        msg: `      ⚠️ Click link ${i + 1}: ${cerr.message?.substring(0, 80)}`,
-                      });
-                    }
-                  }
-                  await new Promise((r) => setTimeout(r, 1500));
-                } catch (terr: any) {
-                  push({
-                    type: "log",
-                    msg: `      ⚠️ Nav "${item.text}": ${terr.message?.substring(0, 80)}`,
-                  });
                 }
+                push({
+                  type: "log",
+                  msg: `    📎 ${lampiranUrls.length}/${kumpulan.jumlah} lampiran ke Drive (${kumpulan.ringkasAsal()})`,
+                });
+              } catch (derr: any) {
+                push({
+                  type: "log",
+                  msg: `    ⚠️ Drive service: ${String(derr?.message ?? derr).substring(0, 80)}`,
+                });
               }
-
-              // Fallback: jika tidak ada nav items SAMA SEKALI, scan global
-              if (navItems.length === 0) {
-                const linkCount = await scanLinks();
-                if (linkCount > 0) {
-                  push({ type: "log", msg: `    📎 Fallback scan global: ${linkCount} link` });
-                  for (let i = 0; i < linkCount; i++) {
-                    try {
-                      const handle = await detailTab.evaluateHandle((idx: number) => {
-                        const links =
-                          ((window as any).__currentLinks ?? []) as HTMLElement[];
-                        const el = links[idx];
-                        if (el) el.scrollIntoView({ block: "center" });
-                        return el ?? null;
-                      }, i);
-                      const el = handle.asElement();
-                      if (el) {
-                        await el.click().catch(async () => {
-                          await detailTab.evaluate((idx: number) => {
-                            const links =
-                              ((window as any).__currentLinks ?? []) as HTMLElement[];
-                            links[idx]?.click();
-                          }, i);
-                        });
-                      }
-                      await handle.dispose().catch(() => {});
-                      await new Promise((r) => setTimeout(r, 3500));
-                    } catch {}
-                  }
-                  await new Promise((r) => setTimeout(r, 1500));
-                }
-              }
-
-              detailTab.off("popup", popupHandler);
-
-              // ── Phase 3: Tunggu download selesai, baca dari disk ──
-              // Klik link tadi men-trigger Chromium download ke `tmpDir`. File
-              // sementara berakhiran `.crdownload` selama in-progress. Polling
-              // sampai tidak ada partial file lagi atau timeout 30s.
-              const isPartial = (n: string) =>
-                /\.(crdownload|tmp|part)$/i.test(n);
-              await new Promise((r) => setTimeout(r, 2000));
-              for (let attempt = 0; attempt < 15; attempt++) {
-                const files = await fsp.readdir(tmpDir);
-                if (files.length === 0) {
-                  // belum ada file sama sekali → coba tunggu lagi
-                  await new Promise((r) => setTimeout(r, 2000));
-                  continue;
-                }
-                if (!files.some(isPartial)) break;
-                await new Promise((r) => setTimeout(r, 2000));
-              }
-
-              const allFiles = await fsp.readdir(tmpDir);
-              const pdfFiles = allFiles.filter((f) => !isPartial(f));
-              push({
-                type: "log",
-                msg: `    📊 Total PDF terdownload: ${pdfFiles.length}`,
-              });
-
-              // ── Phase 4: Upload PDF ke Google Drive ──
-              if (pdfFiles.length > 0) {
-                try {
-                  const drive = new GoogleDriveService();
-                  const slugBase = slugify(data.judul ?? "lelang").substring(0, 60);
-                  for (let i = 0; i < pdfFiles.length; i++) {
-                    const filename = pdfFiles[i];
-                    const filePath = pathMod.join(tmpDir, filename);
-                    try {
-                      const buffer = await fsp.readFile(filePath);
-                      if (buffer.length < 1024) {
-                        push({
-                          type: "log",
-                          msg: `      ⚠️ Skip ${filename}: terlalu kecil (${buffer.length}B)`,
-                        });
-                        continue;
-                      }
-                      if (buffer.slice(0, 4).toString() !== "%PDF") {
-                        push({
-                          type: "log",
-                          msg: `      ⚠️ Skip ${filename}: bukan PDF (magic header salah)`,
-                        });
-                        continue;
-                      }
-                      const ts = Date.now();
-                      const driveName = `${slugBase}_${ts}_${i + 1}_${filename}`.substring(0, 200);
-                      const rawUrl = await drive.uploadFile(
-                        buffer,
-                        driveName,
-                        "application/pdf",
-                        LAMPIRAN_FOLDER_ID
-                      );
-                      const idM = rawUrl.match(/id=([^&]+)/);
-                      const fileId = idM?.[1];
-                      lampiranUrls.push(
-                        fileId
-                          ? `https://drive.google.com/file/d/${fileId}/view`
-                          : rawUrl
-                      );
-                      push({
-                        type: "log",
-                        msg: `      ⬆️ Uploaded: ${filename} (${(buffer.length / 1024).toFixed(0)} KB)`,
-                      });
-                    } catch (uerr: any) {
-                      push({
-                        type: "log",
-                        msg: `      ⚠️ Upload lampiran ${i + 1}: ${uerr.message?.substring(0, 80)}`,
-                      });
-                    }
-                  }
-                  push({
-                    type: "log",
-                    msg: `    ✅ ${lampiranUrls.length}/${pdfFiles.length} lampiran tersimpan di Drive`,
-                  });
-                } catch (derr: any) {
-                  push({
-                    type: "log",
-                    msg: `      ⚠️ Drive service: ${derr.message?.substring(0, 80)}`,
-                  });
-                }
-              }
-            } catch (lerr: any) {
-              push({
-                type: "log",
-                msg: `    ⚠️ Lampiran extraction: ${lerr.message?.substring(0, 80)}`,
-              });
-            } finally {
-              if (tmpDir) {
-                try {
-                  const fsp = await import("fs/promises");
-                  await fsp.rm(tmpDir, { recursive: true, force: true });
-                } catch {}
-              }
+            } else {
+              push({ type: "log", msg: `    📎 lampiran: tidak ditemukan` });
             }
 
             // Guard final: jangan tulis ke DB kalau user sudah cancel
@@ -1229,9 +809,10 @@ async function runScrapeJob(
                 kelurahan: kelurahan ?? null,
                 luas_tanah: luas,
                 legalitas,
-                nomor_legalitas: data.nomor_legalitas
-                  ? data.nomor_legalitas.substring(0, 250)
-                  : null,
+                // Sudah dipotong di batas koma oleh potongNomorLegalitas() —
+                // `substring(250)` polos bisa memenggal nomor terakhir jadi
+                // nomor lain yang valid tapi SALAH.
+                nomor_legalitas: bukti.nomorGabungan,
                 gambar: data.gambar.length > 0 ? data.gambar.join(",") : null,
                 lampiran: lampiranUrls.length > 0 ? lampiranUrls.join(",") : null,
               },

@@ -72,7 +72,10 @@ const createBrandIcon = () => {
     <div className="relative flex flex-col items-center justify-center w-14 h-16 hover:scale-105 transition-transform">
        <div className="w-12 h-12 rounded-full bg-black border-[3px] border-white shadow-[0_4px_15px_rgba(0,0,0,0.3)] flex items-center justify-center overflow-hidden z-20 relative">
           <div className="w-full h-full bg-black flex items-center justify-center">
-             <img src="/images/logo/logokosku.svg" alt="K" className="w-full h-full object-cover p-1" />
+             {/* Berkas /images/logo/logokosku.svg tidak pernah ada di public/,
+                 jadi penanda lokasi kos tampil sebagai gambar rusak. Dipakai
+                 logo yang benar-benar ada — sama dengan yang di header situs. */}
+             <img src="/images/logo/LogoSolusindoPremier.png" alt="Lokasi kos" className="w-full h-full object-contain p-1.5" />
           </div>
        </div>
        <div className="w-4 h-4 bg-white rotate-45 -mt-2.5 shadow-md z-10 rounded-[1px]"></div>

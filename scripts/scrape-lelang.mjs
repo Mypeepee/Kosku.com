@@ -50,6 +50,30 @@ import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { google } from "googleapis";
 import { Readable } from "stream";
+import {
+  bacaBukti,
+  certFromBarangs,
+  cleanJudul,
+  extractKota,
+  extractLuas,
+  gabungBukti,
+  parseTanggalId,
+  parseWilayahFromAlamat,
+  pembukuKelengkapan,
+  pilih,
+  provinsiDariKota,
+  tebakProvinsi,
+  potongNomorLegalitas,
+  buildLink,
+  titleCase,
+  totalLuas,
+} from "../src/lib/lelang/parse.mjs";
+import {
+  kumpulanLampiran,
+  namaDariUrl,
+  unduhBuffer,
+  urlLampiranDariApi,
+} from "../src/lib/lelang/lampiran.mjs";
 
 const prisma = new PrismaClient();
 
@@ -114,27 +138,6 @@ async function fetchJson(url, { retries = 4, timeoutMs = 30000, label = "" } = {
   throw new Error(`${label || "fetchJson"} gagal: ${String(lastErr?.message || lastErr)}`);
 }
 
-async function fetchBuffer(url, { retries = 3, timeoutMs = 60000 } = {}) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(new Error("timeout")), timeoutMs);
-    try {
-      const res = await fetch(url, { headers: { "User-Agent": UA }, signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) {
-        if (res.status === 429 || res.status >= 500) throw new Error(`HTTP ${res.status}`);
-        return null;
-      }
-      return Buffer.from(await res.arrayBuffer());
-    } catch (e) {
-      clearTimeout(timer);
-      if (attempt >= retries) return null;
-      await sleep(1000 * attempt);
-    }
-  }
-  return null;
-}
-
 // ─── Helpers domain (disalin/diselaraskan dari route.ts) ─────────────────────
 function slugify(text) {
   return text
@@ -155,90 +158,34 @@ function mapKategori(tipe) {
   return map[tipe.toLowerCase()] ?? "RUMAH";
 }
 
-function mapLegalitas(s) {
-  if (!s) return null;
-  const u = s.toUpperCase();
-  if (u.includes("SHM")) return "SHM";
-  if (u.includes("HGB") || u.includes("SHGB")) return "HGB";
-  if (u.includes("HGU")) return "HGU";
-  if (u.includes("STRATA")) return "STRATA_TITLE";
-  if (u.includes("PPJB")) return "PPJB";
-  if (u.includes("AJB")) return "AJB";
-  if (u.includes("HP") || u.includes("HAK PAKAI")) return "HP";
-  return "LAINNYA";
-}
-
 function parseDateIso(s) {
   if (!s) return null;
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
 
-function extractKota(judul, alamat) {
-  const jm = judul.match(/\bdi\s+(Kota(?:\s+Adm(?:inistrasi)?\.?)?|Kab(?:\.|upaten)?)\s+([A-Za-z.\s]+?)(?=[,;.]|$)/i);
-  if (jm) {
-    const lbl = jm[1].toLowerCase();
-    const nama = jm[2].trim().replace(/\s+\b(Prov|Prop|Kec|Kab|Kota)\b.*/i, "").trim();
-    if (lbl.includes("adm")) return `Kota Adm. ${nama}`;
-    if (lbl.includes("kota")) return `Kota ${nama}`;
-    return `Kab. ${nama}`;
-  }
-  const am = alamat.match(/\b(Kota|Kabupaten|Kab\.?)\s+([A-Za-z\s]+?)(?=,|\.|Kec|Prov|$)/i);
-  if (am) return `${am[1]} ${am[2].trim()}`;
-  const kabM = alamat.match(/\bKAB\s+([A-Z][A-Za-z\s]+?)(?:\s+PROV|\s*$)/i);
-  if (kabM) return `Kab. ${kabM[1].trim()}`;
-  return null;
-}
-
-// Title-case "KOTA SORONG" → "Kota Sorong" (fallback kota dari namaLokasi)
-function titleCase(s) {
-  if (!s) return null;
-  return s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\s+/g, " ").trim();
-}
-
-function parseWilayahFromAlamat(alamat) {
-  if (!alamat) return { provinsi: null, kecamatan: null, kelurahan: null };
-  const s = alamat.replace(/\s+/g, " ").trim();
-  const clean = (v) => {
-    if (!v) return null;
-    return v
-      .trim()
-      .replace(/\s*\([^)]*\)/g, "")
-      .replace(/\s+/g, " ")
-      .replace(/\s*\d{5}\s*$/, "")
-      .replace(/[,.\s]+$/, "")
-      .trim() || null;
-  };
-  const KW_STOP =
-    "(?=\\s*[,.(]|\\s*\\d{5}|\\s+(?:Kec(?:amatan)?|Kab(?:upaten)?|Kota\\b|Prov(?:insi)?|Propinsi|Prop\\b)|\\s*$)";
-  const provRe = new RegExp(`(?:Provinsi|Propinsi|Prov\\.?|Prop\\.?)\\s+([A-Za-z][A-Za-z\\s]+?)${KW_STOP}`, "i");
-  const provinsi = clean(s.match(provRe)?.[1]);
-  const kecRe = new RegExp(`(?:Kecamatan|Kec\\.?)\\s+([A-Za-z0-9][A-Za-z0-9\\s]+?)${KW_STOP}`, "i");
-  const kecamatan = clean(s.match(kecRe)?.[1]);
-  const kelRe = new RegExp(`(?:Desa\\/Kelurahan|Desa\\/Kel\\.|Kelurahan|Kel\\.?|Desa|DS\\.?)\\s+([A-Za-z0-9][A-Za-z0-9\\s]+?)${KW_STOP}`, "i");
-  const kelurahan = clean(s.match(kelRe)?.[1]);
-  return { provinsi, kecamatan, kelurahan };
-}
-
-function extractLuas(teks) {
-  const m = teks.match(/(?:Luas[:\s]+)?(\d+(?:[.,]\d+)?)\s*[Mm](?:2|²)/);
-  if (!m) return null;
-  return Math.floor(parseFloat(m[1].replace(",", ".")));
-}
-
-// namaLotLelang mengandung HTML (mis. "335 m<sup>2</sup>") → bersihkan.
-function cleanJudul(s) {
-  return (s || "")
-    .replace(/<sup>\s*2\s*<\/sup>/gi, "²")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
-    .trim() || null;
-}
-
 // ─── Ekstraksi dari struktur API (pengganti scraping DOM) ────────────────────
-function buildLink(unitKerjaId, lotLelangId) {
-  return `${SITE}/kpknl/${unitKerjaId}/detail-auction/${lotLelangId}`;
+
+/**
+ * Alamat lot: bidang pertama yang punya alamat layak.
+ *
+ * Kalau semua `barangs[].alamat` kosong, teks uraian dipanen sebagai cadangan —
+ * lot lama sering menaruh alamatnya di sana. Alamat null bukan cuma kolom
+ * bolong: kelurahan/kecamatan/provinsi SEMUANYA diturunkan darinya, jadi satu
+ * kegagalan di sini mengosongkan empat kolom sekaligus.
+ */
+function alamatDariBarangs(barangs) {
+  for (const b of barangs ?? []) {
+    const a = String(b?.alamat || "").replace(/\s+/g, " ").trim();
+    if (a.length > 5) return a;
+  }
+  for (const b of barangs ?? []) {
+    const teks = String(b?.uraian || b?.keterangan || "").replace(/\s+/g, " ").trim();
+    const m = teks.match(/Alamat\s*[:.]?\s*([^|]+?)(?:\s*Luas\s*[:.]|$)/i);
+    const a = m?.[1]?.trim();
+    if (a && a.length > 5) return a;
+  }
+  return null;
 }
 
 // Semua URL gambar dari photos[] — cover didahulukan, dedup, tanpa batas jumlah.
@@ -257,42 +204,6 @@ function imageUrlsFromPhotos(photos) {
     if (!seen.has(u)) { seen.add(u); urls.push(u); }
   }
   return urls;
-}
-
-// Sertifikat & nomor legalitas dari content.barangs[] (bisa banyak bidang).
-function certFromBarangs(barangs) {
-  const CERT_RE = /\b(SHM|SHGB|HGB|HGU|HPL|STRATA|AJB|PPJB|HP|HAK\s*PAKAI|HAK\s*MILIK)\b/i;
-  let tipeRaw = null;
-  const nums = [];
-  const seen = new Set();
-  for (const b of barangs || []) {
-    const raw = String(b?.buktiKepemilikan || "").trim();
-    if (!tipeRaw && raw) {
-      const m = raw.match(CERT_RE);
-      if (m) tipeRaw = m[1];
-    }
-    const no = String(b?.buktiKepemilikanNo || "").trim().replace(/[.,;:]+$/, "");
-    if (no && !seen.has(no)) { seen.add(no); nums.push(no); }
-  }
-  return { sertifikatRaw: tipeRaw, nomor: nums.length ? nums.join(",") : null };
-}
-
-function totalLuas(barangs) {
-  let sum = 0;
-  let found = false;
-  for (const b of barangs || []) {
-    const n = parseFloat(String(b?.luas ?? "").replace(",", "."));
-    if (!isNaN(n) && n > 0) { sum += n; found = true; }
-  }
-  return found ? Math.floor(sum) : null;
-}
-
-function firstAlamat(barangs) {
-  for (const b of barangs || []) {
-    const a = String(b?.alamat || "").replace(/\s+/g, " ").trim();
-    if (a.length > 5) return a;
-  }
-  return "";
 }
 
 // ─── Google Drive (replika dari route.ts, OAuth2 dari .env) ───────────────────
@@ -325,24 +236,6 @@ async function uploadPdfToDrive(drive, buffer, name) {
     });
   } catch {}
   return fileId;
-}
-
-// ─── Ambil daftar URL PDF lampiran (pengumuman) ──────────────────────────────
-async function fetchLampiranPdfUrls(permohonanId) {
-  if (!permohonanId) return [];
-  const j = await fetchJson(`${API}/public/permohonan/${permohonanId}/pengumumans`, {
-    label: "pengumumans",
-  }).catch(() => null);
-  const docs = j?.data ?? [];
-  const seen = new Set();
-  const urls = [];
-  for (const d of docs) {
-    const fileUrl = String(d?.file?.fileUrl || "").replace(/^\/+/, "");
-    if (!fileUrl) continue;
-    const u = `${FILE_BASE}/${fileUrl}`;
-    if (!seen.has(u)) { seen.add(u); urls.push(u); }
-  }
-  return urls;
 }
 
 // ─── Koordinat (bonus, best-effort) ──────────────────────────────────────────
@@ -393,6 +286,16 @@ async function fetchCatalogPage(kategori, page, limit) {
   return { items, totalPage: j?.totalPage ?? 0, totalItem: j?.totalItem ?? 0, url };
 }
 
+/**
+ * Pembukuan kelengkapan satu proses scrape.
+ *
+ * Target "informasi lengkap tanpa null" tidak bisa dikejar tanpa alat ukur:
+ * tanpa ini, satu-satunya cara tahu ada kolom bolong adalah menemukannya di
+ * halaman detail berbulan-bulan kemudian — persis yang terjadi pada nomor
+ * sertifikat. Dicetak di akhir `main()`.
+ */
+const KOLOM = pembukuKelengkapan();
+
 // ─── Ambil & rakit satu listing detail dari API ──────────────────────────────
 async function buildListingRecord(item, { kategori, agentId, wantLampiran, lampiranUrlMode, wantCoords, drive, dryRun }) {
   const info = await fetchJson(`${API}/landing-page/info/${item.lotLelangId}`, {
@@ -407,20 +310,101 @@ async function buildListingRecord(item, { kategori, agentId, wantLampiran, lampi
   const barangs = d.content?.barangs ?? [];
   const seller = d.content?.seller ?? {};
   const gambar = imageUrlsFromPhotos(d.photos);
-  const alamat = firstAlamat(barangs);
-  const kota = extractKota(judul, alamat) || titleCase(d.namaLokasi) || "Tidak Diketahui";
-  const { provinsi, kecamatan, kelurahan } = parseWilayahFromAlamat(alamat);
-  const luas = totalLuas(barangs) ?? extractLuas(judul);
-  const { sertifikatRaw, nomor } = certFromBarangs(barangs);
-  const legalitas = mapLegalitas(sertifikatRaw);
-  const tanggalLelang =
-    parseDateIso(d.tglSelesaiLelang) ||
-    parseDateIso(d.tanggalBatasJaminan) ||
-    new Date(Date.now() + 30 * 86400000);
-  const nilaiLimit = Number(d.nilaiLimit) || 0;
-  const uangJaminan = Number(d.uangJaminan) || null;
-  const penjual =
-    seller.namaOrganisasiPenjual || seller.namaPenjual || d.namaUnitKerja || null;
+
+  // ── Setiap kolom lewat rantai sumber yang eksplisit & TERCATAT ────────────
+  //
+  // Sebelumnya semua ini rantai `??` biasa. Bedanya bukan gaya penulisan:
+  // rantai `??` tidak meninggalkan jejak, jadi saat sebuah kolom null tidak ada
+  // cara membedakan "semua sumber memang kosong" dari "sumber pertama rusak dan
+  // sisanya tak pernah dicoba". `pilih()` mengembalikan pemenangnya, dan KOLOM
+  // di bawah menghitungnya — itulah dasar laporan kelengkapan di akhir proses.
+
+  const fAlamat = pilih([
+    ["barangs.alamat", alamatDariBarangs(barangs)],
+    ["namaLokasi", titleCase(d.namaLokasi)],
+  ]);
+  const alamat = KOLOM.catat("alamat_lengkap", fAlamat);
+
+  const fKota = pilih([
+    ["judul", extractKota(judul, alamat ?? "")],
+    ["namaLokasi", titleCase(d.namaLokasi)],
+    ["namaUnitKerja", titleCase(String(d.namaUnitKerja ?? "").replace(/^KPKNL\s+/i, ""))],
+  ]);
+  // Kolom `kota` NOT NULL. "Tidak Diketahui" adalah nilai sengaja supaya baris
+  // tetap tersimpan; audit yang menandainya untuk dilengkapi, bukan crash.
+  const kota = KOLOM.catat("kota", fKota) ?? "Tidak Diketahui";
+
+  const wilayah = parseWilayahFromAlamat(alamat ?? "");
+  const provinsi = KOLOM.catat(
+    "provinsi",
+    pilih([
+      ["alamat", wilayah.provinsi],
+      ["namaProvinsi", tebakProvinsi(d.namaProvinsi) ?? titleCase(d.namaProvinsi)],
+      // Jaring terakhir & paling produktif: nama kotanya sudah cukup.
+      ["peta kota", provinsiDariKota(kota)],
+    ]),
+  );
+  const kecamatan = KOLOM.catat("kecamatan", pilih([["alamat", wilayah.kecamatan]]));
+  const kelurahan = KOLOM.catat("kelurahan", pilih([["alamat", wilayah.kelurahan]]));
+
+  const luas = KOLOM.catat(
+    "luas_tanah",
+    pilih([
+      ["barangs.luas", totalLuas(barangs)],
+      ["judul", extractLuas(judul)],
+    ]),
+  );
+
+  // ── Bukti kepemilikan ──
+  // JSON terstruktur lebih dipercaya, tapi teks judul & uraian TETAP dibaca dan
+  // digabung — bukan dipakai hanya kalau JSON gagal. Judul lot sering menyebut
+  // nomor bidang yang tidak muncul di `barangs[]`, dan sebaliknya. Union-nya
+  // yang lengkap; "sumber pertama yang berhasil menang" persis kesalahan yang
+  // membuat lot 10 bidang cuma tersimpan satu nomor.
+  const bukti = gabungBukti([
+    certFromBarangs(barangs),
+    bacaBukti(judul),
+    ...barangs.map((b) => bacaBukti(`${b?.uraian ?? ""} ${b?.keterangan ?? ""}`)),
+  ]);
+  const legalitas = KOLOM.catat("legalitas", pilih([["bukti", bukti.legalitas]]));
+  const nomor = KOLOM.catat(
+    "nomor_legalitas",
+    pilih([["bukti", potongNomorLegalitas(bukti.nomor.join(","))]]),
+  );
+
+  const tanggalLelang = KOLOM.catat(
+    "tanggal_lelang",
+    pilih([
+      ["tglSelesaiLelang", parseDateIso(d.tglSelesaiLelang)],
+      ["tanggalBatasJaminan", parseDateIso(d.tanggalBatasJaminan)],
+      ["tglMulaiLelang", parseDateIso(d.tglMulaiLelang)],
+      ["teks", parseTanggalId(d.tglSelesaiLelang ?? d.batasAkhirPenawaran)],
+    ]),
+  ) ?? new Date(Date.now() + 30 * 86400000);
+
+  const nilaiLimit = KOLOM.catat("nilai_limit", pilih([["nilaiLimit", Number(d.nilaiLimit) || null]])) ?? 0;
+  const uangJaminan = KOLOM.catat("uang_jaminan", pilih([["uangJaminan", Number(d.uangJaminan) || null]]));
+  const penjual = KOLOM.catat(
+    "vendor",
+    pilih([
+      ["seller.namaOrganisasiPenjual", seller.namaOrganisasiPenjual],
+      ["seller.namaPenjual", seller.namaPenjual],
+      ["namaUnitKerja", d.namaUnitKerja],
+    ]),
+  );
+
+  // Tautan detail — kunci anti-duplikat. `item.link` dipakai sebagai cadangan
+  // kalau id unit kerja tidak ikut di payload katalog.
+  const link = KOLOM.catat(
+    "link",
+    pilih([
+      ["unitKerjaId", buildLink(item.unitKerjaId ?? d.unitKerjaId, item.lotLelangId)],
+      ["item.link", item.link],
+      ["lotLelangId", buildLink(null, item.lotLelangId)],
+    ]),
+  );
+
+  KOLOM.catat("gambar", pilih([["photos", gambar.length ? gambar : null]]));
 
   // Koordinat (best-effort) dari barang pertama
   let latitude = null, longitude = null;
@@ -428,23 +412,32 @@ async function buildListingRecord(item, { kategori, agentId, wantLampiran, lampi
     ({ latitude, longitude } = await fetchCoords(barangs[0].id));
   }
 
-  // Lampiran PDF
+  // ── Lampiran PDF ──
+  // `info` dioper apa adanya supaya `urlLampiranDariApi` tidak menembak ulang
+  // endpoint yang payload-nya sudah ada di tangan; ia hanya perlu satu
+  // permintaan tambahan ke `pengumumans`. Kalau lot itu menempelkan dokumennya
+  // langsung di payload (sebagian KPKNL begitu), bahkan itu pun tidak perlu.
   let lampiranUrls = [];
   if (wantLampiran) {
-    const pdfUrls = await fetchLampiranPdfUrls(d.permohonanId);
+    const pdfUrls = await urlLampiranDariApi({ permohonanId: d.permohonanId, info: d });
     if (lampiranUrlMode || dryRun || !drive) {
       // Simpan URL langsung (tanpa download / upload Drive)
       lampiranUrls = pdfUrls;
     } else {
-      // Download tiap PDF → validasi → upload ke Drive
+      // Unduh → validasi %PDF & dedup isi → unggah ke Drive.
+      // Dedup pakai sidik isi, bukan URL: satu pengumuman menaungi banyak lot
+      // dan kerap tersaji lewat dua URL berbeda dalam satu permohonan.
+      const kumpulan = kumpulanLampiran();
+      for (const u of pdfUrls) {
+        kumpulan.tambah(await unduhBuffer(u, { referer: SITE + "/" }), namaDariUrl(u), "api");
+      }
       const slugBase = slugify(judul).substring(0, 60);
-      for (let i = 0; i < pdfUrls.length; i++) {
-        const buffer = await fetchBuffer(pdfUrls[i]);
-        if (!buffer || buffer.length < 1024) continue;
-        if (buffer.slice(0, 4).toString() !== "%PDF") continue;
+      for (let i = 0; i < kumpulan.daftar.length; i++) {
+        const berkas = kumpulan.daftar[i];
         try {
-          const driveName = `${slugBase}_${Date.now()}_${i + 1}.pdf`.substring(0, 200);
-          const fileId = await uploadPdfToDrive(drive, buffer, driveName);
+          const driveName =
+            `${slugBase}_${Date.now()}_${i + 1}_${berkas.nama}`.substring(0, 200);
+          const fileId = await uploadPdfToDrive(drive, berkas.buffer, driveName);
           if (fileId) lampiranUrls.push(`https://drive.google.com/file/d/${fileId}/view`);
         } catch {}
       }
@@ -465,13 +458,17 @@ async function buildListingRecord(item, { kategori, agentId, wantLampiran, lampi
       jenis_transaksi: "LELANG",
       kategori: mapKategori(kategori),
       status_tayang: "TERSEDIA",
-      harga: 0,
+      // `harga` WAJIB = nilai_limit_lelang untuk LELANG. Kolom inilah yang
+      // dipakai urutan termurah/termahal & filter rentang harga; diisi 0
+      // (seperti versi sebelumnya) seluruh listing lelang menumpuk di ujung
+      // termurah dan filter harga tidak pernah mengenainya.
+      harga: nilaiLimit,
       harga_per_meter: nilaiLimit && luas && luas > 0 ? Math.round(nilaiLimit / luas) : null,
       nilai_limit_lelang: nilaiLimit,
       uang_jaminan: uangJaminan,
       tanggal_lelang: tanggalLelang,
-      link: item.link,
-      alamat_lengkap: alamat.substring(0, 500) || null,
+      link,
+      alamat_lengkap: alamat ? alamat.substring(0, 500) : null,
       provinsi,
       kota,
       kecamatan: kecamatan ?? null,
@@ -480,13 +477,13 @@ async function buildListingRecord(item, { kategori, agentId, wantLampiran, lampi
       longitude,
       luas_tanah: luas,
       legalitas,
-      nomor_legalitas: nomor ? nomor.substring(0, 250) : null,
+      nomor_legalitas: nomor,
       gambar: gambar.length > 0 ? gambar.join(",") : null,
       lampiran: lampiranUrls.length > 0 ? lampiranUrls.join(",") : null,
     },
     // untuk update() (refresh/backfill — hanya field pengayaan):
     enrich: {
-      alamat_lengkap: alamat.substring(0, 500) || undefined,
+      alamat_lengkap: alamat ? alamat.substring(0, 500) : undefined,
       provinsi: provinsi ?? undefined,
       kecamatan: kecamatan ?? undefined,
       kelurahan: kelurahan ?? undefined,
@@ -494,13 +491,44 @@ async function buildListingRecord(item, { kategori, agentId, wantLampiran, lampi
       longitude: longitude ?? undefined,
       luas_tanah: luas ?? undefined,
       legalitas: legalitas ?? undefined,
-      nomor_legalitas: nomor ? nomor.substring(0, 250) : undefined,
+      nomor_legalitas: nomor ?? undefined,
       gambar: gambar.length > 0 ? gambar.join(",") : undefined,
       lampiran: lampiranUrls.length > 0 ? lampiranUrls.join(",") : undefined,
       tanggal_diupdate: new Date(),
     },
     stats: { judul, kota, img: gambar.length, pdf: lampiranUrls.length },
   };
+}
+
+/**
+ * Cetak kelengkapan per kolom di akhir proses.
+ *
+ * Angka "% terisi" saja tidak cukup untuk memperbaiki apa pun — yang menentukan
+ * langkah berikutnya adalah SUMBER mana yang menutupi kekosongan. Kalau
+ * `alamat_lengkap` 98% terisi tapi 60%-nya dari cadangan `namaLokasi`, berarti
+ * `barangs[].alamat` sedang rusak dan itulah yang harus diperiksa, bukan
+ * angka 98%-nya.
+ */
+function cetakLaporanKelengkapan() {
+  const baris = KOLOM.laporan();
+  if (baris.length === 0) return;
+
+  console.log("\n── Kelengkapan kolom ──────────────────────────────────────────");
+  console.log("kolom              terisi        %   sumber");
+  for (const b of baris) {
+    const nama = b.kolom.padEnd(18);
+    const isi = `${b.terisi}/${b.total}`.padEnd(12);
+    const pct = `${b.persen}%`.padStart(6);
+    const sumber = b.sumber.map(([s, n]) => `${s}:${n}`).join(" ") || "—";
+    const tanda = b.kosong === 0 ? "✅" : b.persen >= 90 ? "🟡" : "🔴";
+    console.log(`${tanda} ${nama}${isi}${pct}   ${sumber}`);
+  }
+  const bolong = baris.filter((b) => b.kosong > 0);
+  console.log(
+    bolong.length === 0
+      ? "Semua kolom terisi penuh.\n"
+      : `${bolong.length} kolom masih ada yang kosong: ${bolong.map((b) => b.kolom).join(", ")}\n`,
+  );
 }
 
 // ─── Pool paralel sederhana ──────────────────────────────────────────────────
@@ -684,6 +712,8 @@ async function main() {
     `SELESAI. Baru=${totalSaved}, Update=${totalUpdated}, Skip=${totalSkipped}, ` +
     `Gagal=${totalFailed}, Halaman=${pagesDone}, Durasi=${mins} menit`
   );
+
+  cetakLaporanKelengkapan();
 }
 
 // Auto-run hanya bila dipanggil langsung (bukan saat di-import untuk test).

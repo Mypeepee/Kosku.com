@@ -223,39 +223,13 @@ export function ProgressIndicator({ currentStep, steps }: ProgressIndicatorProps
         </div>
       </div>
 
-      {/* Step Description (Optional - shows current step info) */}
-      <motion.div
-        key={currentStep}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mt-6 p-4 rounded-xl bg-gradient-to-br from-slate-900/40 to-slate-800/20 backdrop-blur-sm border border-slate-800"
-      >
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
-            <span className="text-lg">{steps[currentStep - 1]?.icon}</span>
-          </div>
-          <div className="flex-1">
-            <h4 className="text-sm font-semibold text-slate-200 mb-1">
-              {steps[currentStep - 1]?.label}
-            </h4>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              {getStepDescription(currentStep)}
-            </p>
-          </div>
-        </div>
-      </motion.div>
+      {/* Dulu di sini ada kartu "judul step + penjelasan satu paragraf".
+          Dibuang: isinya cuma mengulang label yang sudah ada di bar langkah di
+          atas ("Dasar", "Lokasi") dan menyebut ulang nama-nama field yang
+          persis kelihatan di bawahnya. Yang tersisa hanyalah satu blok yang
+          harus dilewati mata sebelum sampai ke isian pertama — pada wizard
+          5 langkah, itu 5 kali gangguan. Kalau ada field yang butuh penjelasan,
+          tempatnya di `description` field itu sendiri, bukan di kepala step. */}
     </div>
   );
-}
-
-// Helper function for step descriptions
-function getStepDescription(step: number): string {
-  const descriptions: Record<number, string> = {
-    1: 'Masukkan informasi dasar properti seperti judul, jenis transaksi, dan kategori.',
-    2: 'Tentukan lokasi properti dengan detail alamat lengkap.',
-    3: 'Atur harga jual, harga promo, dan informasi pembayaran lainnya.',
-    4: 'Lengkapi spesifikasi teknis properti seperti luas tanah, kamar, dan fasilitas.',
-    5: 'Upload foto-foto properti untuk menarik perhatian pembeli.',
-  };
-  return descriptions[step] || 'Lengkapi informasi pada step ini.';
 }

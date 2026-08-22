@@ -14,55 +14,16 @@ import { readFile } from "fs/promises";
 import path from "path";
 import sharp from "sharp";
 import prisma from "@/lib/prisma";
+/* Teknik pengambilannya dipakai bersama dengan /api/foto/[id] (proxy foto
+   untuk email). Disatukan dengan sengaja: keduanya menghadapi proteksi hotlink
+   file.lelang.go.id yang sama, dan salinan kedua akan tertinggal saat aturan
+   host itu berubah — lalu gambar menghilang di satu permukaan saja. */
+import { resolveFetchableImage, fetchImageBytes } from "@/lib/fotoListing";
 
 export const runtime = "nodejs";
 
 const OG_WIDTH = 1200;
 const OG_HEIGHT = 630;
-const FETCH_TIMEOUT_MS = 8000;
-const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-// Ubah nilai kolom `gambar` (URL penuh, atau Google Drive file-id, dipisah koma)
-// menjadi URL yang bisa di-fetch server-side. null → pakai fallback banner.
-function resolveFetchableImage(gambar: string | null | undefined): string | null {
-  if (!gambar) return null;
-  const first = gambar
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)[0];
-  if (!first) return null;
-  if (first.startsWith("http://") || first.startsWith("https://")) return first;
-  if (first.startsWith("/")) return null; // aset lokal → fallback banner
-  // Selain itu anggap Google Drive file-id.
-  return `https://drive.google.com/thumbnail?id=${first}&sz=w1200`;
-}
-
-async function fetchImageBytes(src: string): Promise<Buffer | null> {
-  const headers: Record<string, string> = { "User-Agent": BROWSER_UA };
-  try {
-    // Sebagian host (mis. file.lelang.go.id) memblokir hotlink → kirim Referer
-    // seakan-akan permintaan datang dari host itu sendiri.
-    const u = new URL(src);
-    headers["Referer"] = `${u.protocol}//${u.host}/`;
-  } catch {}
-  try {
-    const res = await fetch(src, {
-      headers,
-      redirect: "follow",
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") || "";
-    if (ct && !ct.startsWith("image/")) return null; // halaman error HTML, dll.
-    const ab = await res.arrayBuffer();
-    if (ab.byteLength === 0) return null;
-    return Buffer.from(ab);
-  } catch {
-    return null;
-  }
-}
-
 let fallbackCache: Buffer | null = null;
 async function loadFallback(): Promise<Buffer> {
   if (!fallbackCache) {
@@ -101,7 +62,7 @@ export async function GET(
       where: { id_property: id },
       select: { gambar: true },
     });
-    const src = resolveFetchableImage(listing?.gambar);
+    const src = resolveFetchableImage(listing?.gambar, OG_WIDTH);
     if (src) source = await fetchImageBytes(src);
   }
   if (!source) source = await loadFallback();

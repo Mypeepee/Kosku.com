@@ -1,11 +1,26 @@
 import React from "react";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import SearchHero from "./searchhero";
 import ProductList from "./produklist";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { buildLocationWhere } from "@/lib/listingLocationFilter";
+import { buildKataKunciWhere } from "@/lib/listingKataKunci";
+import {
+  ambilJarakKeTempat,
+  buildTempatWhere,
+  siapkanTempat,
+  urutkanTerdekat,
+} from "@/lib/listingTempatFilter";
+import TempatAktifBar from "@/components/listing/TempatAktifBar";
 import { parseCategoryDbList } from "@/lib/propertyType";
+import {
+  buildOrderBy,
+  parseHalaman,
+  parseSort,
+  urlHalamanTerakhir,
+} from "@/lib/listingSort";
 
 // --- TIPE DATA URL PARAMETERS ---
 type Props = {
@@ -106,10 +121,9 @@ const allowedKategori = [
 // --- 2. SERVER COMPONENT UTAMA (ASYNC) ---
 export default async function SearchPage({ searchParams }: Props) {
   // A. Ambil Parameter URL (Standard)
-  const page =
-    typeof searchParams.page === "string"
-      ? Number(searchParams.page)
-      : 1;
+  // `page` divalidasi (bukan Number() mentah): "?page=abc" dulu menghasilkan
+  // NaN → `skip: NaN` → Prisma melempar error → halaman 500.
+  const page = parseHalaman(searchParams.page);
   const kota =
     typeof searchParams.kota === "string"
       ? searchParams.kota
@@ -154,10 +168,12 @@ export default async function SearchPage({ searchParams }: Props) {
     typeof searchParams.legalitas === "string"
       ? searchParams.legalitas
       : undefined;
-  const sort =
-    typeof searchParams.sort === "string"
-      ? searchParams.sort
-      : "desc";
+  const hotDeal = searchParams.hotDeal === "1";
+  // Urutan: dinormalkan lewat katalog bersama (@/lib/listingSort) — nilai lama
+  // "asc"/"desc" tetap dikenali, nilai asing jatuh ke default "terbaru".
+  // Nama tempat dibaca DI SINI supaya "terdekat" hanya sah ketika ada titik
+  // acuannya. Dihitung ulang setelah siapTempat siap (lihat di bawah).
+  const sortMentah = searchParams.sort;
 
   // Filter harga & luas dari SearchHero
   const minHarga =
@@ -188,28 +204,19 @@ export default async function SearchPage({ searchParams }: Props) {
   const limit = 30;
   const skip = (page - 1) * limit;
 
-  // Filter harga efektif: pakai harga_promo jika valid (> 0), else pakai harga
+  // Filter harga memakai kolom `harga_efektif` — kolom YANG SAMA dengan yang
+  // dipakai "Urutkan → harga terendah" dan yang dicetak kartu. Sebelumnya
+  // filter menyusun sendiri OR promo-vs-harga sementara urutan memakai `harga`
+  // mentah, jadi keduanya bisa tidak sepakat: listing harga Rp 1 M berpromo
+  // Rp 5 M (promo lebih mahal — bukan diskon, dan kartu menampilkan Rp 1 M)
+  // dulu ikut tersaring ke rentang Rp 5 M. Satu kolom, satu kebenaran.
   const buildPriceFilter = (): Prisma.ListingWhereInput | undefined => {
     if (minHarga === undefined && maxHarga === undefined) return undefined;
     return {
-      OR: [
-        // Punya harga promo yang valid → filter berdasar harga_promo
-        {
-          AND: [
-            { harga_promo: { gt: 0 } },
-            ...(minHarga !== undefined ? [{ harga_promo: { gte: minHarga } }] : []),
-            ...(maxHarga !== undefined ? [{ harga_promo: { lte: maxHarga } }] : []),
-          ],
-        },
-        // Tidak ada harga promo → filter berdasar harga biasa
-        {
-          AND: [
-            { OR: [{ harga_promo: null }, { harga_promo: { lte: 0 } }] },
-            ...(minHarga !== undefined ? [{ harga: { gte: minHarga } }] : []),
-            ...(maxHarga !== undefined ? [{ harga: { lte: maxHarga } }] : []),
-          ],
-        },
-      ],
+      harga_efektif: {
+        ...(minHarga !== undefined && { gte: minHarga }),
+        ...(maxHarga !== undefined && { lte: maxHarga }),
+      },
     };
   };
 
@@ -217,6 +224,15 @@ export default async function SearchPage({ searchParams }: Props) {
 
   // Filter lokasi multi-wilayah (provinsi/kota/kecamatan/kelurahan) → grup OR.
   const locationWhere = buildLocationWhere(searchParams);
+
+  /**
+   * Filter "dekat X". Menangani DUA jalan masuk sekaligus: `?dekat=…` (user
+   * mengklik saran) dan `?q=deket unesa` (user langsung menekan Enter).
+   * Yang kedua dulu berakhir "0 properti" karena teksnya dicari apa adanya di
+   * dalam kolom alamat — lihat siapkanTempat().
+   */
+  const siapTempat = await siapkanTempat(searchParams, { q, kota });
+  const tempatWhere = buildTempatWhere(siapTempat.tempat);
 
   // Tipe aset multi-kategori (param `tipe` = daftar enum dipisah koma).
   const kategoriList = parseCategoryDbList(searchParams.tipe);
@@ -227,15 +243,31 @@ export default async function SearchPage({ searchParams }: Props) {
   // Jika q ada → cari di alamat_lengkap (case-insensitive contains)
   const whereClause: Prisma.ListingWhereInput = {
     jenis_transaksi: { in: ["PRIMARY", "SECONDARY"] },
-    status_tayang: "TERSEDIA",
+    status_tayang: { in: ["TERSEDIA", "TERJUAL"] },
 
     ...(idPropertyRaw && { id_property: BigInt(idPropertyRaw) }),
 
-    ...(!idPropertyRaw && q && {
-      alamat_lengkap: { contains: q, mode: "insensitive" },
-    }),
 
-    ...(!idPropertyRaw && locationWhere && { AND: [locationWhere] }),
+    // Lokasi administratif & "dekat tempat" digabung dalam SATU daftar AND —
+    // dua kunci `AND` di objek yang sama akan saling menimpa, dan filter yang
+    // hilang diam-diam adalah kerusakan yang tidak terlihat sebagai kerusakan.
+    // Kata kunci, lokasi administratif, dan "dekat tempat" digabung dalam SATU
+    // daftar AND — dua kunci `AND` di objek yang sama akan saling menimpa, dan
+    // filter yang hilang diam-diam adalah kerusakan yang tidak terlihat
+    // sebagai kerusakan.
+    //
+    // Kata kunci memakai pembangun bersama (src/lib/listingKataKunci.ts): ia
+    // mencari lintas kolom, bukan cuma `alamat_lengkap`. "Dukuh Kupang" adalah
+    // nama KELURAHAN dan sering tidak tertulis ulang di dalam alamat — dicari
+    // di satu kolom saja, orang mengetik nama yang benar lalu mendapat nol.
+    ...(() => {
+      const and = [
+        buildKataKunciWhere(siapTempat.q),
+        locationWhere,
+        tempatWhere,
+      ].filter(Boolean) as Prisma.ListingWhereInput[];
+      return !idPropertyRaw && and.length ? { AND: and } : {};
+    })(),
 
     ...(!idPropertyRaw && kategoriList.length > 0 && {
       kategori: { in: kategoriList as any },
@@ -269,21 +301,56 @@ export default async function SearchPage({ searchParams }: Props) {
     ...(!idPropertyRaw && legalitas && {
       legalitas: { equals: legalitas as any },
     }),
+
+    ...(!idPropertyRaw && hotDeal && { is_hot_deal: true }),
   };
 
   // C. TENTUKAN SORTING (ORDER BY)
-  let orderBy: Prisma.ListingOrderByWithRelationInput = {
-    tanggal_dibuat: "desc",
-  };
-
-  if (sort === "asc") {
-    orderBy = { harga: "asc" };
-  } else if (sort === "desc") {
-    orderBy = { harga: "desc" };
-  }
+  // Aturannya (status_tayang dulu → kunci pilihan user → pemecah seri
+  // id_property) ada di @/lib/listingSort supaya /Jual, /Sewa, dan /Lelang
+  // tidak pernah berbeda perilaku.
+  const sort = parseSort(sortMentah, "JUAL", siapTempat.chip?.nama);
+  const orderBy = buildOrderBy(sort, "JUAL");
 
   // D. EKSEKUSI QUERY DATABASE (TRANSACTION)
-  const [totalItems, propertiesRaw] = await prisma.$transaction([
+  //
+  // "Terdekat" tidak bisa lewat `orderBy`: jaraknya ada di relasi to-many dan
+  // berbeda untuk setiap tempat yang dicari, jadi tidak ada kolom yang bisa
+  // diurut. Urutan & paginasinya dihitung lebih dulu, lalu barisnya diambil
+  // berdasarkan id — lihat urutkanTerdekat().
+  const urutJarak =
+    sort === "terdekat" && siapTempat.tempat
+      ? await urutkanTerdekat(siapTempat.tempat, whereClause, page, limit)
+      : null;
+
+  const sertakanAgent = {
+    agent: {
+      select: {
+        nama_kantor: true,
+        foto_profil_url: true,
+        pengguna: { select: { nama_lengkap: true } },
+      },
+    },
+  } as const;
+
+  const [totalItems, propertiesRaw] = urutJarak
+    ? [
+        urutJarak.total,
+        // Urutan hasil findMany tidak dijamin mengikuti daftar `in`, jadi
+        // barisnya disusun ulang mengikuti urutan jarak yang sudah dihitung.
+        await prisma.listing
+          .findMany({
+            where: { id_property: { in: urutJarak.ids } },
+            include: sertakanAgent,
+          })
+          .then((baris) => {
+            const peta = new Map(baris.map((b) => [String(b.id_property), b]));
+            return urutJarak.ids
+              .map((id) => peta.get(String(id)))
+              .filter(Boolean) as typeof baris;
+          }),
+      ]
+    : await prisma.$transaction([
     prisma.listing.count({ where: whereClause }),
 
     prisma.listing.findMany({
@@ -309,6 +376,19 @@ export default async function SearchPage({ searchParams }: Props) {
 
   const totalPages = Math.ceil(totalItems / limit);
 
+  // Halaman di luar jangkauan → pindahkan ke halaman terakhir, jangan sajikan
+  // grid kosong bertuliskan "Belum Ada Properti" padahal hasilnya ada. Ini juga
+  // yang terjadi saat user mempersempit filter selagi berada di halaman jauh.
+  const tujuan = urlHalamanTerakhir("/Jual", searchParams, page, totalPages);
+  if (tujuan) redirect(tujuan);
+
+  // Jarak tiap kartu ke tempat yang dicari — SATU kueri untuk seluruh halaman,
+  // bukan satu per kartu.
+  const petaJarak = await ambilJarakKeTempat(
+    siapTempat.tempat,
+    propertiesRaw.map((p) => p.id_property),
+  );
+
   // E. FORMAT DATA UNTUK UI
   const formattedData = propertiesRaw.map((item) => {
     const foto_list = normalizeListingImages(item.gambar);
@@ -326,6 +406,7 @@ export default async function SearchPage({ searchParams }: Props) {
         item.harga_promo != null ? Number(item.harga_promo) : null,
       jenis_transaksi: item.jenis_transaksi,
       kategori: item.kategori,
+      status_tayang: item.status_tayang,
 
       // ambil gambar pertama + list lengkap
       gambar: foto_list[0] || "/images/hero/banner.jpg",
@@ -342,15 +423,24 @@ export default async function SearchPage({ searchParams }: Props) {
       agent_photo: agentPhotoUrl,
       agent_office: item.agent?.nama_kantor || "Solusindo Aset",
       is_hot_deal: !!item.is_hot_deal,
+      // Nama tempatnya yang dicetak, bukan nama filternya: "152 m dari
+      // Universitas Ciputra" menjawab pertanyaan pembaca, "152 m dari Semua
+      // kampus" mengulang apa yang sudah ia ketik sendiri.
+      jarak_tempat: petaJarak.get(String(item.id_property)) ?? null,
     };
   });
 
   return (
     <main className="bg-[#0F0F0F] min-h-screen pb-20">
       <SearchHero
-        key={`${q ?? ""}_${idPropertyRaw ?? ""}_${kota ?? ""}_${tipe ?? ""}_${minHarga ?? ""}_${maxHarga ?? ""}_${minLT ?? ""}_${maxLT ?? ""}_${minLB ?? ""}_${maxLB ?? ""}`}
+        key={`${q ?? ""}_${siapTempat.chip?.nilai ?? ""}_${idPropertyRaw ?? ""}_${kota ?? ""}_${tipe ?? ""}_${minHarga ?? ""}_${maxHarga ?? ""}_${minLT ?? ""}_${maxLT ?? ""}_${minLB ?? ""}_${maxLB ?? ""}`}
         initial={{
-          q: q,
+          // Teks yang sudah ditafsirkan jadi tempat tidak ditaruh lagi di
+          // kotak kata kunci — chip-nya sudah mewakili, dan menampilkan
+          // keduanya membuat pemakai mengira filternya dobel.
+          q: siapTempat.q,
+          dekat: siapTempat.chip,
+          radius: siapTempat.tempat?.radius,
           idProperty: idPropertyRaw,
           kota: kota,
           tipe: tipe,
@@ -363,8 +453,22 @@ export default async function SearchPage({ searchParams }: Props) {
         }}
       />
 
+      {(siapTempat.chip || siapTempat.catatan) && (
+        <div className="container mx-auto px-4 mt-6">
+          <TempatAktifBar
+            tempat={siapTempat.chip}
+            radius={siapTempat.tempat?.radius}
+            jumlah={totalItems}
+            ditebak={siapTempat.ditebak}
+            kueriAsli={q}
+            catatan={siapTempat.catatan}
+          />
+        </div>
+      )}
+
       <ProductList
         initialData={formattedData}
+        namaTempat={siapTempat.chip?.nama ?? null}
         pagination={{
           currentPage: page,
           totalPages,

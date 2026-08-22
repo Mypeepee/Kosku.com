@@ -323,7 +323,10 @@ export async function POST(request: NextRequest) {
         deskripsi: `Menambahkan listing: ${body.judul}`,
         poin: 10,
         tipe_transaksi: "DAPAT",
-        id_referensi: listing.id_property.toString(),
+        // BigInt langsung, bukan .toString(): kolomnya memang `BigInt?`.
+        // Prisma kebetulan menerima string juga, jadi tidak ada data yang
+        // hilang selama ini — yang hilang cuma jaminan tipenya.
+        id_referensi: listing.id_property,
         tabel_referensi: "listing",
         saldo_sebelum: agent.poin ?? 0,
         saldo_sesudah: newPoin,

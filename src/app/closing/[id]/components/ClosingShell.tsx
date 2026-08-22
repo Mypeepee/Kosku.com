@@ -117,7 +117,15 @@ export default function ClosingShell({
   const [riwayatData, setRiwayatData] = useState<any>(null);
   const [riwayatLoading, setRiwayatLoading] = useState(false);
 
-  const riwayatCount: number = riwayatData?.rows?.length ?? 0;
+  // Badge hitungan hanya menghitung event atas aset yang sama persis. Lot
+  // dengan susunan bidang berbeda (paket/pecahan) tetap muncul di dalam modal,
+  // tapi tidak boleh membesarkan angka "sudah dilelang sekian kali".
+  const riwayatCount: number =
+    riwayatData?.total_sebidang ??
+    (Array.isArray(riwayatData?.rows)
+      ? riwayatData.rows.filter((r: any) => (r?.cakupan ?? "SAMA") === "SAMA")
+          .length
+      : 0);
 
   async function fetchRiwayatData() {
     if (riwayatData) return;
@@ -664,7 +672,22 @@ type RiwayatRow = {
   kota?: string | null;
   legalitas?: string | null;
   nomor_legalitas?: string | null;
+  /** Nomor sertifikat ternormalisasi — satu lot bisa memuat banyak bidang. */
+  nomor_legalitas_list?: string[];
+  /**
+   * Hubungan susunan bidang lot ini terhadap listing yang dibuka. Selain
+   * "SAMA", nilai limitnya TIDAK sebanding (paket vs pecahan) — lihat
+   * @/lib/auctionHistory. Absen = respons lama, diperlakukan sebagai "SAMA".
+   */
+  cakupan?: "SAMA" | "SEBAGIAN" | "LEBIH_LUAS" | "BERIRISAN";
   alamat_lengkap?: string | null;
+};
+
+/** Label lot yang susunan bidangnya berbeda dari aset yang sedang dibuka. */
+const CAKUPAN_LABEL: Record<string, string> = {
+  SEBAGIAN: "Sebagian bidang",
+  LEBIH_LUAS: "Paket lebih besar",
+  BERIRISAN: "Susunan bidang beda",
 };
 
 type MatchCriteria = {
@@ -674,6 +697,7 @@ type MatchCriteria = {
   kota?: string | null;
   legalitas: string | null;
   nomor_legalitas: string | null;
+  nomor_normal?: string[];
 } | null;
 
 const PLACEHOLDER_SVG =
@@ -748,7 +772,19 @@ function RiwayatLelangModal({
           <div className="min-w-0 flex-1">
             <div className="text-[16px] font-bold tracking-tight text-white">Riwayat Lelang</div>
             <div className="text-[11px] text-zinc-500">
-              {loading ? "Memuat..." : `${rows.length} penawaran tercatat pada aset yang sama`}
+              {loading
+                ? "Memuat..."
+                : (() => {
+                    // Lot dengan susunan bidang berbeda tetap ditampilkan, tapi
+                    // tidak boleh ikut dihitung sebagai "penawaran atas aset ini".
+                    const sebidang = rows.filter(
+                      (r) => (r.cakupan ?? "SAMA") === "SAMA"
+                    ).length;
+                    const terkait = rows.length - sebidang;
+                    return `${sebidang} penawaran tercatat pada aset yang sama${
+                      terkait > 0 ? ` · ${terkait} lot terkait` : ""
+                    }`;
+                  })()}
             </div>
           </div>
           <button
@@ -830,6 +866,8 @@ function RiwayatLelangModal({
                 {rows.map((row, idx) => {
                   const isCurrent = row.id_property === currentId;
                   const attempt = idx + 1;
+                  const cakupanLabel =
+                    CAKUPAN_LABEL[row.cakupan ?? "SAMA"] ?? null;
                   const imgSrc = row.imageUrl && row.imageUrl !== "/placeholder.jpg"
                     ? row.imageUrl
                     : null;
@@ -896,6 +934,14 @@ function RiwayatLelangModal({
                             {isCurrent && (
                               <span className="rounded-full bg-amber-500/90 px-2.5 py-0.5 text-[10px] font-bold text-black">
                                 ● Saat ini
+                              </span>
+                            )}
+                            {cakupanLabel && (
+                              <span
+                                className="rounded-full bg-sky-500/85 px-2.5 py-0.5 text-[10px] font-bold text-black"
+                                title="Susunan bidangnya berbeda dari aset yang sedang dibuka — nilai limitnya tidak sebanding."
+                              >
+                                {cakupanLabel}
                               </span>
                             )}
                           </div>

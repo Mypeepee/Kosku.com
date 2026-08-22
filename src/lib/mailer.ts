@@ -33,6 +33,11 @@ const SUPPORT_WA = "+62 813-3571-6679";
 const SUPPORT_WA_LINK = "https://wa.me/6281335716679";
 const SITE = "SolusindoAset.com";
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://solusindoaset.com";
+/* Gambar & tautan di dalam email WAJIB memakai alamat yang bisa dijangkau dari
+   luar. BASE_URL berisi localhost di mesin pengembangan, dan server Gmail yang
+   mengambil gambarnya tidak berada di mesin itu — hasilnya kotak rusak di
+   setiap email. Lihat catatan lengkapnya di src/lib/site.ts. */
+import { URL_PUBLIK } from "@/lib/site";
 const ADDRESS =
   "Santorini Town Square, Jl. Ronggolawe No.2A, DR. Soetomo, Kec. Tegalsari, Surabaya, Jawa Timur";
 
@@ -210,7 +215,7 @@ function renderEmailShell(opts: {
     : `
           <!-- brand header -->
           <tr><td bgcolor="${E.card}" align="center" style="padding:30px 40px 6px;background-color:${E.card};">
-            <img src="${BASE_URL}/images/logo/LogoSolusindoPremier.png" alt="Solusindo Aset" width="180" height="auto" style="display:block;height:auto;max-width:180px;border:0;" />
+            <img src="${URL_PUBLIK}/images/logo/LogoSolusindoPremier.png" alt="Solusindo Aset" width="180" height="auto" style="display:block;height:auto;max-width:180px;border:0;" />
           </td></tr>`;
   return `<!doctype html>
 <html lang="id" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -376,7 +381,7 @@ export function newAgentEmailHtml(o: NewAgentEmailOpts) {
           </td></tr>
 
           <!-- profile card -->
-          <tr><td bgcolor="${E.card}" style="padding:24px 40px 0;background-color:${E.card};">
+          <tr><td bgcolor="${E.card}" style="padding:24px 28px 0;background-color:${E.card};">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:18px;">
               <tr><td style="padding:22px 22px 16px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -522,7 +527,7 @@ export function newUserEmailHtml(o: NewUserEmailOpts) {
           </td></tr>
 
           <!-- profile card -->
-          <tr><td bgcolor="${E.card}" style="padding:24px 40px 0;background-color:${E.card};">
+          <tr><td bgcolor="${E.card}" style="padding:24px 28px 0;background-color:${E.card};">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:18px;">
               <tr><td style="padding:22px 22px 16px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -660,7 +665,7 @@ export function referralKlienEmailHtml(o: ReferralKlienEmailOpts) {
           </td></tr>
 
           <!-- klien card -->
-          <tr><td bgcolor="${E.card}" style="padding:24px 40px 0;background-color:${E.card};">
+          <tr><td bgcolor="${E.card}" style="padding:24px 28px 0;background-color:${E.card};">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:18px;">
               <tr><td style="padding:22px 22px 16px;">
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -1138,7 +1143,7 @@ export function agentEventReminderEmailHtml(o: AgentEventReminderEmailOpts) {
           </td></tr>
 
           <!-- TIKET ACARA -->
-          <tr><td bgcolor="${E.card}" style="padding:24px 40px 0;background-color:${E.card};">
+          <tr><td bgcolor="${E.card}" style="padding:24px 28px 0;background-color:${E.card};">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:20px;">
               <!-- judul acara -->
               <tr><td align="center" style="padding:26px 24px 0;">
@@ -1236,5 +1241,575 @@ export async function sendAgentEventReminderEmail(
   } catch (err) {
     console.error("❌ Gagal mengirim email pengingat acara:", err);
     return { delivered: false };
+  }
+}
+
+/* ===========================================================================
+ *  EMAIL 6: REKOMENDASI PROPERTI  →  KLIEN
+ *
+ *  Dikirim agent dari panel Rekomendasi di CRM. Isinya daftar properti yang
+ *  cocok dengan preferensi klien, plus bagian terpisah untuk properti yang
+ *  HARGANYA TURUN — properti yang pernah dikirim hanya boleh muncul lagi
+ *  dengan alasan itu (lihat src/lib/preferensiRekomendasi.ts).
+ * ========================================================================= */
+
+export type RekomendasiPropertiEmailOpts = {
+  klienName: string;
+  agentName?: string | null;
+  agentOffice?: string | null;
+  agentWhatsapp?: string | null;
+  ringkasKriteria?: string | null;
+  subject: string;
+  /** Properti yang belum pernah dikirim ke klien ini. */
+  baru: RekomendasiPropertiItem[];
+  /** Properti yang pernah dikirim dan sekarang lebih murah. */
+  turunHarga: RekomendasiPropertiItem[];
+  /** Versi teks polos, dipakai sebagai fallback body. */
+  plainText: string;
+};
+
+export type RekomendasiPropertiItem = {
+  judul: string;
+  url: string;
+  gambar: string;
+  hargaTampil: string;
+  hargaSebelumnya?: string | null;
+  frasaTurun?: string | null;
+  lokasi: string;
+  spesifikasi: string;
+  badge: string;
+};
+
+/** Satu kartu properti — tabel, bukan flexbox: klien email tidak punya CSS modern. */
+function propertyCard(it: RekomendasiPropertiItem): string {
+  const hargaBlok = it.hargaSebelumnya
+    ? `<div style="font-size:12px;color:${E.inkMute};text-decoration:line-through;line-height:1.4;">${esc(it.hargaSebelumnya)}</div>
+       <div class="em-mint" style="font-size:17px;font-weight:800;color:${E.mint};line-height:1.3;">${esc(it.hargaTampil)}</div>
+       ${it.frasaTurun ? `<div style="display:inline-block;margin-top:5px;font-size:10.5px;font-weight:800;letter-spacing:0.6px;text-transform:uppercase;color:${E.green};background-color:${E.greenBg};border:1px solid ${E.greenBorder};border-radius:7px;padding:3px 8px;">&#8595; ${esc(it.frasaTurun)}</div>` : ""}`
+    : `<div class="em-mint" style="font-size:17px;font-weight:800;color:${E.mint};line-height:1.3;">${esc(it.hargaTampil)}</div>`;
+
+  return `
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:16px;margin-bottom:12px;">
+              <tr><td style="padding:0;">
+                <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:block;">
+                  <img src="${esc(it.gambar)}" alt="${esc(it.judul)}" width="520" style="display:block;width:100%;max-width:520px;height:auto;border:0;border-radius:16px 16px 0 0;" />
+                </a>
+              </td></tr>
+              <tr><td style="padding:16px 18px 18px;">
+                <div style="margin-bottom:8px;">
+                  <span style="display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:${E.emeraldBright};background-color:#082018;border:1px solid ${E.panelBorder};border-radius:6px;padding:3px 8px;">${esc(it.badge)}</span>
+                </div>
+                <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" class="em-ink" style="display:block;font-size:15.5px;font-weight:800;color:${E.ink};line-height:1.35;text-decoration:none;">${esc(it.judul)}</a>
+                ${it.lokasi ? `<div class="em-mute" style="margin-top:6px;font-size:12px;color:${E.inkMute};line-height:1.5;">&#128205; ${esc(it.lokasi)}</div>` : ""}
+                ${it.spesifikasi ? `<div class="em-soft" style="margin-top:4px;font-size:12px;color:${E.inkSoft};line-height:1.5;">${esc(it.spesifikasi)}</div>` : ""}
+                <div style="margin-top:12px;padding-top:12px;border-top:1px solid ${E.dividerSolid};">
+                  ${hargaBlok}
+                </div>
+                <div style="margin-top:12px;">
+                  <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer"
+                     style="display:inline-block;background-color:#082018;border:1px solid ${E.panelBorder};color:${E.mint};text-decoration:none;font-size:12.5px;font-weight:700;padding:9px 18px;border-radius:9px;">
+                    Lihat Detail &nbsp;&rarr;
+                  </a>
+                </div>
+              </td></tr>
+            </table>`;
+}
+
+function sectionHeading(text: string, sub?: string) {
+  return `
+          <tr><td bgcolor="${E.card}" style="padding:24px 40px 10px;background-color:${E.card};">
+            <div class="em-emerald" style="font-size:10px;letter-spacing:2.2px;text-transform:uppercase;color:${E.emeraldBright};font-weight:800;">${text}</div>
+            ${sub ? `<div class="em-mute" style="margin-top:5px;font-size:12px;color:${E.inkMute};line-height:1.55;">${sub}</div>` : ""}
+          </td></tr>`;
+}
+
+export function rekomendasiPropertiEmailHtml(o: RekomendasiPropertiEmailOpts) {
+  const nama = esc((o.klienName || "").trim().split(/\s+/)[0] || "");
+  const total = o.baru.length + o.turunHarga.length;
+  const agent = esc(o.agentName || "Agent Solusindo Aset");
+  const wa = waDigits(o.agentWhatsapp);
+
+  const headline =
+    o.turunHarga.length > 0 && o.baru.length === 0
+      ? `Kabar baik${nama ? `, ${nama}` : ""}!<br>Harganya turun &#128071;`
+      : `Halo${nama ? ` ${nama}` : ""}!<br>${total > 1 ? `${total} properti` : "Ada properti"} untuk Anda &#127968;`;
+
+  const lead = o.ringkasKriteria
+    ? `Berikut properti yang cocok dengan kriteria yang Anda sampaikan — <strong class="em-mint" style="color:${E.mint};font-weight:700;">${esc(o.ringkasKriteria)}</strong>.`
+    : `Berikut properti yang menurut kami cocok dengan kriteria yang Anda sampaikan.`;
+
+  const blokBaru =
+    o.baru.length > 0
+      ? sectionHeading(
+          o.baru.length > 1 ? `${o.baru.length} Properti Pilihan` : "Properti Pilihan",
+        ) +
+        `<tr><td bgcolor="${E.card}" style="padding:0 40px;background-color:${E.card};">${o.baru
+          .map(propertyCard)
+          .join("")}</td></tr>`
+      : "";
+
+  const blokTurun =
+    o.turunHarga.length > 0
+      ? sectionHeading(
+          "Turun Harga",
+          "Properti yang pernah kami kirimkan sebelumnya — sekarang harganya lebih rendah.",
+        ) +
+        `<tr><td bgcolor="${E.card}" style="padding:0 40px;background-color:${E.card};">${o.turunHarga
+          .map(propertyCard)
+          .join("")}</td></tr>`
+      : "";
+
+  const content = `
+          <!-- pill -->
+          <tr><td bgcolor="${E.card}" align="center" style="padding:20px 40px 0;background-color:${E.card};">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:999px;">
+              <tr><td class="em-mint" style="padding:7px 16px 7px 14px;font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;color:${E.mint};font-weight:800;">
+                <span style="color:${E.emeraldBright};">&#9679;</span>&nbsp;&nbsp;Rekomendasi Properti
+              </td></tr>
+            </table>
+          </td></tr>
+
+          <!-- hero -->
+          <tr><td bgcolor="${E.card}" align="center" style="padding:16px 40px 0;background-color:${E.card};">
+            <h1 class="em-ink" style="margin:0;font-size:24px;line-height:1.3;font-weight:800;color:${E.ink};letter-spacing:-0.2px;">${headline}</h1>
+            <p class="em-soft" style="margin:13px auto 0;font-size:14.5px;line-height:1.65;color:${E.inkSoft};max-width:430px;">${lead}</p>
+          </td></tr>
+
+          ${blokTurun}
+          ${blokBaru}
+
+          <!-- penutup -->
+          <tr><td bgcolor="${E.card}" style="padding:14px 40px 0;background-color:${E.card};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:14px;">
+              <tr>
+                <td valign="top" width="40" style="padding:16px 0 16px 16px;font-size:17px;">&#128172;</td>
+                <td class="em-soft" style="padding:16px 16px 16px 8px;font-size:12.5px;line-height:1.65;color:${E.inkSoft};">
+                  <strong class="em-mint" style="color:${E.mint};font-weight:700;">Ada yang menarik?</strong><br>
+                  Balas email ini atau hubungi ${esc(agent)}${wa ? ` di <a href="https://wa.me/${wa}" style="color:${E.mint};text-decoration:none;font-weight:600;">WhatsApp</a>` : ""} — jadwal survei bisa diatur sesuai waktu Anda.
+                </td>
+              </tr>
+            </table>
+          </td></tr>`;
+
+  return renderEmailShell({
+    title: `${BRAND} — Rekomendasi Properti`,
+    preheader:
+      o.turunHarga.length > 0 && o.baru.length === 0
+        ? `Harga turun untuk properti yang Anda minati.`
+        : `${total} properti yang cocok dengan kriteria Anda${o.ringkasKriteria ? ` — ${o.ringkasKriteria}` : ""}.`,
+    content,
+  });
+}
+
+export async function sendRekomendasiPropertiEmail(
+  to: string,
+  opts: RekomendasiPropertiEmailOpts
+): Promise<{ delivered: boolean; reason?: string }> {
+  if (!isMailConfigured()) {
+    console.warn(
+      `\n📧 [DEV] SMTP belum dikonfigurasi. Email rekomendasi untuk ${to} tidak dikirim.\n` +
+        `   ${opts.baru.length} properti baru · ${opts.turunHarga.length} turun harga.\n`
+    );
+    return { delivered: false, reason: "SMTP belum dikonfigurasi" };
+  }
+
+  try {
+    await getTransport().sendMail({
+      from: `"${opts.agentName || BRAND} · ${BRAND}" <${GMAIL_USER}>`,
+      to,
+      subject: `${opts.subject} · ${BRAND}`,
+      text: opts.plainText,
+      html: rekomendasiPropertiEmailHtml(opts),
+    });
+    return { delivered: true };
+  } catch (err) {
+    console.error("❌ Gagal mengirim email rekomendasi properti:", err);
+    return { delivered: false, reason: "Gagal mengirim email" };
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ASISTEN ASET — email ke AGENT: "ada aset baru untuk klien Anda"
+   ---------------------------------------------------------------------------
+   Email ini punya satu tugas dan bukan "memberi tahu". Memberi tahu itu murah
+   dan hampir tidak berguna: agent yang membaca "3 aset baru cocok untuk Budi"
+   lalu harus membuka dashboard, mencari Budi, mencari asetnya, memilih, dan
+   menyusun pesan sedang mengerjakan seluruh pekerjaan yang tadinya ada —
+   ditambah membaca email. Otomatisasi yang begitu justru MENAMBAH satu langkah.
+
+   Maka email ini memuat keputusannya, bukan cuma kabarnya:
+     • asetnya ditampilkan (foto, harga, lokasi) → inilah momen pemeriksaannya;
+     • satu tombol per klien → mencatat kiriman lalu membuka WhatsApp yang
+       sudah berisi draf lengkap.
+   Dari kotak masuk ke draf WhatsApp: satu ketukan. Menekan "kirim" di
+   WhatsApp tetap pekerjaan manusia — aset yang salah kirim tidak bisa ditarik,
+   dan yang menanggung malunya agent, bukan sistem.
+
+   Satu email memuat SEMUA klien yang punya kecocokan baru. Satu email per
+   klien akan mengubur kotak masuk agent yang punya tiga puluh klien, dan
+   kotak masuk yang terkubur berhenti dibaca dalam tiga hari.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export type AsistenAsetItem = {
+  judul: string;
+  url: string;
+  gambar: string;
+  hargaTampil: string;
+  /** Baris lokasi pendek: kecamatan, kota. */
+  lokasi: string;
+  /** Alamat lengkap — nama jalan, komplek, blok, kavling. Inilah yang membuat
+   *  agent tahu PERSIS di mana asetnya tanpa membuka apa pun, dan yang
+   *  menentukan apakah ia bisa langsung menjawab saat klien bertanya
+   *  "dekat mana itu?". */
+  alamat?: string | null;
+  spesifikasi: string;
+  badge: string;
+  /** KENAPA aset ini cocok — "Rp 184 jt di bawah plafon", "baru masuk hari
+   *  ini", "Kelurahan Manukan Kulon". Bagian yang mengubah email ini dari
+   *  pemberitahuan jadi sesuatu yang bisa dinilai dalam dua detik. Tanpa
+   *  alasan, agent harus membuka tiap aset untuk tahu apakah kecocokannya
+   *  masuk akal — dan rekomendasi yang tidak bisa dinilai berhenti dipercaya
+   *  setelah satu hasil yang terasa aneh. */
+  alasan?: string[];
+};
+
+export type AsistenAsetKlien = {
+  nama: string;
+  /** Sudah berapa lama klien ini tidak dihubungi, mis. "12 hari lalu".
+   *  Bukan hiasan: aset baru untuk klien yang baru dihubungi kemarin dan untuk
+   *  klien yang didiamkan sebulan adalah dua tingkat kepentingan yang berbeda,
+   *  dan agent hanya bisa membedakannya kalau angkanya ditulis. */
+  kontakTerakhir?: string | null;
+  /** Kriteria yang membuat aset-aset ini muncul, mis. "Rumah · Gresik · ≤ 500 jt".
+   *  Bukan hiasan: tanpanya agent tidak bisa menilai apakah kecocokannya masuk
+   *  akal, dan rekomendasi yang tidak bisa dinilai berhenti dipercaya. */
+  kriteria: string;
+  /** Total kecocokan baru — bisa lebih besar dari `aset.length` yang ditampilkan. */
+  total: number;
+  aset: AsistenAsetItem[];
+  /** Tautan satu-ketukan: catat kiriman lalu buka WhatsApp berisi draf.
+   *  null bila klien tidak punya nomor WhatsApp. */
+  kirimUrl: string | null;
+  /** Tautan cadangan ke layar Asisten Aset klien ini. */
+  bukaUrl: string;
+};
+
+export type AsistenAsetEmailOpts = {
+  agentName?: string | null;
+  klien: AsistenAsetKlien[];
+  /** Total aset baru di seluruh klien — dipakai di judul & preheader. */
+  totalAset: number;
+  /** Foto yang ikut di dalam surat (cid). Kartu yang punya entri di sini
+   *  memakai `cid:` alih-alih URL — lihat alasannya di src/lib/fotoListing.ts. */
+  lampiran?: { cid: string; content: Buffer }[];
+};
+
+/** Batas panjang alamat di kartu email. Median alamat 96 karakter dan 90%
+ *  di bawah 172 — tapi ADA baris sepanjang 500 karakter di data, dan satu
+ *  alamat seperti itu menenggelamkan harga, alasan, dan tombolnya sekaligus
+ *  di bawah lipatan layar ponsel. Dipotong di 150: dua baris pada lebar email
+ *  600px, tetap utuh untuk sebagian besar alamat. */
+const MAKS_ALAMAT = 150;
+
+/** Satu kartu aset di email agent.
+ *
+ *  ── KENAPA SUSUNANNYA SEPERTI INI ────────────────────────────────────────
+ *  Versi sebelumnya menaruh foto 92×92 di samping blok teks setinggi ±230px,
+ *  dan selisihnya — sekitar 140px kolom kosong di bawah foto — adalah lubang
+ *  yang tidak bisa diisi apa pun. Email tidak punya flexbox; sel tabel tidak
+ *  bisa disuruh meregangkan gambar mengikuti tinggi tetangganya.
+ *
+ *  Jadi jaraknya ditutup dari DUA sisi sekaligus:
+ *    • fotonya naik ke 118×148 (potret 4:5, lazim untuk properti), dan
+ *    • teksnya dirapatkan dengan menggabungkan dua pasang baris yang selama
+ *      ini berdiri sendiri-sendiri — badge dengan luas, lalu chip alasan
+ *      dengan tombol detail.
+ *  Menaikkan foto saja akan menghasilkan foto raksasa; merapatkan teks saja
+ *  tetap menyisakan lubang. Keduanya sekaligus membuat sisa ruangnya tinggal
+ *  puluhan piksel — dan email jadi LEBIH pendek, bukan lebih panjang.
+ *
+ *  Foto TIDAK dibuat selebar kartu (pola email ke klien) dengan sengaja:
+ *  agent membaca untuk MEMUTUSKAN, bukan untuk tergoda. Tiga foto selebar
+ *  kartu membuat email sepanjang tiga layar demi tiga keputusan.
+ *
+ *  Tabel bersarang, bukan flexbox — Outlook tidak punya CSS modern. */
+function asistenAsetCard(it: AsistenAsetItem): string {
+  const alamat = (it.alamat || it.lokasi || "").trim();
+  const alamatTampil =
+    alamat.length > MAKS_ALAMAT ? `${alamat.slice(0, MAKS_ALAMAT - 1).trimEnd()}…` : alamat;
+
+  const chip = (isi: string) =>
+    `<span style="display:inline-block;font-size:10.5px;font-weight:700;color:${E.inkSoft};background-color:${E.bg};border:1px solid ${E.dividerSolid};border-radius:6px;padding:4px 9px;margin:0 5px 0 0;white-space:nowrap;">${esc(isi)}</span>`;
+
+  return `
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:14px;margin-bottom:10px;">
+              <tr>
+                <td width="118" valign="top" style="padding:10px 0 10px 10px;">
+                  <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;display:block;">
+                    <img src="${esc(it.gambar)}" alt="" width="118" height="148" style="display:block;width:118px;height:148px;border:0;border-radius:10px;object-fit:cover;background-color:${E.cardBorder};" />
+                  </a>
+                </td>
+                <td valign="top" style="padding:10px 12px 10px 11px;">
+
+                  <!-- Baris 1: jenis + luas. Dulu dua baris terpisah; keduanya
+                       sama-sama keterangan singkat dan tidak pernah dibaca
+                       sebagai kalimat, jadi tidak ada yang hilang. -->
+                  <div style="line-height:1;">
+                    <span style="display:inline-block;font-size:9px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:${E.emeraldBright};background-color:#082018;border:1px solid ${E.panelBorder};border-radius:5px;padding:3px 7px;vertical-align:middle;">${esc(it.badge)}</span>
+                    ${it.spesifikasi ? `<span class="em-mute" style="font-size:11px;color:${E.inkMute};vertical-align:middle;">&nbsp;&nbsp;${esc(it.spesifikasi)}</span>` : ""}
+                  </div>
+
+                  <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer" class="em-ink" style="display:block;margin-top:7px;font-size:13.5px;font-weight:700;color:${E.ink};line-height:1.35;text-decoration:none;">${esc(it.judul)}</a>
+
+                  <div class="em-mint" style="margin-top:6px;font-size:17px;font-weight:800;color:${E.mint};line-height:1.2;">${esc(it.hargaTampil)}</div>
+
+                  ${alamatTampil ? `<div class="em-soft" style="margin-top:6px;font-size:11.5px;color:${E.inkSoft};line-height:1.45;">&#128205; ${esc(alamatTampil)}</div>` : ""}
+
+                  <!-- Baris terakhir: alasan di kiri, tombol di kanan.
+                       Dua baris terpisah menyisakan satu jalur kosong selebar
+                       kartu di antara keduanya, padahal masing-masing hanya
+                       memakai sepertiga lebarnya. -->
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;">
+                    <tr>
+                      <td valign="middle" style="padding:0;">
+                        ${(it.alasan && it.alasan.length > 0) ? it.alasan.slice(0, 2).map(chip).join("") : "&nbsp;"}
+                      </td>
+                      <td valign="middle" align="right" style="padding:0;">
+                        <a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer"
+                           style="display:inline-block;background-color:${E.bg};border:1px solid ${E.panelBorder};color:${E.mint};text-decoration:none;font-size:11.5px;font-weight:700;padding:7px 13px;border-radius:8px;white-space:nowrap;">
+                          Detail &nbsp;&rarr;
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>`;
+}
+
+function asistenBlokKlien(k: AsistenAsetKlien): string {
+  const sisa = k.total - k.aset.length;
+
+  /* Tombol utama = tindakannya, bukan navigasinya. "Buka dashboard" akan
+     mendaratkan agent di tempat pekerjaannya baru dimulai; "Kirim ke Budi"
+     menyelesaikannya. Bila nomor WhatsApp-nya tidak ada, tombolnya berubah
+     jujur jadi "Buka" — tombol kirim yang mendarat di layar kosong lebih
+     merusak kepercayaan daripada tombol yang sejak awal mengaku terbatas. */
+  const aksi = k.kirimUrl
+    ? `<a href="${esc(k.kirimUrl)}" target="_blank" rel="noopener noreferrer"
+          style="display:inline-block;background-color:${E.mint};color:${E.btnText};text-decoration:none;font-size:13px;font-weight:800;padding:11px 22px;border-radius:10px;">
+         Kirim ke ${esc(k.nama.split(/\s+/)[0])} via WhatsApp &nbsp;&rarr;
+       </a>`
+    : `<a href="${esc(k.bukaUrl)}" target="_blank" rel="noopener noreferrer"
+          style="display:inline-block;background-color:#082018;border:1px solid ${E.panelBorder};color:${E.mint};text-decoration:none;font-size:13px;font-weight:700;padding:10px 20px;border-radius:10px;">
+         Buka di CRM &nbsp;&rarr;
+       </a>
+       <div class="em-mute" style="margin-top:7px;font-size:11px;color:${E.inkMute};">Nomor WhatsApp-nya belum terisi.</div>`;
+
+  return `
+          <tr><td bgcolor="${E.card}" style="padding:22px 28px 0;background-color:${E.card};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="padding-bottom:10px;border-bottom:1px solid ${E.dividerSolid};">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td valign="middle" style="padding:0;">
+                      <div class="em-ink" style="font-size:16px;font-weight:800;color:${E.ink};line-height:1.3;">${esc(k.nama)}</div>
+                    </td>
+                    <td valign="middle" align="right" style="padding:0;">
+                      <span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:${E.btnText};background-color:${E.mint};border-radius:999px;padding:4px 10px;white-space:nowrap;">
+                        ${k.total} aset &middot; kirim
+                      </span>
+                    </td>
+                  </tr>
+                </table>
+                <div class="em-mute" style="margin-top:5px;font-size:11.5px;color:${E.inkMute};line-height:1.6;">
+                  Mencari: ${esc(k.kriteria)}
+                  ${k.kontakTerakhir ? `<br><span style="color:${E.amber};">&#9200; Terakhir dihubungi ${esc(k.kontakTerakhir)}</span>` : ""}
+                </div>
+              </td></tr>
+            </table>
+          </td></tr>
+          <tr><td bgcolor="${E.card}" style="padding:12px 28px 0;background-color:${E.card};">
+            ${k.aset.map(asistenAsetCard).join("")}
+            ${sisa > 0 ? `<div class="em-mute" style="margin:2px 0 4px;font-size:11.5px;color:${E.inkMute};">&#43;${sisa} aset lain menunggu di CRM.</div>` : ""}
+          </td></tr>
+          <tr><td bgcolor="${E.card}" style="padding:8px 28px 0;background-color:${E.card};">
+            ${aksi}
+          </td></tr>`;
+}
+
+export function asistenAsetEmailHtml(o: AsistenAsetEmailOpts) {
+  const sapaan = esc((o.agentName || "").trim().split(/\s+/)[0] || "");
+  const jumlahKlien = o.klien.length;
+
+  /* ── JUDUL SEBAGAI PERINTAH, BUKAN LAPORAN ────────────────────────────
+     "3 aset baru untuk Bambang" menyampaikan fakta lalu berhenti. Agent
+     membacanya, mengangguk, dan menutup emailnya — tidak ada satu pun kata yang
+     menyuruhnya melakukan sesuatu.
+
+     Judulnya sekarang menyebut TINDAKANNYA. Bedanya kecil di halaman, besar di
+     kotak masuk: subjek yang berbunyi "Kirim 3 aset ke Bambang hari ini" sudah
+     memberi tahu apa yang harus terjadi bahkan sebelum emailnya dibuka.
+
+     Tanpa <br> paksa: judul rata kiri membungkus sendiri sesuai lebar layar,
+     sementara pemenggalan tetap akan salah tempat di separuh lebar yang ada. */
+  const headline =
+    jumlahKlien === 1
+      ? `Kirim ${o.totalAset} aset ini ke ${esc(o.klien[0].nama.split(/\s+/)[0])} hari ini &#128640;`
+      : `${jumlahKlien} klien Anda menunggu aset baru hari ini &#128640;`;
+
+  const content = `
+          <!-- ── Bilah merek: logo KIRI, penanda kanan ──
+               Menggantikan logo terpusat 180px + pill terpusat yang bersama-sama
+               memakan sekitar 200px tinggi sebelum satu kata pun terbaca. Di
+               ponsel itu berarti seluruh layar pertama habis untuk merek —
+               padahal yang menunggu dibaca agent adalah nama kliennya. Susunan
+               mendatar memangkasnya jadi satu baris. -->
+          <tr><td bgcolor="${E.card}" style="padding:20px 28px 14px;background-color:${E.card};border-bottom:1px solid ${E.dividerSolid};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td valign="middle" style="padding:0;">
+                  <!-- Kunci merek: lambang + NAMA, sama dengan header situs
+                       (src/components/Layout/Header/Logo). Lambang sendirian
+                       tidak memberi tahu siapa pengirimnya, dan yang lebih
+                       menentukan: banyak klien email MEMBLOKIR gambar secara
+                       bawaan. Nama yang ditulis sebagai TEKS tetap terbaca di
+                       email yang gambarnya tidak dimuat — email tanpa identitas
+                       pengirim adalah email yang dilaporkan sebagai spam.
+                       Memakai kelas em-ink/em-mint, bukan hex mati, supaya
+                       tidak dibalik oleh mode gelap paksa di Outlook. -->
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td width="36" valign="middle" style="padding:0;">
+                        <img src="${URL_PUBLIK}/images/logo/LogoSolusindoPremier.png" alt="" width="36" height="36" style="display:block;width:36px;height:36px;border:0;" />
+                      </td>
+                      <td valign="middle" style="padding:0 0 0 9px;">
+                        <span class="em-ink" style="font-size:18px;font-weight:800;letter-spacing:-0.3px;color:${E.ink};white-space:nowrap;">Solusindo<span class="em-mint" style="color:${E.mint};">&nbsp;Aset</span></span>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+                <td valign="middle" align="right" style="padding:0;">
+                  <span class="em-mint" style="display:inline-block;font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:${E.mint};font-weight:800;background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:999px;padding:6px 13px;white-space:nowrap;">
+                    <span style="color:${E.emeraldBright};">&#9679;</span>&nbsp; Asisten Aset
+                  </span>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+
+          <!-- ── Judul: rata KIRI, bukan tengah ──
+               Teks rata tengah memaksa mata mencari awal tiap baris. Untuk
+               kalimat pemasaran itu wajar; untuk email kerja yang dipindai
+               sambil berjalan, rata kiri lebih cepat dibaca dan sejajar dengan
+               nama-nama klien di bawahnya. -->
+          <tr><td bgcolor="${E.card}" style="padding:20px 28px 0;background-color:${E.card};">
+            <h1 class="em-ink" style="margin:0;font-size:19px;line-height:1.35;font-weight:800;color:${E.ink};letter-spacing:-0.2px;">${headline}</h1>
+            <!-- SATU kalimat. Versi sebelumnya lima baris yang menjelaskan cara
+                 kerja tombolnya — penjelasan yang tidak dibutuhkan siapa pun yang
+                 sudah melihat tombol hijau besar di bawahnya. Yang perlu diketahui
+                 agent cuma dua: asetnya baru, dan belum pernah ia kirim. -->
+            <p class="em-soft" style="margin:7px 0 0;font-size:13px;line-height:1.55;color:${E.inkSoft};">
+              ${sapaan ? `${sapaan}, b` : "B"}aru masuk hari ini &amp; belum pernah Anda kirim.
+              <strong class="em-mint" style="color:${E.mint};font-weight:700;">Ketuk tombol hijau</strong> &mdash; WhatsApp langsung terbuka dengan pesannya.
+            </p>
+          </td></tr>
+
+          ${o.klien.map(asistenBlokKlien).join("")}
+
+          <!-- ── Penutup: jaminan sebagai PENANDA, bukan paragraf ──
+               Versi sebelumnya satu paragraf beremoji besar dengan baris kosong
+               di tengahnya: memakan enam baris untuk tiga fakta, dan tiga fakta
+               yang harus dibaca sebagai kalimat tidak akan dibaca sama sekali
+               pada email yang dibuka sambil berjalan. Sebagai penanda pendek
+               berbaris, ketiganya tertangkap dalam satu pandangan — dan justru
+               inilah yang membuat agent percaya pada isi email di atasnya. -->
+          <tr><td bgcolor="${E.card}" style="padding:24px 28px 0;background-color:${E.card};">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${E.panel}" class="em-panel" style="background-color:${E.panel};border:1px solid ${E.panelBorder};border-radius:14px;">
+              <tr>
+                <td style="padding:15px 16px 13px;">
+                  <div class="em-mint" style="font-size:10px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:${E.mint};">Sudah diperiksa sistem</div>
+                  <div style="margin-top:9px;line-height:2;">
+                    ${[
+                      "Masih tersedia",
+                      "Belum pernah Anda kirim",
+                      "Cocok dengan kriteria klien",
+                    ].map(t => `<span style="display:inline-block;font-size:11.5px;font-weight:700;color:${E.ink};background-color:${E.bg};border:1px solid ${E.dividerSolid};border-radius:7px;padding:5px 10px;margin:0 5px 5px 0;white-space:nowrap;"><span style="color:${E.emeraldBright};font-weight:800;">&#10003;</span>&nbsp; ${t}</span>`).join("")}
+                  </div>
+                  <div class="em-mute" style="margin-top:8px;font-size:11.5px;line-height:1.6;color:${E.inkMute};">
+                    Tidak ada yang terkirim otomatis &mdash; Anda tetap yang menekan kirim di WhatsApp.
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td></tr>`;
+
+  return renderEmailShell({
+    hideLogo: true,
+    title: `${BRAND} — Aset Baru untuk Klien Anda`,
+    preheader:
+      jumlahKlien === 1
+        ? `${o.totalAset} aset baru cocok untuk ${o.klien[0].nama}.`
+        : `${o.totalAset} aset baru cocok untuk ${jumlahKlien} klien Anda.`,
+    content,
+  });
+}
+
+export async function sendAsistenAsetEmail(
+  to: string,
+  opts: AsistenAsetEmailOpts,
+): Promise<{ delivered: boolean; reason?: string }> {
+  if (!isMailConfigured()) {
+    console.warn(
+      `\n📧 [DEV] SMTP belum dikonfigurasi. Email asisten aset untuk ${to} tidak dikirim.\n` +
+        `   ${opts.klien.length} klien · ${opts.totalAset} aset.\n`,
+    );
+    return { delivered: false, reason: "SMTP belum dikonfigurasi" };
+  }
+
+  /* Subjek menyebut tindakan + nama. Itu dua hal yang terlihat di daftar
+     kotak masuk sebelum emailnya dibuka, dan keduanya yang menentukan apakah
+     ia dibuka sama sekali. */
+  const subjek =
+    opts.klien.length === 1
+      ? `Kirim ${opts.totalAset} aset ke ${opts.klien[0].nama} — baru masuk hari ini`
+      : `${opts.klien.length} klien menunggu: ${opts.totalAset} aset baru siap dikirim`;
+
+  /* Teks polos bukan formalitas: sebagian klien email menampilkannya di
+     pratinjau, dan penyaring spam menilai email yang HANYA berisi HTML lebih
+     keras. Isinya sengaja memuat tautan CRM, bukan tautan satu-ketukan —
+     tautan bertanda tangan yang tercetak di teks polos gampang tersalin ke
+     tempat yang tidak semestinya. */
+  const plain = [
+    `${subjek}`,
+    "",
+    ...opts.klien.map(k => `• ${k.nama} (${k.kriteria}) — ${k.total} aset baru\n  ${k.bukaUrl}`),
+    "",
+    "Buka email versi HTML untuk mengirim langsung lewat WhatsApp.",
+    `${BRAND}`,
+  ].join("\n");
+
+  try {
+    await getTransport().sendMail({
+      from: `"Asisten Aset · ${BRAND}" <${GMAIL_USER}>`,
+      to,
+      subject: `${subjek} · ${BRAND}`,
+      text: plain,
+      html: asistenAsetEmailHtml(opts),
+      /* `cid` + `contentDisposition: inline` — tanpa keduanya nodemailer
+         melampirkannya sebagai berkas unduhan biasa, dan <img src="cid:…">
+         tetap kosong sementara suratnya jadi berat. */
+      attachments: (opts.lampiran ?? []).map(f => ({
+        filename: `${f.cid}.jpg`,
+        content: f.content,
+        cid: f.cid,
+        contentType: "image/jpeg",
+        contentDisposition: "inline" as const,
+      })),
+    });
+    return { delivered: true };
+  } catch (err) {
+    console.error("❌ Gagal mengirim email asisten aset:", err);
+    return { delivered: false, reason: "Gagal mengirim email" };
   }
 }

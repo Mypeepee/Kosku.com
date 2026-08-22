@@ -1,11 +1,27 @@
 import React from "react";
 import type { Metadata } from "next";
-import SearchHero from "@/app/Jual/searchhero";
+import { redirect } from "next/navigation";
+import SearchHero from "./SearchHero";
 import ProductList from "@/app/Jual/produklist";
 import prisma from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { buildLocationWhere } from "@/lib/listingLocationFilter";
+import { buildKataKunciWhere } from "@/lib/listingKataKunci";
+import {
+  ambilJarakKeTempat,
+  buildTempatWhere,
+  siapkanTempat,
+  urutkanTerdekat,
+} from "@/lib/listingTempatFilter";
+import TempatAktifBar from "@/components/listing/TempatAktifBar";
 import { parseCategoryDbList } from "@/lib/propertyType";
+import { OPSI_KAMAR_MANDI_TIPE, OPSI_TIPE_UNIT } from "@/lib/listingFilters";
+import {
+  buildOrderBy,
+  parseHalaman,
+  parseSort,
+  urlHalamanTerakhir,
+} from "@/lib/listingSort";
 
 // --- TIPE DATA URL PARAMETERS ---
 type Props = {
@@ -74,8 +90,9 @@ function normalizeAgentPhoto(fileId: string | null | undefined): string {
 // --- SERVER COMPONENT UTAMA ---
 export default async function SewaSearchPage({ searchParams }: Props) {
   // A. Parameter URL
-  const page =
-    typeof searchParams.page === "string" ? Number(searchParams.page) : 1;
+  // Divalidasi, bukan Number() mentah: "?page=abc" dulu jadi NaN → skip NaN →
+  // Prisma error → halaman 500.
+  const page = parseHalaman(searchParams.page);
   const kota =
     typeof searchParams.kota === "string" ? searchParams.kota : undefined;
   const tipe =
@@ -104,8 +121,11 @@ export default async function SewaSearchPage({ searchParams }: Props) {
     typeof searchParams.kondisi === "string" ? searchParams.kondisi : undefined;
   const legalitas =
     typeof searchParams.legalitas === "string" ? searchParams.legalitas : undefined;
-  const sort =
-    typeof searchParams.sort === "string" ? searchParams.sort : "desc";
+  // Urutan dinormalkan lewat katalog bersama (@/lib/listingSort); nilai lama
+  // "asc"/"desc" dan sisa sidebar lama ("relevansi"/"rating") ikut dikenali.
+  // Dihitung setelah tempatnya diketahui — "terdekat" hanya sah bila ada titik
+  // acuannya (lihat parseSort).
+  const sortMentah = searchParams.sort;
 
   // Filter harga & luas
   const minHarga =
@@ -121,53 +141,128 @@ export default async function SewaSearchPage({ searchParams }: Props) {
   const maxLB =
     typeof searchParams.maxLB === "string" ? Number(searchParams.maxLB) : undefined;
 
+  // Filter khusus sewa
+  const durasi =
+    typeof searchParams.durasi === "string" ? searchParams.durasi : undefined;
+  const gender =
+    typeof searchParams.gender === "string" ? searchParams.gender : undefined;
+  const kamarMandiTipeRaw =
+    typeof searchParams.kmTipe === "string" ? searchParams.kmTipe : undefined;
+  const kamarMandiTipe =
+    kamarMandiTipeRaw && OPSI_KAMAR_MANDI_TIPE.some((o) => o.value === kamarMandiTipeRaw)
+      ? kamarMandiTipeRaw
+      : undefined;
+  const tipeUnitRaw =
+    typeof searchParams.tipeUnit === "string" ? searchParams.tipeUnit : undefined;
+  const tipeUnit =
+    tipeUnitRaw && OPSI_TIPE_UNIT.some((o) => o.value === tipeUnitRaw)
+      ? tipeUnitRaw
+      : undefined;
+  const hotDeal = searchParams.hotDeal === "1";
+
   const limit = 30;
   const skip = (page - 1) * limit;
 
-  const buildPriceFilter = (): Prisma.ListingWhereInput | undefined => {
+  // Listing SEWA bisa punya >1 durasi sekaligus (harga_sewa_harian/mingguan/
+  // bulanan/tahunan, sekarang di tabel ListingSewaDetail) — saat user filter
+  // durasi tertentu, kita cari listing yang MENAWARKAN durasi itu (field-nya
+  // terisi), bukan hanya yang durasi utamanya sama. Range harga ikut ditarget
+  // ke kolom durasi tsb kalau dipilih.
+  const DURASI_FIELD_MAP = {
+    HARIAN: "harga_sewa_harian",
+    MINGGUAN: "harga_sewa_mingguan",
+    BULANAN: "harga_sewa_bulanan",
+    TAHUNAN: "harga_sewa_tahunan",
+  } as const;
+  const durasiField =
+    durasi && durasi in DURASI_FIELD_MAP
+      ? DURASI_FIELD_MAP[durasi as keyof typeof DURASI_FIELD_MAP]
+      : undefined;
+
+  // Filter harga generik (harga/harga_promo di Listing) — dipakai cuma kalau
+  // user TIDAK memilih durasi spesifik (lihat sewaDetailWhere di bawah).
+  // Memakai kolom `harga_efektif` — sama dengan yang dipakai "Urutkan → harga
+  // terendah" dan yang dicetak kartu, jadi filter dan urutan tidak mungkin
+  // saling bertentangan.
+  const buildGenericPriceFilter = (): Prisma.ListingWhereInput | undefined => {
     if (minHarga === undefined && maxHarga === undefined) return undefined;
     return {
-      OR: [
-        {
-          AND: [
-            { harga_promo: { gt: 0 } },
-            ...(minHarga !== undefined ? [{ harga_promo: { gte: minHarga } }] : []),
-            ...(maxHarga !== undefined ? [{ harga_promo: { lte: maxHarga } }] : []),
-          ],
-        },
-        {
-          AND: [
-            { OR: [{ harga_promo: null }, { harga_promo: { lte: 0 } }] },
-            ...(minHarga !== undefined ? [{ harga: { gte: minHarga } }] : []),
-            ...(maxHarga !== undefined ? [{ harga: { lte: maxHarga } }] : []),
-          ],
-        },
-      ],
+      harga_efektif: {
+        ...(minHarga !== undefined && { gte: minHarga }),
+        ...(maxHarga !== undefined && { lte: maxHarga }),
+      },
     };
   };
 
-  const priceFilter = buildPriceFilter();
+  // Semua filter yang menyasar tabel ListingSewaDetail (durasi+harga, gender)
+  // WAJIB digabung jadi SATU object relasi `sewaDetail` — kalau dipisah jadi
+  // beberapa spread `{ sewaDetail: {...} }`, spread belakangan akan menimpa
+  // yang sebelumnya karena sama-sama pakai key `sewaDetail`.
+  const sewaDetailFilter: Record<string, any> = {};
+  if (durasiField) {
+    sewaDetailFilter[durasiField] = {
+      not: null,
+      ...(minHarga !== undefined && { gte: minHarga }),
+      ...(maxHarga !== undefined && { lte: maxHarga }),
+    };
+  }
+  if (gender) {
+    sewaDetailFilter.kos_gender = { equals: gender as any };
+  }
+  if (kamarMandiTipe) {
+    sewaDetailFilter.kamar_mandi_tipe = { equals: kamarMandiTipe as any };
+  }
+  if (tipeUnit) {
+    sewaDetailFilter.tipe_unit = { equals: tipeUnit as any };
+  }
+  const hasSewaDetailFilter = Object.keys(sewaDetailFilter).length > 0;
+
+  const genericPriceFilter = durasiField ? undefined : buildGenericPriceFilter();
   const locationWhere = buildLocationWhere(searchParams);
+
+  // Filter "dekat X" — menangani `?dekat=…` maupun `?q=deket unesa`. Di /Sewa
+  // inilah fitur yang paling ditunggu: yang mencari kos hampir selalu memulai
+  // dari kampusnya, bukan dari nama kelurahan.
+  const siapTempat = await siapkanTempat(searchParams, { q, kota });
+  const tempatWhere = buildTempatWhere(siapTempat.tempat);
+  const sort = parseSort(sortMentah, "SEWA", siapTempat.chip?.nama);
   const kategoriList = parseCategoryDbList(searchParams.tipe);
 
   // B. WHERE — khusus SEWA
   const whereClause: Prisma.ListingWhereInput = {
     jenis_transaksi: "SEWA",
-    status_tayang: "TERSEDIA",
+    status_tayang: { in: ["TERSEDIA", "TERJUAL"] },
 
     ...(idPropertyRaw && { id_property: BigInt(idPropertyRaw) }),
 
-    ...(!idPropertyRaw && q && {
-      alamat_lengkap: { contains: q, mode: "insensitive" },
-    }),
 
-    ...(!idPropertyRaw && locationWhere && { AND: [locationWhere] }),
+    // Digabung dalam SATU daftar AND — dua kunci `AND` di objek yang sama akan
+    // saling menimpa, dan filter yang hilang diam-diam adalah kerusakan yang
+    // tidak terlihat sebagai kerusakan.
+    // Kata kunci, lokasi administratif, dan "dekat tempat" digabung dalam SATU
+    // daftar AND — dua kunci `AND` di objek yang sama akan saling menimpa, dan
+    // filter yang hilang diam-diam adalah kerusakan yang tidak terlihat
+    // sebagai kerusakan.
+    //
+    // Kata kunci memakai pembangun bersama (src/lib/listingKataKunci.ts): ia
+    // mencari lintas kolom, bukan cuma `alamat_lengkap`. "Dukuh Kupang" adalah
+    // nama KELURAHAN dan sering tidak tertulis ulang di dalam alamat — dicari
+    // di satu kolom saja, orang mengetik nama yang benar lalu mendapat nol.
+    ...(() => {
+      const and = [
+        buildKataKunciWhere(siapTempat.q),
+        locationWhere,
+        tempatWhere,
+      ].filter(Boolean) as Prisma.ListingWhereInput[];
+      return !idPropertyRaw && and.length ? { AND: and } : {};
+    })(),
 
     ...(!idPropertyRaw && kategoriList.length > 0 && {
       kategori: { in: kategoriList as any },
     }),
 
-    ...(!idPropertyRaw && priceFilter && priceFilter),
+    ...(!idPropertyRaw && genericPriceFilter && genericPriceFilter),
+    ...(!idPropertyRaw && hasSewaDetailFilter && { sewaDetail: sewaDetailFilter }),
 
     ...(!idPropertyRaw && minKT !== undefined && { kamar_tidur: { gte: minKT } }),
     ...(!idPropertyRaw && minKM !== undefined && { kamar_mandi: { gte: minKM } }),
@@ -179,34 +274,96 @@ export default async function SewaSearchPage({ searchParams }: Props) {
       kondisi_interior: { contains: kondisi, mode: "insensitive" },
     }),
     ...(!idPropertyRaw && legalitas && { legalitas: { equals: legalitas as any } }),
-  };
 
-  // C. SORTING
-  let orderBy: Prisma.ListingOrderByWithRelationInput = { tanggal_dibuat: "desc" };
-  if (sort === "asc") orderBy = { harga: "asc" };
-  else if (sort === "desc") orderBy = { harga: "desc" };
-
-  // D. QUERY
-  const [totalItems, propertiesRaw] = await prisma.$transaction([
-    prisma.listing.count({ where: whereClause }),
-    prisma.listing.findMany({
-      where: whereClause,
-      take: limit,
-      skip,
-      orderBy,
-      include: {
-        agent: {
-          select: {
-            nama_kantor: true,
-            foto_profil_url: true,
-            pengguna: { select: { nama_lengkap: true } },
-          },
-        },
+    // Luas bangunan — sebelumnya diparse (minLB/maxLB) tapi tidak pernah
+    // dituang ke where clause di halaman ini, jadi filternya terlihat aktif
+    // di drawer tapi tidak menyaring apa pun.
+    ...(!idPropertyRaw && (minLB !== undefined || maxLB !== undefined) && {
+      luas_bangunan: {
+        ...(minLB !== undefined && { gte: minLB }),
+        ...(maxLB !== undefined && { lte: maxLB }),
       },
     }),
-  ]);
+
+    ...(!idPropertyRaw && hotDeal && { is_hot_deal: true }),
+  };
+
+  // C. SORTING — satu aturan bersama untuk /Jual, /Sewa, /Lelang.
+  // "Harga terendah" memakai `harga_efektif` (harga promo bila ada), yaitu
+  // angka yang benar-benar tercetak di kartu. "Terluas" memakai luas BANGUNAN
+  // di konteks sewa, karena unit apartemen tidak punya luas tanah.
+  const orderBy = buildOrderBy(sort, "SEWA");
+
+  // D. QUERY
+  // `totalAktif` = seluruh listing sewa yang tayang, TANPA filter — dipakai
+  // badge hero ("N unit aktif") supaya angkanya tidak ikut berubah saat user
+  // mempersempit pencarian.
+  const sertakan = {
+    agent: {
+      select: {
+        nama_kantor: true,
+        foto_profil_url: true,
+        pengguna: { select: { nama_lengkap: true } },
+      },
+    },
+    sewaDetail: true,
+    // Cukup jumlahnya: card hanya perlu tahu ada >1 tipe kamar supaya harga
+    // ditampilkan sebagai "mulai dari". Detail tipenya urusan halaman detail,
+    // bukan daftar.
+    _count: { select: { kamarTipe: true } },
+  } as const;
+
+  // "Terdekat" diurut di luar `orderBy` — jaraknya ada di relasi to-many dan
+  // berbeda per tempat yang dicari. Lihat urutkanTerdekat().
+  const urutJarak =
+    sort === "terdekat" && siapTempat.tempat
+      ? await urutkanTerdekat(siapTempat.tempat, whereClause, page, limit)
+      : null;
+
+  const [totalItems, totalAktif, propertiesRaw] = urutJarak
+    ? [
+        urutJarak.total,
+        await prisma.listing.count({
+          where: { jenis_transaksi: "SEWA", status_tayang: "TERSEDIA" },
+        }),
+        await prisma.listing
+          .findMany({
+            where: { id_property: { in: urutJarak.ids } },
+            include: sertakan,
+          })
+          .then((baris) => {
+            // findMany tidak menjamin urutan daftar `in` — disusun ulang
+            // mengikuti jarak yang sudah dihitung.
+            const peta = new Map(baris.map((b) => [String(b.id_property), b]));
+            return urutJarak.ids
+              .map((id) => peta.get(String(id)))
+              .filter(Boolean) as typeof baris;
+          }),
+      ]
+    : await prisma.$transaction([
+        prisma.listing.count({ where: whereClause }),
+        prisma.listing.count({
+          where: { jenis_transaksi: "SEWA", status_tayang: "TERSEDIA" },
+        }),
+        prisma.listing.findMany({
+          where: whereClause,
+          take: limit,
+          skip,
+          orderBy,
+          include: sertakan,
+        }),
+      ]);
+
+  const petaJarak = await ambilJarakKeTempat(
+    siapTempat.tempat,
+    propertiesRaw.map((p) => p.id_property),
+  );
 
   const totalPages = Math.ceil(totalItems / limit);
+
+  // Halaman di luar jangkauan → geser ke halaman terakhir, bukan grid kosong.
+  const tujuan = urlHalamanTerakhir("/Sewa", searchParams, page, totalPages);
+  if (tujuan) redirect(tujuan);
 
   // E. FORMAT DATA
   const formattedData = propertiesRaw.map((item) => {
@@ -218,47 +375,88 @@ export default async function SewaSearchPage({ searchParams }: Props) {
       slug: item.slug,
       judul: item.judul,
       kota: item.kota,
+      kecamatan: item.kecamatan,
+      kelurahan: item.kelurahan,
       harga: Number(item.harga),
       harga_promo: item.harga_promo != null ? Number(item.harga_promo) : null,
       jenis_transaksi: item.jenis_transaksi,
       kategori: item.kategori,
+      status_tayang: item.status_tayang,
       gambar: foto_list[0] || "/images/hero/banner.jpg",
       foto_list,
       luas_tanah: item.luas_tanah ? Number(item.luas_tanah) : 0,
       luas_bangunan: item.luas_bangunan ? Number(item.luas_bangunan) : 0,
       kamar_tidur: item.kamar_tidur ?? 0,
       kamar_mandi: item.kamar_mandi ?? 0,
+      durasi_sewa: item.sewaDetail?.durasi_sewa ?? null,
+      fasilitas_kamar: item.sewaDetail?.fasilitas_kamar ?? null,
+      fasilitas_bersama: item.sewaDetail?.fasilitas_bersama ?? null,
+      peraturan: item.sewaDetail?.peraturan ?? null,
+      kos_gender: item.sewaDetail?.kos_gender ?? null,
+      kapasitas_penghuni: item.sewaDetail?.kapasitas_penghuni ?? null,
+      // Spesifikasi unit apartemen — dipakai card untuk menggantikan grid
+      // KT/KM/LT/LB yang tidak berlaku bagi unit apartemen.
+      tipe_unit: item.sewaDetail?.tipe_unit ?? null,
+      lantai_unit: item.sewaDetail?.lantai_unit ?? null,
+      kondisi_interior: item.kondisi_interior ?? null,
+      kamar_mandi_tipe: item.sewaDetail?.kamar_mandi_tipe ?? null,
+      kamar_tersedia: item.sewaDetail?.kamar_tersedia ?? null,
+      jumlah_tipe_kamar: item._count?.kamarTipe ?? 0,
+      // Patokan terdekat ("5 mnt ke UNAIR") — faktor keputusan utama penyewa
+      // kos, disimpan sebagai Json terstruktur di Listing.
+      akses_terdekat: Array.isArray(item.akses_terdekat)
+        ? (item.akses_terdekat as any[])
+        : [],
       agent_name: item.agent?.pengguna?.nama_lengkap || "Agent Premier",
       agent_photo: agentPhotoUrl,
       agent_office: item.agent?.nama_kantor || "Solusindo Aset",
       is_hot_deal: !!item.is_hot_deal,
+      // Nama tempatnya yang dicetak, bukan nama filternya: "152 m dari
+      // Universitas Ciputra" menjawab pertanyaan pembaca, "152 m dari Semua
+      // kampus" mengulang apa yang sudah ia ketik sendiri.
+      jarak_tempat: petaJarak.get(String(item.id_property)) ?? null,
     };
   });
 
   return (
     <main className="bg-[#0F0F0F] min-h-screen pb-20">
       <SearchHero
-        initialTab="sewa"
-        key={`${q ?? ""}_${idPropertyRaw ?? ""}_${kota ?? ""}_${tipe ?? ""}_${minHarga ?? ""}_${maxHarga ?? ""}_${minLT ?? ""}_${maxLT ?? ""}_${minLB ?? ""}_${maxLB ?? ""}`}
+        key={`${q ?? ""}_${siapTempat.chip?.nilai ?? ""}_${idPropertyRaw ?? ""}_${kota ?? ""}_${tipe ?? ""}_${durasi ?? ""}_${gender ?? ""}_${minHarga ?? ""}_${maxHarga ?? ""}`}
+        totalAktif={totalAktif}
         initial={{
-          q,
+          q: siapTempat.q,
+          dekat: siapTempat.chip,
+          radius: siapTempat.tempat?.radius,
           idProperty: idPropertyRaw,
           kota,
           tipe,
+          durasi,
+          gender,
           minHarga,
           maxHarga,
-          minLT,
-          maxLT,
-          minLB,
-          maxLB,
         }}
       />
 
+      {(siapTempat.chip || siapTempat.catatan) && (
+        <div className="container mx-auto px-4 mt-6">
+          <TempatAktifBar
+            tempat={siapTempat.chip}
+            radius={siapTempat.tempat?.radius}
+            jumlah={totalItems}
+            ditebak={siapTempat.ditebak}
+            kueriAsli={q}
+            catatan={siapTempat.catatan}
+          />
+        </div>
+      )}
+
       <ProductList
         initialData={formattedData}
+        namaTempat={siapTempat.chip?.nama ?? null}
         pagination={{ currentPage: page, totalPages, totalItems }}
         baseUrl="/Sewa"
         heading="Listing Sewa"
+        konteks="SEWA"
       />
     </main>
   );

@@ -1,80 +1,61 @@
 "use client";
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { GoogleMap, Circle, OverlayView, useJsApiLoader } from "@react-google-maps/api";
 import { Icon } from "@iconify/react";
+import {
+  KATEGORI_POI,
+  RADIUS_POI_METER,
+  URUTAN_KATEGORI,
+  formatJarak,
+  type KategoriPOI,
+  type TempatTerdekat,
+} from "@/lib/nearbyPlaces";
 
-interface POI {
-  id: string;
-  name: string;
-  type: string;
-  lat: number;
-  lon: number;
-  icon: string;
-  color: string;
-  category: string;
-}
+/**
+ * Peta detail properti — dipakai halaman Jual, Lelang, DAN Sewa.
+ *
+ * Dulu ada dua peta: Google Maps di Jual/Lelang, dan Leaflet (KosMap) di Sewa.
+ * Keduanya punya separuh dari yang dibutuhkan — Google Maps punya tampilan yang
+ * dipakai di seluruh situs, Leaflet punya pencarian fasilitas sekitar yang
+ * benar-benar berfungsi. Sekarang satu komponen.
+ *
+ * KOMPONEN INI TIDAK LAGI MENCARI SENDIRI. Dulu ia memanggil Overpass dari
+ * browser setiap kali dipasang; hasilnya seperti undian (server publik sering
+ * 504) dan permintaannya berulang untuk jawaban yang tidak pernah berubah.
+ * Sekarang pencarian dilakukan sekali di server dan disimpan
+ * (src/lib/nearbyPlaces.server.ts); peta menerima hasilnya sebagai prop, sama
+ * persis dengan yang dipakai daftar "yang ada di sekitar" di bawahnya — satu
+ * data, dua tampilan, mustahil berselisih.
+ */
 
 interface GoogleMapViewProps {
   address?: string;
   lat?: number | null;
   lng?: number | null;
+  /** Tempat di sekitar, hasil pemindaian server (lihat useSekitar). */
+  tempat?: TempatTerdekat[];
+  /** Radius pemindaian yang benar-benar dipakai — lingkaran & label ikut ini. */
+  radius?: number;
+  memuat?: boolean;
+  gagal?: boolean;
+  /** Tombol "Coba lagi" di kartu bawah-kiri. */
+  onUlang?: () => void;
 }
 
 const libraries: ('places')[] = ['places'];
 
 const mapContainerStyle = { width: "100%", height: "100%" };
 
-// ====== FOURSQUARE POI ======
-async function fetchPOIsWithFoursquare(lat: number, lon: number): Promise<POI[]> {
-  const API_KEY = process.env.NEXT_PUBLIC_FOURSQUARE_API_KEY;
-  if (!API_KEY) return [];
-  try {
-    const res = await fetch(
-      `https://api.foursquare.com/v3/places/nearby?ll=${lat},${lon}&radius=500&limit=50`,
-      { headers: { Accept: "application/json", Authorization: API_KEY } }
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!data.results) return [];
-    return data.results.map((place: any) => {
-      const categoryName = place.categories?.[0]?.name || "Unknown";
-      const style = getIconStyle(categoryName);
-      return {
-        id: place.fsq_id,
-        name: place.name,
-        type: categoryName,
-        lat: place.geocodes.main.latitude,
-        lon: place.geocodes.main.longitude,
-        ...style,
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-
-function getIconStyle(categoryName: string) {
-  const lower = categoryName.toLowerCase();
-  if (lower.includes("school") || lower.includes("university") || lower.includes("education"))
-    return { icon: "solar:diploma-bold-duotone", color: "#3b82f6", category: "Pendidikan" };
-  if (lower.includes("hospital") || lower.includes("clinic") || lower.includes("pharmacy"))
-    return { icon: "solar:health-bold-duotone", color: "#ef4444", category: "Kesehatan" };
-  if (lower.includes("mosque") || lower.includes("church") || lower.includes("temple"))
-    return { icon: "solar:mosque-bold-duotone", color: "#8b5cf6", category: "Ibadah" };
-  if (lower.includes("restaurant") || lower.includes("cafe") || lower.includes("food"))
-    return { icon: "solar:chef-hat-bold-duotone", color: "#f97316", category: "Kuliner" };
-  if (lower.includes("supermarket") || lower.includes("shop") || lower.includes("store"))
-    return { icon: "solar:cart-large-bold-duotone", color: "#fbbf24", category: "Belanja" };
-  if (lower.includes("bank") || lower.includes("atm"))
-    return { icon: "solar:card-bold-duotone", color: "#06b6d4", category: "Keuangan" };
-  if (lower.includes("bus") || lower.includes("station") || lower.includes("transit"))
-    return { icon: "solar:bus-bold-duotone", color: "#10b981", category: "Transportasi" };
-  if (lower.includes("police") || lower.includes("fire"))
-    return { icon: "solar:shield-check-bold-duotone", color: "#64748b", category: "Keamanan" };
-  return { icon: "solar:map-point-bold", color: "#94a3b8", category: "Lainnya" };
-}
-
-export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps) {
+export default function GoogleMapView({
+  address,
+  lat,
+  lng,
+  tempat,
+  radius = RADIUS_POI_METER,
+  memuat = false,
+  gagal = false,
+  onUlang,
+}: GoogleMapViewProps) {
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
     libraries,
@@ -84,9 +65,12 @@ export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps)
 
   const mapRef = useRef<google.maps.Map | null>(null);
   const [center, setCenter] = useState<google.maps.LatLngLiteral | null>(null);
-  const [nearbyPOI, setNearbyPOI] = useState<POI[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<KategoriPOI | "all">("all");
+  const [aktif, setAktif] = useState<TempatTerdekat | null>(null);
+
+  const nearbyPOI = useMemo(() => tempat ?? [], [tempat]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -115,8 +99,6 @@ export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps)
 
       if (finalLat != null && finalLng != null && !isNaN(finalLat) && !isNaN(finalLng)) {
         setCenter({ lat: finalLat, lng: finalLng });
-        const pois = await fetchPOIsWithFoursquare(finalLat, finalLng);
-        setNearbyPOI(pois);
       } else {
         setError("Data lokasi tidak tersedia");
       }
@@ -127,30 +109,54 @@ export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps)
     init();
   }, [isLoaded, lat, lng, address]);
 
-  const onMapLoad = useCallback((map: google.maps.Map) => {
-    mapRef.current = map;
-    if (center) {
-      map.setCenter(center);
-      map.setZoom(16);
-    }
-  }, [center]);
+  /** Kategori yang benar-benar ada hasilnya — chip kosong hanya menipu. */
+  const kategoriTersedia = useMemo(
+    () => URUTAN_KATEGORI.filter((k) => nearbyPOI.some((p) => p.kategori === k)),
+    [nearbyPOI],
+  );
+
+  const poiTampil = useMemo(
+    () => (filter === "all" ? nearbyPOI : nearbyPOI.filter((p) => p.kategori === filter)),
+    [nearbyPOI, filter],
+  );
+
+  /**
+   * Bingkai peta = lingkaran radius pemindaian, bukan zoom tetap 16.
+   *
+   * Radius pemindaian tidak selalu 800 m: aset pinggiran baru dapat cukup
+   * tetangga di 3 km. Dengan zoom mati di 16, lingkaran seluas itu keluar
+   * layar dan separuh pin jatuh di luar bingkai — pembaca melihat peta kosong
+   * padahal datanya ada. `fitBounds` membuat semua yang dihitung selalu
+   * terlihat, di lebar layar mana pun.
+   */
+  const pasKanBingkai = useCallback(
+    (map: google.maps.Map | null, titik: google.maps.LatLngLiteral | null) => {
+      if (!map || !titik) return;
+      map.setCenter(titik);
+      const lingkaran = new google.maps.Circle({ center: titik, radius });
+      const batas = lingkaran.getBounds();
+      if (batas) map.fitBounds(batas, 0);
+      else map.setZoom(16);
+    },
+    [radius],
+  );
+
+  const onMapLoad = useCallback(
+    (map: google.maps.Map) => {
+      mapRef.current = map;
+      pasKanBingkai(map, center);
+    },
+    [center, pasKanBingkai],
+  );
 
   // Ketika center selesai di-set (setelah geocoding), paksa map ke posisi yang benar
   useEffect(() => {
-    if (mapRef.current && center) {
-      mapRef.current.setCenter(center);
-      mapRef.current.setZoom(16);
-    }
-  }, [center]);
+    pasKanBingkai(mapRef.current, center);
+  }, [center, pasKanBingkai]);
 
   const handleZoomIn = () => mapRef.current?.setZoom((mapRef.current.getZoom() ?? 16) + 1);
   const handleZoomOut = () => mapRef.current?.setZoom((mapRef.current.getZoom() ?? 16) - 1);
-  const handleRecenter = () => {
-    if (mapRef.current && center) {
-      mapRef.current.setCenter(center);
-      mapRef.current.setZoom(16);
-    }
-  };
+  const handleRecenter = () => pasKanBingkai(mapRef.current, center);
 
   // ====== LOADING ======
   if (!isLoaded || loading) {
@@ -207,10 +213,12 @@ export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps)
           fullscreenControl: false,
         }}
       >
-        {/* Circle radius */}
+        {/* Lingkaran = radius pemindaian yang benar-benar dipakai, bukan angka
+            hiasan. Kalau ia menggambar 500 m sementara daftarnya menghitung
+            3 km, pembaca menyimpulkan jarak yang salah dari gambar. */}
         <Circle
           center={center}
-          radius={500}
+          radius={radius}
           options={{
             strokeColor: "#059669",
             strokeOpacity: 0.9,
@@ -272,35 +280,129 @@ export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps)
         </OverlayView>
 
         {/* POI markers */}
-        {nearbyPOI.map((p) => (
-          <OverlayView
-            key={p.id}
-            position={{ lat: p.lat, lng: p.lon }}
-            mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
-            getPixelPositionOffset={() => ({ x: 0, y: 0 })}
-          >
-            <div
-              title={`${p.name} — ${p.category}`}
-              style={{
-                position: "absolute",
-                transform: "translate(-50%, -50%)",
-                width: 36,
-                height: 36,
-                borderRadius: "50%",
-                background: p.color,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                border: "3px solid rgba(255,255,255,0.95)",
-                boxShadow: `0 4px 12px rgba(0,0,0,0.25), 0 0 0 2px ${p.color}33`,
-                cursor: "pointer",
-              }}
+        {poiTampil.map((p) => {
+          const k = KATEGORI_POI[p.kategori];
+          const dipilih = aktif?.id === p.id;
+          return (
+            <OverlayView
+              key={p.id}
+              position={{ lat: p.lat, lng: p.lon }}
+              mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+              getPixelPositionOffset={() => ({ x: 0, y: 0 })}
             >
-              <Icon icon={p.icon} style={{ color: "white", fontSize: 18 }} />
-            </div>
-          </OverlayView>
-        ))}
+              <div
+                style={{
+                  position: "absolute",
+                  transform: "translate(-50%, -50%)",
+                  zIndex: dipilih ? 20 : 1,
+                }}
+              >
+                <button
+                  onClick={() => setAktif(dipilih ? null : p)}
+                  title={`${p.nama} — ${k.label} · ${formatJarak(p.jarak)}`}
+                  aria-label={`${p.nama}, ${formatJarak(p.jarak)}`}
+                  style={{
+                    width: dipilih ? 40 : 34,
+                    height: dipilih ? 40 : 34,
+                    borderRadius: "50%",
+                    background: k.warna,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "3px solid rgba(255,255,255,0.95)",
+                    boxShadow: `0 4px 12px rgba(0,0,0,0.25), 0 0 0 2px ${k.warna}33`,
+                    cursor: "pointer",
+                    transition: "width 160ms ease, height 160ms ease",
+                  }}
+                >
+                  <Icon icon={k.icon} style={{ color: "white", fontSize: dipilih ? 20 : 17 }} />
+                </button>
+
+                {/* Label hanya muncul saat pin diklik. Kalau semua pin berlabel,
+                    peta padat justru tidak terbaca — persis masalah yang bikin
+                    nama POI disembunyikan di peta mana pun. */}
+                {dipilih && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: "calc(100% + 8px)",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      whiteSpace: "nowrap",
+                      background: "rgba(255,255,255,0.97)",
+                      borderRadius: 12,
+                      padding: "6px 10px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <p style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                      {p.nama}
+                    </p>
+                    <p style={{ fontSize: 10, color: "#64748b", margin: 0 }}>
+                      {k.label} · {formatJarak(p.jarak)}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </OverlayView>
+          );
+        })}
       </GoogleMap>
+
+      {/* ── Filter kategori (atas-kiri) ──
+          Dibawa dari peta Sewa: tanpa penyaring, 60 pin dari 10 kategori jadi
+          satu kerumunan warna dan pertanyaan "ada apotek tidak di sini?" tetap
+          tidak terjawab. Hanya kategori yang ADA hasilnya yang ditampilkan. */}
+      {kategoriTersedia.length > 0 && (
+        <div className="absolute left-4 right-20 top-4 z-[500] flex gap-2 overflow-x-auto hide-scrollbar">
+          <button
+            onClick={() => {
+              setFilter("all");
+              setAktif(null);
+            }}
+            className={`shrink-0 rounded-full px-3.5 py-2 text-xs font-bold shadow-lg backdrop-blur-2xl transition-all ${
+              filter === "all"
+                ? "bg-slate-900 text-white"
+                : "border border-white/40 bg-white/80 text-slate-700 hover:bg-white"
+            }`}
+          >
+            Semua {nearbyPOI.length}
+          </button>
+
+          {kategoriTersedia.map((k) => {
+            const cfg = KATEGORI_POI[k];
+            const jumlah = nearbyPOI.filter((p) => p.kategori === k).length;
+            const dipilih = filter === k;
+            return (
+              <button
+                key={k}
+                onClick={() => {
+                  setFilter(dipilih ? "all" : k);
+                  setAktif(null);
+                }}
+                className="flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold shadow-lg backdrop-blur-2xl transition-all"
+                style={
+                  dipilih
+                    ? { background: cfg.warna, color: "#fff" }
+                    : {
+                        background: "rgba(255,255,255,0.85)",
+                        color: "#334155",
+                        border: "1px solid rgba(255,255,255,0.5)",
+                      }
+                }
+              >
+                <Icon
+                  icon={cfg.icon}
+                  style={{ fontSize: 15, color: dipilih ? "#fff" : cfg.warna }}
+                />
+                {cfg.label}
+                <span className={dipilih ? "opacity-80" : "text-slate-400"}>{jumlah}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Glassmorphism controls (top right) */}
       <div className="absolute top-4 right-4 z-[500] flex flex-col gap-2">
@@ -341,13 +443,33 @@ export default function GoogleMapView({ address, lat, lng }: GoogleMapViewProps)
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg">
               <Icon icon="solar:map-point-search-bold-duotone" className="text-xl text-white" />
             </div>
-            <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-400 rounded-full border-2 border-white shadow-sm flex items-center justify-center">
-              <span className="text-[8px] font-bold text-white">{nearbyPOI.length}</span>
+            <div className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full border-2 border-white bg-emerald-400 px-1 shadow-sm">
+              <span className="text-[8px] font-bold text-white">{poiTampil.length}</span>
             </div>
           </div>
           <div>
-            <p className="text-[10px] text-slate-600 font-medium">Fasilitas Terdekat</p>
-            <p className="text-sm font-bold text-slate-800">{nearbyPOI.length} Lokasi</p>
+            <p className="text-[10px] font-medium text-slate-600">Fasilitas Terdekat</p>
+            <p className="text-sm font-bold text-slate-800">
+              {memuat
+                ? "Mencari…"
+                : gagal
+                  ? "Gagal dimuat"
+                  : `${poiTampil.length} Lokasi`}
+            </p>
+            {gagal && onUlang ? (
+              <button
+                onClick={onUlang}
+                className="text-[9px] font-bold text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+              >
+                Coba lagi
+              </button>
+            ) : (
+              <p className="text-[9px] font-medium text-slate-500">
+                {filter === "all"
+                  ? `Radius ${radius >= 1000 ? `${(radius / 1000).toFixed(1).replace(".", ",")} km` : `${radius} m`}`
+                  : KATEGORI_POI[filter].label}
+              </p>
+            )}
           </div>
         </div>
       </div>

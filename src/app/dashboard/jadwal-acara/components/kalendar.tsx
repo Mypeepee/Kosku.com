@@ -4,16 +4,8 @@ import { useState, useMemo } from "react";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getHolidaysForMonth } from "@/lib/holidays-id";
+import type { EventData } from "../lib/acara-types";
 
-interface EventData {
-  id_acara: string;
-  judul_acara: string;
-  tanggal_mulai: string;
-  tanggal_selesai: string;
-  tipe_acara: string;
-  agent?: { id_agent?: string } | null;
-  [key: string]: any;
-}
 
 interface KalendarProps {
   currentDate: Date;
