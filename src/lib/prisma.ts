@@ -53,8 +53,25 @@ export function petunjukClientBasi(): string | null {
   try {
     // require dipanggil di dalam fungsi supaya `fs` tidak pernah ikut terbawa
     // ke bundel mana pun yang kebetulan menyentuh berkas ini.
-    const fs = require("fs") as typeof import("fs");
-    const jalur = require.resolve(".prisma/client/index.js");
+    //
+    // Dan diambil lewat eval, bukan dipakai langsung. Ini bukan gaya-gayaan:
+    // `require.resolve(".prisma/client/index.js")` dengan string literal
+    // dianalisis webpack secara statis, sehingga client Prisma hasil generate
+    // IKUT DIBUNDEL ke setiap rute yang menyentuh berkas ini. Daftar
+    // `serverComponentsExternalPackages` di next.config.mjs tidak menolong —
+    // externals hanya berlaku untuk `require`/`import`, tidak untuk dependensi
+    // `require.resolve`. Akibatnya `next build` gagal total dengan:
+    //
+    //     ./node_modules/.prisma/client/index.js
+    //     Self-reference dependency has unused export name: This should not happen
+    //
+    // karena package.json hasil generate Prisma punya field `exports` dengan
+    // `name` berbasis hash skema. Membungkusnya dengan eval memutus analisis
+    // statis itu tanpa mengubah perilaku saat dijalankan: di Node ia tetap
+    // `require` yang asli.
+    const req = eval("require") as NodeRequire;
+    const fs = req("fs") as typeof import("fs");
+    const jalur = req.resolve(".prisma/client/index.js");
     const ditulis = fs.statSync(jalur).mtimeMs;
     const prosesMulai = Date.now() - process.uptime() * 1000;
     if (ditulis <= prosesMulai) return null;
