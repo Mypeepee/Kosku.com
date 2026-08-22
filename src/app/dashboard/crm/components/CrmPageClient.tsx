@@ -7,18 +7,15 @@ import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
 import KlienFormModal from "./KlienFormModal";
 import {
+  FormPreferensi,
   formatRupiah as fmtRup,
   locFieldsToRegion,
   buildPrefPayloads,
-  TIPE_ICONS,
-  TIPE_LABELS,
-  TUJUAN_OPTIONS,
-} from "./KlienFormModal";
+  sidikKriteria,
+  type PickerPref,
+} from "./FormPreferensi";
 import { PremiumSelect, PremiumDateTimePicker, type PremiumOption } from "./CrmFormControls";
 import RingkasanCrm, { rupiahRingkas, RATE_KOMISI, type StatistikCrm } from "./RingkasanCrm";
-import TypePicker from "@/components/search/TypePicker";
-import LocationPicker from "@/components/search/LocationPicker";
-import KeywordField from "@/components/search/KeywordField";
 import { regionKey, type SelectedRegion } from "@/lib/regionSearch";
 import { rapikanAlamat, saringAlasan } from "@/lib/klienRingkas";
 import { pathListing } from "@/lib/klienPesan";
@@ -28,15 +25,6 @@ import {
   EMPTY_PREFERENSI, SUMBER_LABEL, JENIS_TRANSAKSI_LABEL, TIPE_PROPERTI_LABEL,
   SERTIFIKAT_LABEL, type Sertifikat,
 } from "./types";
-
-/* Opsi jenis transaksi untuk inline edit preferensi */
-const JENIS_EDIT_OPTIONS: PremiumOption[] = [
-  { value: "", label: "-- Semua --" },
-  ...(Object.entries(JENIS_TRANSAKSI_LABEL) as [string, string][]).map(([k, v]) => ({ value: k, label: v })),
-];
-
-/* Input style untuk inline edit preferensi */
-const editInputCls = "w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-[13px] text-white placeholder-slate-600 outline-none transition-all focus:border-emerald-400/40 focus:bg-white/[0.05]";
 
 /* ────────────────────────────────────────────────────────────
    THEME — per-status visual language (futuristic glass + glow)
@@ -107,12 +95,6 @@ const STATUS_THEME: Record<KlienStatus, StatusTheme> = {
     tint: "from-slate-500/[0.05]",
   },
 };
-
-const SERTIFIKAT_OPTIONS: PremiumOption[] = [
-  { value: "", label: "Tidak masalah" },
-  ...(["SHM", "HGB", "HGU", "HP", "AJB", "PPJB", "LAINNYA"] as Sertifikat[])
-    .map(s => ({ value: s, label: SERTIFIKAT_LABEL[s] })),
-];
 
 const PIPELINE_ORDER: KlienStatus[] = [
   "lead_baru", "sudah_dikontak", "hot_buyer", "closing", "lost_iseng",
@@ -331,6 +313,10 @@ export default function CrmPageClient() {
      kalimat "24 aset cocok" yang tidak bisa ditindaklanjuti hanya memindahkan
      pekerjaan membuka layar, tidak menghapusnya. */
   const [kabarKriteria, setKabarKriteria] = useState<{ id: string; nama: string; jumlah: number } | null>(null);
+  /* Penanda "ringkasan sudah tidak mewakili keadaan". Dinaikkan dari SATU
+     tempat — `kriteriaBerubah` — dan sesudah asisten aset ditutup, karena
+     mengirim aset juga mengubah apa yang tersisa untuk dikirim. */
+  const [versiRingkasan, setVersiRingkasan] = useState(0);
   const jedaKabar = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const jedaCari = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -346,6 +332,7 @@ export default function CrmPageClient() {
    *  Simpanan tetap dibuang SEKETIKA; yang ditunda hanya pencarian ulangnya. */
   const kriteriaBerubah = useCallback((id: string, nama: string) => {
     buangSimpanan(id);
+    setVersiRingkasan(v => v + 1);
     if (jedaCari.current) clearTimeout(jedaCari.current);
     jedaCari.current = setTimeout(async () => {
       const jumlah = await cariUlangDiamDiam(id);
@@ -394,6 +381,20 @@ export default function CrmPageClient() {
   const [editTarget, setEditTarget] = useState<Klien | undefined>(undefined);
   const [detailOpen, setDetailOpen] = useState<Klien | null>(null);
   const [deleting, setDeleting]   = useState<string | null>(null);
+  /* ── MODE PILIH ──
+     Membuang dua belas prospek sampah satu per satu berarti dua belas geseran,
+     dua belas konfirmasi, dan dua belas putaran jaringan. Tapi mode ini
+     DINYALAKAN agent, tidak menyala sendiri: daftar ini jauh lebih sering
+     dibaca daripada dihapus, dan kotak centang yang menempel permanen di tiap
+     baris membuat papan klien terbaca seperti formulir. */
+  const [modePilih, setModePilih]   = useState(false);
+  const [terpilih, setTerpilih]     = useState<Set<string>>(() => new Set());
+  const [konfirmasiMassal, setKonfirmasiMassal] = useState(false);
+  const [menghapusMassal, setMenghapusMassal]   = useState(false);
+  /* Kegagalan hapus massal ditampilkan DI DALAM kotak konfirmasinya, bukan
+     lewat toast hijau di sudut layar: di situlah mata agent sedang berada, dan
+     pilihannya masih utuh untuk dicoba lagi. */
+  const [gagalMassal, setGagalMassal] = useState<string | null>(null);
   const [syncMsg, setSyncMsg]     = useState<string | null>(null);
   const [stat, setStat]           = useState<StatistikCrm | null>(null);
   const [statLoading, setStatLoading] = useState(true);
@@ -529,6 +530,105 @@ export default function CrmPageClient() {
     () => barisKlien.filter(k => k.status !== "lost_iseng" && k.tanggal_follow_up && selisihHari(k.tanggal_follow_up) < 0).length,
     [barisKlien],
   );
+
+  /* Pilihan selalu dibatasi pada baris yang SEDANG TAMPIL. "Pilih semua" yang
+     diam-diam ikut mencentang klien di balik filter status — lalu
+     menghapusnya — adalah kejutan, bukan kemudahan. */
+  const idTampil = useMemo(() => barisKlien.map(k => k.id_klien), [barisKlien]);
+  const terpilihTampil = useMemo(() => idTampil.filter(id => terpilih.has(id)), [idTampil, terpilih]);
+  const semuaTerpilih = idTampil.length > 0 && terpilihTampil.length === idTampil.length;
+
+  /* Filter berganti, pencarian diketik, sinkron menarik daftar baru — baris
+     yang tercentang bisa lenyap dari layar sambil tetap tercatat terpilih.
+     Tanpa pemangkasan ini tombol "Hapus 5 klien" menghitung orang yang tidak
+     terlihat di mana pun, dan menepatinya. */
+  useEffect(() => {
+    setTerpilih(prev => {
+      if (prev.size === 0) return prev;
+      const ada = new Set(idTampil);
+      const n = new Set<string>();
+      prev.forEach(id => { if (ada.has(id)) n.add(id); });
+      return n.size === prev.size ? prev : n;
+    });
+  }, [idTampil]);
+
+  const togglePilih = useCallback((id: string) => {
+    setTerpilih(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }, []);
+
+  const toggleSemua = useCallback(() => {
+    setTerpilih(prev => idTampil.length > 0 && idTampil.every(id => prev.has(id))
+      ? new Set<string>()
+      : new Set(idTampil));
+  }, [idTampil]);
+
+  const keluarModePilih = useCallback(() => {
+    setModePilih(false);
+    setTerpilih(new Set());
+    setKonfirmasiMassal(false);
+    setGagalMassal(null);
+  }, []);
+
+  /* Esc mengakhiri mode pilih. Sebuah mode yang mengubah arti ketukan di
+     SELURUH daftar harus punya jalan keluar yang tidak perlu dicari dulu. */
+  useEffect(() => {
+    if (!modePilih) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || menghapusMassal) return;
+      if (konfirmasiMassal) setKonfirmasiMassal(false); else keluarModePilih();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modePilih, konfirmasiMassal, menghapusMassal, keluarModePilih]);
+
+  /* SATU permintaan untuk seluruh pilihan, bukan satu DELETE per klien. Lima
+     puluh penghapusan berurutan dari browser bisa berhenti di tengah jalan --
+     sebagian terhapus, sebagian tidak, dan tak seorang pun tahu sampai mana.
+     Baris yang hilang dari layar adalah baris yang DIJAWAB server sebagai
+     terhapus, bukan yang dikirim: id milik agent lain (atau yang sudah
+     terhapus lebih dulu) tidak boleh lenyap dari layar seolah berhasil. */
+  async function hapusTerpilih() {
+    const ids = terpilihTampil;
+    if (ids.length === 0 || menghapusMassal) return;
+    setMenghapusMassal(true);
+    setGagalMassal(null);
+    try {
+      const res  = await fetch("/api/dashboard/klien/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const json = await res.json().catch(() => null);
+      const terhapus: string[] = json?.ok && Array.isArray(json.deleted) ? json.deleted : [];
+
+      if (terhapus.length === 0) {
+        setGagalMassal(json?.message || "Gagal menghapus. Coba lagi.");
+        return;
+      }
+
+      /* Simpanan hasil pencarian milik klien yang sudah tidak ada tidak akan
+         pernah dibaca lagi — tapi id klien dipakai ulang bukan hal mustahil,
+         dan simpanan yatim yang kebetulan cocok akan menampilkan aset milik
+         orang lain. */
+      const hilang = new Set(terhapus);
+      terhapus.forEach(buangSimpanan);
+      setItems(prev => prev.filter(k => !hilang.has(k.id_klien)));
+      setTotal(t => Math.max(0, t - terhapus.length));
+      if (detailOpen && hilang.has(detailOpen.id_klien)) setDetailOpen(null);
+      muatStatistik();
+      setSyncMsg(`${terhapus.length} klien dihapus`);
+      setTimeout(() => setSyncMsg(null), 4000);
+      keluarModePilih();
+    } catch {
+      setGagalMassal("Gagal menghapus. Periksa koneksi lalu coba lagi.");
+    } finally {
+      setMenghapusMassal(false);
+    }
+  }
 
   function handleSaved(k: Klien) {
     muatStatistik();
@@ -724,7 +824,7 @@ export default function CrmPageClient() {
             <>
               {/* Baris konteks di atas daftar: berapa yang tampil, dan — kalau
                   ada — berapa janji yang sudah lewat di antaranya. */}
-              <PanelSiapKirim onPilih={(id, nama) => setAsetUntuk({ id, nama })} />
+              <PanelSiapKirim versi={versiRingkasan} onPilih={(id, nama) => setAsetUntuk({ id, nama })} />
 
               <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11.5px]">
                 <span className="text-slate-500">
@@ -737,6 +837,37 @@ export default function CrmPageClient() {
                     {telatTampil} follow-up telat
                   </span>
                 )}
+
+                {/* Saklar mode pilih. Ditaruh di baris hitungan, bukan di
+                    toolbar yang menempel: ia milik DAFTAR di bawahnya, dan
+                    kepala tabel — tempat kotak "pilih semua" berdiri — cuma
+                    ada di layar lebar. Di ponsel inilah satu-satunya jalan
+                    masuknya. */}
+                {!modePilih ? (
+                  <button
+                    onClick={() => setModePilih(true)}
+                    className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 font-semibold text-slate-400 transition-colors hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
+                  >
+                    <Icon icon="solar:check-square-bold-duotone" className="text-[14px]" />
+                    Pilih
+                  </button>
+                ) : (
+                  <div className="ml-auto inline-flex shrink-0 items-center gap-2">
+                    <button
+                      onClick={toggleSemua}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/[0.12] px-2.5 py-1 font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                    >
+                      <Icon icon={semuaTerpilih ? "solar:check-square-bold" : "solar:check-square-linear"} className="text-[14px]" />
+                      {semuaTerpilih ? "Batal pilih" : `Pilih semua ${barisKlien.length}`}
+                    </button>
+                    <button
+                      onClick={keluarModePilih}
+                      className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 font-semibold text-slate-400 transition-colors hover:text-white"
+                    >
+                      Selesai
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-gradient-to-b from-white/[0.035] to-white/[0.015] backdrop-blur-xl">
@@ -744,7 +875,17 @@ export default function CrmPageClient() {
                     membawa labelnya sendiri lewat bentuk, bukan lewat header
                     yang menggulir pergi. */}
                 <div className={`hidden border-b border-white/[0.07] bg-white/[0.02] px-4 py-2.5 text-[9.5px] font-extrabold uppercase tracking-[0.14em] text-slate-500 lg:grid ${KOLOM_DAFTAR} lg:items-center lg:gap-4`}>
-                  <span>Klien</span>
+                  <span className="flex items-center gap-2.5">
+                    {modePilih && (
+                      <KotakCentang
+                        dipilih={semuaTerpilih}
+                        sebagian={terpilihTampil.length > 0 && !semuaTerpilih}
+                        onClick={toggleSemua}
+                        label="Pilih semua klien yang tampil"
+                      />
+                    )}
+                    Klien
+                  </span>
                   <span>Yang dicari</span>
                   <span>Budget &amp; komisi</span>
                   <span>Follow-up</span>
@@ -768,6 +909,9 @@ export default function CrmPageClient() {
                         onOpen={() => setDetailOpen(klien)}
                         onMove={(st) => moveStatus(klien.id_klien, st)}
                         onAset={() => setAsetUntuk({ id: klien.id_klien, nama: klien.nama })}
+                        modePilih={modePilih}
+                        dipilih={terpilih.has(klien.id_klien)}
+                        onTogglePilih={() => togglePilih(klien.id_klien)}
                       />
                     ))}
                   </AnimatePresence>
@@ -801,17 +945,11 @@ export default function CrmPageClient() {
             setDetailOpen(d => d ? strip(d) : null);
             setItems(prev => prev.map(k => k.id_klien === detailOpen.id_klien ? strip(k) : k));
           }}
-          onPrefGroupUpdated={(oldIds, newPrefs) => {
+          onPrefGroupSynced={(semua) => {
             kriteriaBerubah(detailOpen.id_klien, detailOpen.nama);
-            const replace = (k: Klien) => ({
-              ...k,
-              preferensi: [
-                ...k.preferensi.filter(p => !oldIds.includes(p.id_preferensi)),
-                ...newPrefs,
-              ],
-            });
-            setDetailOpen(d => d ? replace(d) : null);
-            setItems(prev => prev.map(k => k.id_klien === detailOpen!.id_klien ? replace(k) : k));
+            const pasang = (k: Klien) => ({ ...k, preferensi: semua });
+            setDetailOpen(d => d ? pasang(d) : null);
+            setItems(prev => prev.map(k => k.id_klien === detailOpen!.id_klien ? pasang(k) : k));
           }}
         />
       )}
@@ -869,6 +1007,131 @@ export default function CrmPageClient() {
         )}
       </AnimatePresence>
 
+      {/* ── BILAH AKSI MODE PILIH ──
+          Menempel di dasar layar, bukan di kepala halaman. Yang dipandangi
+          orang saat memilih adalah barisnya; tombol hapus yang ikut menggulir
+          pergi bersama header memaksa gulir balik hanya untuk mengakhiri
+          pekerjaan yang baru saja selesai dikerjakan. */}
+      <AnimatePresence>
+        {modePilih && (
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed inset-x-0 bottom-5 z-[70] flex justify-center px-4"
+          >
+            <div className="flex w-full max-w-md items-center gap-2 rounded-2xl border border-white/[0.1] bg-[#0a0c12]/95 p-2 pl-3.5 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.9)] backdrop-blur-xl">
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-slate-400">
+                {terpilihTampil.length > 0
+                  ? <><b className="text-white">{terpilihTampil.length}</b> klien dipilih</>
+                  : "Ketuk baris untuk memilih"}
+              </span>
+              <button
+                onClick={keluarModePilih}
+                className="shrink-0 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[12.5px] font-semibold text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => { setGagalMassal(null); setKonfirmasiMassal(true); }}
+                disabled={terpilihTampil.length === 0}
+                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-b from-rose-500 to-rose-600 px-3.5 py-2 text-[12.5px] font-bold text-white shadow-[0_10px_28px_-12px_rgba(244,63,94,0.9)] transition-all hover:from-rose-400 hover:to-rose-500 active:scale-[0.97] disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-500 disabled:shadow-none"
+              >
+                <Icon icon="solar:trash-bin-trash-bold" className="text-[15px]" />
+                Hapus{terpilihTampil.length > 0 ? ` ${terpilihTampil.length}` : ""}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── KONFIRMASI HAPUS MASSAL ──
+          Laci geser meminta ketukan kedua di tempat, dan itu cukup untuk SATU
+          klien. Menghapus dua belas sekaligus tidak bisa dibatalkan dan tidak
+          bisa ditebak dari tombolnya saja, jadi kotak ini menyebutkan siapa
+          yang akan hilang — nama, bukan angka — sebelum menanyakannya. */}
+      <AnimatePresence>
+        {konfirmasiMassal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
+            onClick={() => { if (!menghapusMassal) setKonfirmasiMassal(false); }}
+            className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 20, scale: 0.97 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-sm rounded-2xl border border-rose-400/25 bg-[#0b0d12] p-5 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.95)]"
+            >
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-rose-400/25 bg-rose-500/[0.12] text-rose-300">
+                  <Icon icon="solar:trash-bin-trash-bold" className="text-[19px]" />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-bold tracking-tight text-white">
+                    Hapus {terpilihTampil.length} klien?
+                  </h3>
+                  <p className="mt-1 text-[12px] leading-relaxed text-slate-400">
+                    Preferensi dan riwayat rekomendasi yang menempel ikut terhapus.
+                    Tindakan ini tidak bisa dibatalkan.
+                  </p>
+                </div>
+              </div>
+
+              {/* Nama, bukan cuma jumlah: satu baris salah centang di antara
+                  dua belas tidak akan pernah ketahuan dari angka. */}
+              <div className="mt-3.5 max-h-40 overflow-y-auto rounded-xl border border-white/[0.07] bg-white/[0.02] p-2.5">
+                <ul className="space-y-1">
+                  {barisKlien
+                    .filter(k => terpilih.has(k.id_klien))
+                    .map(k => (
+                      <li key={k.id_klien} className="flex items-center gap-2 text-[12px] text-slate-300">
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_THEME[k.status].dot}`} />
+                        <span className="truncate font-semibold">{k.nama}</span>
+                        <span className="shrink-0 text-[10.5px] text-slate-600">
+                          {k.nomor_whatsapp ? `+${k.nomor_whatsapp}` : "tanpa nomor"}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+
+              {gagalMassal && (
+                <p className="mt-3 flex items-center gap-1.5 rounded-lg border border-rose-400/25 bg-rose-500/[0.1] px-2.5 py-1.5 text-[11.5px] font-semibold text-rose-200">
+                  <Icon icon="solar:danger-triangle-bold" className="shrink-0 text-[13px]" />
+                  {gagalMassal}
+                </p>
+              )}
+
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => setKonfirmasiMassal(false)}
+                  disabled={menghapusMassal}
+                  className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 text-[13px] font-semibold text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-40"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={hapusTerpilih}
+                  disabled={menghapusMassal}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-rose-500 to-rose-600 py-2.5 text-[13px] font-bold text-white shadow-[0_10px_28px_-12px_rgba(244,63,94,0.9)] transition-all hover:from-rose-400 hover:to-rose-500 active:scale-[0.98] disabled:opacity-60"
+                >
+                  {menghapusMassal
+                    ? <><Icon icon="svg-spinners:ring-resize" className="text-[15px]" /> Menghapus…</>
+                    : "Ya, hapus"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sync toast */}
       {syncMsg && (
         <div className="fixed inset-x-0 bottom-6 z-[80] flex justify-center px-4">
@@ -897,7 +1160,7 @@ export default function CrmPageClient() {
             if (new URLSearchParams(window.location.search).get("klien")) {
               window.history.replaceState({}, "", window.location.pathname);
             }
-            load(true); muatStatistik();
+            load(true); muatStatistik(); setVersiRingkasan(v => v + 1);
           }}
         />
       )}
@@ -1018,7 +1281,16 @@ function StatusDropdown({ value, onChange }: {
 
 type SiapKirim = { id_klien: string; nama: string; status: string; jumlah: number; punyaWa: boolean; telat: boolean };
 
-function PanelSiapKirim({ onPilih }: { onPilih: (id: string, nama: string) => void }) {
+function PanelSiapKirim({ versi, onPilih }: {
+  /** Naik setiap kali kriteria seorang klien berubah atau ada aset yang
+   *  dikirim. Tanpanya panel ini mengambil datanya SEKALI saat halaman dibuka
+   *  dan tidak pernah lagi: agent yang baru saja memperbaiki wilayah seorang
+   *  klien tetap membaca "12 aset" dari kriteria yang sudah ia ganti, dan
+   *  angka yang salah di panel paling menonjol di layar adalah cara tercepat
+   *  membuat seluruh fitur ini tidak dipercaya. */
+  versi: number;
+  onPilih: (id: string, nama: string) => void;
+}) {
   const [items, setItems] = useState<SiapKirim[]>([]);
   const [memuat, setMemuat] = useState(true);
 
@@ -1030,7 +1302,7 @@ function PanelSiapKirim({ onPilih }: { onPilih: (id: string, nama: string) => vo
       .catch(() => {})
       .finally(() => { if (hidup) setMemuat(false); });
     return () => { hidup = false; };
-  }, []);
+  }, [versi]);
 
   /* Sunyi saat memuat DAN saat kosong. Pencarian ini berjalan sungguhan di
      server, jadi ia tiba beberapa ratus milidetik setelah daftar klien —
@@ -1199,7 +1471,53 @@ const KOLOM_DAFTAR =
 /** Lebar laci hapus yang tersingkap saat baris digeser. */
 const LEBAR_HAPUS = 92;
 
-function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onEdit, onDelete, onOpen, onMove, onAset }: {
+/* ════════════════════════════════════════════════════════════
+   KOTAK CENTANG
+   ------------------------------------------------------------
+   Digambar sendiri, bukan <input type="checkbox">, dan itu bukan soal selera:
+   kotak bawaan mewarisi warna sistem operasi — di papan segelap ini ia muncul
+   sebagai kotak putih terang yang lebih menonjol daripada nama klien di
+   sebelahnya. Satu-satunya cara meredamnya (`appearance:none`) berarti
+   menggambar ulang seluruhnya juga, jadi sekalian.
+
+   Perannya tetap `checkbox`, bukan `button`: pembaca layar harus mengumumkan
+   "tercentang / tidak", dan keadaan SEBAGIAN — dipakai kotak "pilih semua" —
+   hanya punya nama di kosakata checkbox (`aria-checked="mixed"`).
+   ════════════════════════════════════════════════════════════ */
+function KotakCentang({ dipilih, sebagian, onClick, label }: {
+  dipilih: boolean;
+  /** Sebagian anggota tercentang. Kosong dan penuh saja tidak cukup
+   *  menjelaskan keadaan kotak "pilih semua" di kepala tabel. */
+  sebagian?: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  const aktif = dipilih || sebagian;
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={sebagian && !dipilih ? "mixed" : dipilih}
+      aria-label={label}
+      title={label}
+      onClick={e => { e.stopPropagation(); onClick(); }}
+      className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[6px] border transition-all active:scale-90 ${
+        aktif
+          ? "border-emerald-400 bg-emerald-500 text-[#04130d]"
+          : "border-white/25 bg-white/[0.04] text-transparent hover:border-emerald-400/70 hover:bg-emerald-500/[0.12]"
+      }`}
+    >
+      {/* SVG sebaris, bukan ikon Iconify: pada 18 px setiap setengah piksel
+          terlihat, dan bentuk yang digambar sendiri tidak pernah menunggu
+          jaringan untuk muncul. */}
+      <svg viewBox="0 0 16 16" className="h-[11px] w-[11px]" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+        {sebagian && !dipilih ? <path d="M4 8h8" /> : <path d="M3.5 8.5l3 3 6-6.5" />}
+      </svg>
+    </button>
+  );
+}
+
+function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onEdit, onDelete, onOpen, onMove, onAset, modePilih, dipilih, onTogglePilih }: {
   klien: Klien; indeks: number; deleting: boolean;
   /** Sekali seumur pemakaian: baris paling atas menggeser dirinya sendiri
    *  sedikit lalu kembali, memperlihatkan sesobek merah di baliknya. Gerakan
@@ -1214,6 +1532,13 @@ function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onE
   onEdit: () => void; onDelete: () => void; onOpen: () => void;
   onMove: (s: KlienStatus) => void;
   onAset: () => void;
+  /** Mode pilih-banyak sedang menyala. Saat menyala SELURUH baris jadi sasaran
+   *  centang — mengetuk di mana pun memilih, bukan membuka detail — dan geser
+   *  untuk hapus dimatikan supaya dua cara menghapus tidak berebut jempol yang
+   *  sama. */
+  modePilih: boolean;
+  dipilih: boolean;
+  onTogglePilih: () => void;
 }) {
   const theme = STATUS_THEME[klien.status];
   const prov  = provenanceOf(klien);
@@ -1248,6 +1573,10 @@ function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onE
 
   const bukaDetail = () => {
     if (baruGeser.current) return;
+    /* Di mode pilih, seluruh baris adalah sasaran centang. Memaksa jempol
+       mengenai kotak 18 px di ujung kiri untuk memilih dua belas orang adalah
+       persis pekerjaan yang mode ini ada untuk menghapusnya. */
+    if (modePilih) { onTogglePilih(); return; }
     if (terbuka) { onGeser(false); return; }  // geseran terbuka: ketukan pertama menutupnya
     onOpen();
   };
@@ -1266,11 +1595,11 @@ function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onE
           atasnya. Ikonnya membesar mengikuti terbukanya laci supaya geseran
           setengah jalan terasa seperti sesuatu yang sedang terjadi, bukan
           seperti lapisan yang tiba-tiba ada. */}
-      <div className={`absolute inset-y-0 right-0 flex items-stretch ${terbuka ? "" : "pointer-events-none"}`}>
+      <div className={`absolute inset-y-0 right-0 flex items-stretch ${terbuka ? "" : "pointer-events-none"} ${modePilih ? "hidden" : ""}`}>
         <button
           onClick={(e) => { e.stopPropagation(); if (yakin) onDelete(); else setYakin(true); }}
           aria-label={yakin ? `Konfirmasi hapus ${klien.nama}` : `Hapus ${klien.nama}`}
-          tabIndex={terbuka ? 0 : -1}
+          tabIndex={terbuka && !modePilih ? 0 : -1}
           style={{ width: LEBAR_HAPUS }}
           className={`flex flex-col items-center justify-center gap-0.5 text-white transition-colors ${
             yakin
@@ -1296,14 +1625,14 @@ function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onE
 
       {/* ── Baris ── */}
       <motion.div
-        drag="x"
+        drag={modePilih ? false : "x"}
         dragDirectionLock
         dragConstraints={{ left: -LEBAR_HAPUS, right: 0 }}
         /* Elastis hanya ke kiri. Menarik ke kanan tidak menyingkap apa pun,
            jadi memberinya karet cuma membuat baris terasa longgar. */
         dragElastic={{ left: 0.06, right: 0 }}
         dragMomentum={false}
-        animate={mengintip ? { x: [0, -30, 0] } : { x: terbuka ? -LEBAR_HAPUS : 0 }}
+        animate={mengintip && !modePilih ? { x: [0, -30, 0] } : { x: terbuka && !modePilih ? -LEBAR_HAPUS : 0 }}
         transition={
           mengintip
             ? { delay: 0.75, duration: 1, times: [0, 0.4, 1], ease: [0.4, 0, 0.2, 1] }
@@ -1322,7 +1651,12 @@ function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onE
         onClick={bukaDetail}
         role="button"
         tabIndex={0}
-        onKeyDown={e => { if (e.key === "Enter") onOpen(); }}
+        onKeyDown={e => {
+          if (e.key !== "Enter" && !(modePilih && e.key === " ")) return;
+          e.preventDefault();
+          if (modePilih) onTogglePilih(); else onOpen();
+        }}
+        aria-selected={modePilih ? dipilih : undefined}
         /* LATAR BARIS HARUS PADAT DI SEMUA KEADAAN — termasuk saat hover.
            Sebelumnya hover memakai `bg-white/[0.035]`, yang bukan menumpuk di
            atas warna dasar melainkan MENGGANTINYA: satu properti
@@ -1330,7 +1664,12 @@ function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onE
            putih 3,5% alias nyaris tembus pandang, dan laci hapus merah di
            belakangnya muncul begitu kursor lewat — tanpa ada yang menggeser
            apa pun. Warna hover-nya kini padat juga. */
-        className={`group relative cursor-pointer touch-pan-y select-none bg-[#0a0c0e] px-3 py-3 outline-none transition-colors duration-200 hover:bg-[#101318] focus-visible:bg-[#12151b] lg:grid ${KOLOM_DAFTAR} lg:items-center lg:gap-4 lg:px-4`}
+        /* Warna baris terpilih PADAT juga, dengan alasan yang sama seperti
+           hover di atas: warna emerald tembus pandang akan menyingkap laci
+           merah di belakangnya. */
+        className={`group relative cursor-pointer touch-pan-y select-none px-3 py-3 outline-none transition-colors duration-200 focus-visible:bg-[#12151b] lg:grid ${KOLOM_DAFTAR} lg:items-center lg:gap-4 lg:px-4 ${
+          dipilih ? "bg-[#0b1712] hover:bg-[#0f2019]" : "bg-[#0a0c0e] hover:bg-[#101318]"
+        }`}
       >
         {/* Rel status di tepi kiri: satu-satunya cara membaca tahap seluruh
             daftar dalam satu sapuan mata. */}
@@ -1341,6 +1680,13 @@ function KlienRow({ klien, indeks, deleting, terbuka, beriPetunjuk, onGeser, onE
 
         {/* ── 1. Klien ── */}
         <div className="relative flex min-w-0 items-center gap-3">
+          {modePilih && (
+            <KotakCentang
+              dipilih={dipilih}
+              onClick={onTogglePilih}
+              label={`${dipilih ? "Batal pilih" : "Pilih"} ${klien.nama}`}
+            />
+          )}
           <div className="relative shrink-0">
             <div className={`relative grid h-10 w-10 place-items-center overflow-hidden rounded-xl bg-gradient-to-br text-[13px] font-bold ring-1 transition-transform duration-300 group-hover:scale-105 ${theme.grad}`}>
               <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent" />
@@ -1630,308 +1976,6 @@ function DropdownTahap({ nilai, onPilih, gaya, tinggiPanel = 232 }: {
 }
 
 /* ════════════════════════════════════════════════════════════
-   FORMULIR PREFERENSI — dipakai TAMBAH dan EDIT
-   ------------------------------------------------------------
-   Diekstrak, bukan disalin. Formulir ini punya sembilan medan yang saling
-   berkaitan (tipe menentukan apakah luas tanah relevan, jenis transaksi
-   menentukan makna budget), dan dua salinan akan menyimpang pada perubahan
-   pertama — lalu "tambah" dan "edit" menerima kriteria yang berbeda untuk
-   klien yang sama, tanpa satu pun galat yang memberi tahu.
-   ════════════════════════════════════════════════════════════ */
-const KELAS_INPUT =
-  "w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-[12.5px] text-white placeholder-slate-600 outline-none transition-all focus:border-emerald-400/50 focus:bg-white/[0.05]";
-
-function FormPreferensi({
-  form, setForm, pickerTerbuka, setPicker, judul, ikon, labelSimpan, menyimpan, onBatal, onSimpan, className,
-}: {
-  form: PreferensiForm;
-  setForm: (f: (p: PreferensiForm | null) => PreferensiForm | null) => void;
-  pickerTerbuka: "type" | "transaksi" | "location" | "tujuan" | "legalitas" | null;
-  setPicker: (v: "type" | "transaksi" | "location" | "tujuan" | "legalitas" | null) => void;
-  judul: string;
-  ikon: string;
-  labelSimpan: string;
-  menyimpan: boolean;
-  onBatal: () => void;
-  onSimpan: () => void;
-  /** Pembungkus opsional. Ada supaya komponen ini bisa jadi anak LANGSUNG
-   *  <AnimatePresence>: membungkusnya dengan <div> biasa membuat animasi keluar
-   *  tidak pernah berjalan — AnimatePresence hanya melihat anak langsungnya. */
-  className?: string;
-}) {
-  /* Teks yang sedang diketik di kolom patokan.
-     WAJIB ada keadaannya sendiri. `KeywordField` adalah input TERKENDALI: ia
-     menggambar apa pun yang diberikan lewat `value` dan menyerahkan tiap
-     ketikan ke `onChange`. Diberi `value=""` tetap dan `onChange` kosong —
-     seperti versi pertama saya — hurufnya memang masuk, tapi langsung dibuang
-     dan React menggambar ulang string kosong. Yang terlihat agent: kolomnya
-     tidak bisa diketik sama sekali.
-
-     Teksnya TIDAK ikut disimpan ke preferensi: yang disimpan hasil pilihannya
-     (`form.dekat`), bukan kata kunci yang dipakai mencarinya. */
-  const [teksDekat, setTeksDekat] = useState("");
-
-  /* ── YANG WAJIB ADALAH LOKASI, BUKAN TIPE ────────────────────────────────
-     Dulu terbalik, dan salah di kedua sisinya:
-
-       • Klien yang bilang "apa saja di Wiyung, budget 500 jt" tidak bisa
-         dicatat — agent terpaksa mencentang sembilan tipe satu per satu.
-       • Preferensi tanpa lokasi menyaring 120 ribu aset se-Indonesia; daftar
-         seperti itu tidak pernah berguna bagi siapa pun.
-
-     Tipe kosong sekarang berarti SEMUA TIPE, dan itu bawaan yang paling sering
-     benar: klien menyebut daerah dan anggaran jauh lebih dulu daripada
-     menyebut ia mau rumah atau ruko. */
-  const sah = form.locations.length > 0;
-
-  return (
-    <motion.div
-      key={judul}
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-      className={`space-y-3 p-3 ${className ?? ""}`}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500/20">
-            <Icon icon={ikon} className="text-[10px] text-emerald-300" />
-          </div>
-          <p className="text-[11px] font-bold text-emerald-300">{judul}</p>
-        </div>
-        <button onClick={onBatal} className="text-[10px] font-semibold text-slate-400 transition-colors hover:text-white">
-          Batal
-        </button>
-      </div>
-
-      {/* Tipe Properti */}
-      <div>
-        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-          Tipe Properti
-          <span className="ml-1 font-semibold normal-case tracking-normal text-slate-600">
-            — kosongkan = semua tipe
-          </span>
-        </label>
-        <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] transition-all hover:border-white/20">
-          <TypePicker
-            theme="dark"
-            label=""
-            value={form.tipe_properti.map(t => TIPE_PROPERTI_LABEL[t])}
-            onChange={labels =>
-              setForm(f => f ? { ...f, tipe_properti: labels.map(l => Object.entries(TIPE_PROPERTI_LABEL).find(([, v]) => v === l)?.[0] as TipeProperti).filter(Boolean) } : f)
-            }
-            options={TIPE_LABELS}
-            icons={TIPE_ICONS}
-            open={pickerTerbuka === "type"}
-            onOpenChange={v => setPicker(v ? "type" : null)}
-          />
-        </div>
-      </div>
-
-      {/* Jenis Transaksi */}
-      <div>
-        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Jenis Transaksi</label>
-        <PremiumSelect
-          value={form.jenis_transaksi}
-          onChange={v => setForm(f => f ? { ...f, jenis_transaksi: v as JenisTransaksi | "" } : f)}
-          placeholder="-- Semua --"
-          options={JENIS_EDIT_OPTIONS}
-          open={pickerTerbuka === "transaksi"}
-          onOpenChange={v => setPicker(v ? "transaksi" : null)}
-        />
-      </div>
-
-      {/* Lokasi */}
-      <div>
-        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-          Lokasi <span className="text-rose-400">*</span>
-          <span className="ml-1 font-semibold normal-case tracking-normal text-slate-600">
-            — provinsi sampai kelurahan
-          </span>
-        </label>
-        <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] px-1 transition-all hover:border-white/20">
-          <LocationPicker
-            theme="dark"
-            label=""
-            value={form.locations}
-            onChange={locs => setForm(f => f ? { ...f, locations: locs } : f)}
-            open={pickerTerbuka === "location"}
-            onOpenChange={v => setPicker(v ? "location" : null)}
-          />
-        </div>
-      </div>
-
-      {/* ── Dekat tempat ──
-          Memakai KeywordField yang SAMA dengan searchbar publik. Bukan demi
-          hemat kode: kalau preferensi punya pemilih tempatnya sendiri, agent
-          bisa memilih patokan yang tidak ada di kamus pencarian, dan hasil
-          "cari aset" akan berbeda dari hasil pencarian untuk kriteria yang
-          terlihat sama. */}
-      <div>
-        <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-          Patokan
-          <span className="ml-1 font-semibold normal-case tracking-normal text-slate-600">
-            — opsional · landmark atau nama jalan
-          </span>
-        </label>
-        <KeywordField
-          id="pref-dekat"
-          label=""
-          placeholder="mis. UNESA, hotel, atau Jalan Raya Darmo"
-          value={teksDekat}
-          onChange={setTeksDekat}
-          /* DI SINILAH nama jalan ditangani. Panel saran menawarkan dua hal:
-             daftar tempat dari kamus (landmark) dan satu baris "cari sebagai
-             alamat" untuk teks yang bukan tempat. Baris kedua memanggil
-             `onSubmit` — jadi di formulir ini onSubmit berarti "pakai teks ini
-             sebagai patokan alamat", bukan "kirim formulir".
-
-             Satu kolom melayani keduanya, dan itu disengaja: agent tidak perlu
-             tahu lebih dulu apakah "Graha Family" itu terdaftar sebagai tempat
-             atau cuma tertulis di alamat. Ia mengetik, lalu memilih. */
-          onSubmit={() => {
-            const t = teksDekat.trim();
-            if (t.length < 3) return;
-            setForm(f => f ? { ...f, alamat_teks: t, dekat: null } : f);
-            setTeksDekat("");
-          }}
-          theme="dark"
-          width="w-full"
-          dekat={form.dekat}
-          onPilihTempat={t => {
-            /* Keduanya saling meniadakan. Menyimpan landmark DAN teks alamat
-               sekaligus menghasilkan dua penyaring yang dipasang bersamaan —
-               hampir selalu nol hasil, dan agent tidak akan menduga sebabnya. */
-            setForm(f => f ? { ...f, dekat: t, alamat_teks: t ? "" : f.alamat_teks } : f);
-            /* Kotak teks dikosongkan begitu tempatnya terpilih: chip-nya sudah
-               mewakili pilihan itu, dan menyisakan "unesa" di kotak membuat
-               agent mengira ada dua kriteria yang aktif. */
-            if (t) setTeksDekat("");
-          }}
-        />
-        {form.dekat && (
-          <p className="mt-1 text-[10.5px] text-slate-500">
-            Radius {(form.dekat.radius / 1000).toFixed(1).replace(".", ",")} km dari {form.dekat.nama}
-          </p>
-        )}
-        {form.alamat_teks && (
-          <button
-            type="button"
-            onClick={() => setForm(f => f ? { ...f, alamat_teks: "" } : f)}
-            className="mt-1.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-sky-400/30 bg-sky-500/10 py-1 pl-2 pr-1.5 text-[11px] font-bold text-sky-200 transition-colors hover:bg-sky-500/20"
-          >
-            <Icon icon="solar:signpost-2-bold-duotone" className="shrink-0 text-xs" />
-            <span className="truncate">Alamat memuat “{form.alamat_teks}”</span>
-            <Icon icon="solar:close-circle-bold" className="shrink-0 text-sm opacity-70" />
-          </button>
-        )}
-      </div>
-
-      {/* Budget */}
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Budget Min (Rp)</label>
-          <input type="text" inputMode="numeric" placeholder="500.000.000"
-            value={form.budget_min}
-            onChange={e => setForm(f => f ? { ...f, budget_min: fmtRup(e.target.value) } : f)}
-            className={KELAS_INPUT} />
-        </div>
-        <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Budget Max (Rp)</label>
-          <input type="text" inputMode="numeric" placeholder="2.000.000.000"
-            value={form.budget_max}
-            onChange={e => setForm(f => f ? { ...f, budget_max: fmtRup(e.target.value) } : f)}
-            className={KELAS_INPUT} />
-        </div>
-      </div>
-
-      {/* Luas */}
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Min (m²)</label>
-          <input type="text" inputMode="numeric" placeholder="60"
-            value={form.luas_min}
-            onChange={e => setForm(f => f ? { ...f, luas_min: fmtRup(e.target.value) } : f)}
-            className={KELAS_INPUT} />
-        </div>
-        <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Max (m²)</label>
-          <input type="text" inputMode="numeric" placeholder="500"
-            value={form.luas_max}
-            onChange={e => setForm(f => f ? { ...f, luas_max: fmtRup(e.target.value) } : f)}
-            className={KELAS_INPUT} />
-        </div>
-      </div>
-
-      {/* Sertifikat + Tujuan */}
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          {/* Satu-satunya kriteria tambahan yang bisa dijawab data listing
-              (99,9% terisi; kamar tidur hanya 4 baris dari 120 ribu). Kosong =
-              tidak mempermasalahkan — keadaan bawaan yang paling sering benar,
-              dan memaksa agent memilih hanya membuatnya mengarang jawaban. */}
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Sertifikat</label>
-          <PremiumSelect
-            value={form.legalitas}
-            onChange={v => setForm(f => f ? { ...f, legalitas: v as Sertifikat | "" } : f)}
-            placeholder="-- Tidak masalah --"
-            options={SERTIFIKAT_OPTIONS}
-            open={pickerTerbuka === "legalitas"}
-            onOpenChange={v => setPicker(v ? "legalitas" : null)}
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Tujuan Beli</label>
-          <PremiumSelect
-            value={form.tujuan_beli}
-            onChange={v => setForm(f => f ? { ...f, tujuan_beli: v as TujuanBeli | "" } : f)}
-            placeholder="-- Belum tahu --"
-            options={TUJUAN_OPTIONS}
-            open={pickerTerbuka === "tujuan"}
-            onOpenChange={v => setPicker(v ? "tujuan" : null)}
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Catatan</label>
-          <input type="text" placeholder="Hal lain..."
-            value={form.catatan}
-            onChange={e => setForm(f => f ? { ...f, catatan: e.target.value } : f)}
-            className={KELAS_INPUT} />
-        </div>
-      </div>
-
-      <div className="flex gap-2 pt-1">
-        <button
-          onClick={onBatal}
-          className="flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 text-[12px] font-bold text-slate-300 transition-all hover:border-white/20 hover:text-white"
-        >
-          Batal
-        </button>
-        <button
-          onClick={onSimpan}
-          disabled={menyimpan || !sah}
-          title={sah ? undefined : "Pilih lokasi dulu"}
-          className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-400 py-2.5 text-[12px] font-extrabold text-[#04130d] transition-all hover:from-emerald-400 hover:to-emerald-300 disabled:opacity-50"
-        >
-          {menyimpan
-            ? <><Icon icon="solar:refresh-circle-bold-duotone" className="animate-spin text-sm" /> Menyimpan…</>
-            : <><Icon icon="solar:check-circle-bold" className="text-sm" /> {labelSimpan}</>}
-        </button>
-      </div>
-
-      {/* Tombol yang mati tanpa penjelasan membuat agent mengira formulirnya
-          rusak. Satu kalimat menghapus seluruh tebakan itu. */}
-      {!sah && (
-        <p className="text-center text-[10.5px] text-slate-500">
-          Pilih <span className="font-bold text-slate-300">lokasi</span> dulu — sisanya boleh dikosongkan.
-        </p>
-      )}
-    </motion.div>
-  );
-}
-
-/* ════════════════════════════════════════════════════════════
    DETAIL DRAWER
    ════════════════════════════════════════════════════════════ */
 type PrefGroup = {
@@ -1952,12 +1996,17 @@ type PrefGroup = {
   catatan: string | null;
 };
 
-function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUpdated, onPrefDeleted, onPrefGroupUpdated }: {
+function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUpdated, onPrefDeleted, onPrefGroupSynced }: {
   klien: Klien; onClose: () => void; onEdit: () => void; onDelete: () => void;
   onMove: (s: KlienStatus) => void;
   onKlienUpdated: (k: Klien) => void;
   onPrefDeleted: (prefId: string) => void;
-  onPrefGroupUpdated: (oldIds: string[], newPrefs: PreferensiKlien[]) => void;
+  /** SELURUH daftar preferensi sesudah transaksi, bukan tambalan.
+   *  Sebelumnya berupa (oldIds, newPrefs) dan layar merakit sendiri hasilnya —
+   *  yang berarti layar dan database bisa berbeda pendapat begitu sebagian
+   *  permintaan gagal. Server sekarang menjawab dengan keadaan akhir, dan itu
+   *  yang dipasang apa adanya. */
+  onPrefGroupSynced: (semua: PreferensiKlien[]) => void;
 }) {
   const [shown, setShown] = useState(false);
   /* DAFTAR id, bukan satu preferensi. Satu kartu preferensi di layar adalah
@@ -1974,8 +2023,13 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
   const [menambahPref, setMenambahPref] = useState(false);
   const [savingTambah, setSavingTambah] = useState(false);
   const [editForm, setEditForm] = useState<PreferensiForm | null>(null);
-  const [openEditPicker, setOpenEditPicker] = useState<"type" | "transaksi" | "location" | "tujuan" | "legalitas" | null>(null);
+  const [openEditPicker, setOpenEditPicker] = useState<PickerPref>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  /* Kegagalan ditampilkan DI DALAM formulirnya, bukan lewat toast di sudut
+     layar: di situlah mata agent sedang berada, dan isiannya masih utuh untuk
+     dicoba lagi. Satu keadaan dipakai bersama mode tambah & mode edit — hanya
+     satu dari keduanya yang bisa terbuka pada satu waktu. */
+  const [galatPref, setGalatPref] = useState<string | null>(null);
 
   // ── Inline CRM edit (catatan & follow-up) ──
   const [editingCrm, setEditingCrm] = useState(false);
@@ -2054,18 +2108,21 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
     });
     setEditingGroupIdx(i);
     setOpenEditPicker(null);
+    setGalatPref(null);
   }
 
   function cancelEdit() {
     setEditingGroupIdx(null);
     setEditForm(null);
     setOpenEditPicker(null);
+    setGalatPref(null);
   }
 
   function mulaiTambah() {
     setEditingGroupIdx(null);          // tutup edit yang mungkin sedang terbuka
     setEditForm({ ...EMPTY_PREFERENSI });
     setOpenEditPicker(null);
+    setGalatPref(null);
     setMenambahPref(true);
   }
 
@@ -2073,70 +2130,71 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
     setMenambahPref(false);
     setEditForm(null);
     setOpenEditPicker(null);
+    setGalatPref(null);
   }
 
   /**
-   * Simpan preferensi BARU dari dalam kartu klien.
+   * Tulis ulang preferensi lewat SATU permintaan transaksional.
    *
-   * Sebelumnya satu-satunya jalan adalah "Edit Klien" — formulir penuh yang
-   * MENULIS ULANG seluruh preferensi (hapus semua → buat baru) hanya untuk
-   * menambah satu kriteria. Selain berputar jauh, itu juga berisiko: kegagalan
-   * di tengah penulisan ulang meninggalkan klien dengan preferensi yang hilang
-   * sebagian. Di sini hanya baris baru yang ditulis; yang lama tidak disentuh.
+   * `ganti` menyebut baris mana yang digantikan:
+   *   []          → hanya menambah; kriteria lain tidak disentuh.
+   *   [id, id, …] → kartu itu yang ditulis ulang.
+   *
+   * Sebelumnya ini rentetan DELETE lalu POST dari browser, tanpa satu pun
+   * jawaban yang dibaca. Dua akhir buruknya sama-sama senyap: gagal di tengah
+   * menghapus kriteria klien tanpa jejak, dan DELETE yang gagal sementara POST
+   * berhasil meninggalkan baris lama sebagai HANTU — layar menampilkan wilayah
+   * yang baru, sementara pencarian aset masih memakai wilayah yang lama.
    */
-  async function handleSaveTambah() {
-    if (!editForm || editForm.locations.length === 0) return;
-    setSavingTambah(true);
+  async function simpanPreferensi(ganti: string[]): Promise<boolean> {
+    if (!editForm) return false;
+    setGalatPref(null);
     try {
       /* Satu kartu formulir mekar jadi beberapa baris — satu per kombinasi
          tipe × lokasi. Fungsi yang sama dipakai formulir klien, jadi bentuk
          barisnya tidak bisa menyimpang antar jalur. */
-      const payloads = buildPrefPayloads(editForm);
-      const hasil = await Promise.all(
-        payloads.map(p =>
-          fetch(`/api/dashboard/klien/${klien.id_klien}/preferensi`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(p),
-          }).then(r => r.json()).catch(() => ({ ok: false })),
-        ),
-      );
-      const baru: PreferensiKlien[] = hasil.filter(r => r.ok).map(r => r.data);
-      /* Ditutup hanya kalau ADA yang benar-benar tersimpan. Menutup formulir
-         setelah kegagalan total akan membuang isian agent tanpa satu pun
-         penjelasan. */
-      if (baru.length === 0) return;
-      /* oldIds kosong = tidak ada yang diganti, hanya ditambah. Lewat jalur
-         yang sama dengan edit, jadi pencarian ulang otomatis & pembuangan
-         simpanan ikut berjalan tanpa perlu diingat lagi di sini. */
-      onPrefGroupUpdated([], baru);
-      batalTambah();
+      const res = await fetch(`/api/dashboard/klien/${klien.id_klien}/preferensi`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ganti, preferensi: buildPrefPayloads(editForm) }),
+      });
+      const j = await res.json().catch(() => ({} as any));
+      if (!res.ok || !j?.ok) {
+        setGalatPref(j?.message || "Gagal menyimpan. Tidak ada yang diubah.");
+        return false;
+      }
+      /* Server mengembalikan SELURUH daftar sesudah transaksi, jadi layar tidak
+         perlu menebak baris mana yang bertahan. `ganti` diteruskan sebagai
+         "buang semua yang lama" karena daftar barunya sudah lengkap. */
+      onPrefGroupSynced(j.data as PreferensiKlien[]);
+      return true;
+    } catch {
+      setGalatPref("Gagal menyimpan. Periksa koneksi lalu coba lagi.");
+      return false;
+    }
+  }
+
+  async function handleSaveTambah() {
+    if (!editForm || savingTambah) return;
+    setSavingTambah(true);
+    try {
+      /* Formulir ditutup HANYA kalau benar-benar tersimpan. Menutupnya setelah
+         kegagalan membuang isian agent tanpa satu pun penjelasan. */
+      if (await simpanPreferensi([])) batalTambah();
     } finally {
       setSavingTambah(false);
     }
   }
 
   async function handleSaveEdit(g: PrefGroup) {
-    if (!editForm) return;
+    if (!editForm || savingEdit) return;
     setSavingEdit(true);
     try {
-      await Promise.all(g.ids.map(id =>
-        fetch(`/api/dashboard/klien/${klien.id_klien}/preferensi/${id}`, { method: "DELETE" })
-      ));
-      const payloads = buildPrefPayloads(editForm);
-      const results = await Promise.all(
-        payloads.map(p =>
-          fetch(`/api/dashboard/klien/${klien.id_klien}/preferensi`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(p),
-          }).then(r => r.json())
-        )
-      );
-      const newPrefs: PreferensiKlien[] = results.filter(r => r.ok).map(r => r.data);
-      onPrefGroupUpdated(g.ids, newPrefs);
-      setEditingGroupIdx(null);
-      setEditForm(null);
+      if (await simpanPreferensi(g.ids)) {
+        setEditingGroupIdx(null);
+        setEditForm(null);
+        setGalatPref(null);
+      }
     } finally {
       setSavingEdit(false);
     }
@@ -2144,11 +2202,23 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
 
   async function handleDeletePrefGroup(ids: string[]) {
     setDeletingPrefs(new Set(ids));
+    setGalatPref(null);
     try {
-      await Promise.all(ids.map(id =>
-        fetch(`/api/dashboard/klien/${klien.id_klien}/preferensi/${id}`, { method: "DELETE" })
-      ));
-      ids.forEach(id => onPrefDeleted(id));
+      /* Yang lenyap dari layar adalah yang DIJAWAB server sebagai terhapus,
+         bukan yang dikirim. Baris yang gagal dihapus tapi ikut hilang dari
+         layar adalah kriteria hantu: tidak terlihat di mana pun, tapi tetap
+         ikut menentukan aset mana yang dicarikan untuk klien ini. */
+      const hasil = await Promise.all(ids.map(async id => {
+        try {
+          const r = await fetch(`/api/dashboard/klien/${klien.id_klien}/preferensi/${id}`, { method: "DELETE" });
+          return r.ok ? id : null;
+        } catch { return null; }
+      }));
+      const terhapus = hasil.filter((v): v is string => v !== null);
+      terhapus.forEach(id => onPrefDeleted(id));
+      if (terhapus.length < ids.length) {
+        setGalatPref("Sebagian kriteria gagal dihapus. Muat ulang halaman lalu coba lagi.");
+      }
     } finally {
       setDeletingPrefs(new Set());
     }
@@ -2264,16 +2334,17 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
           {(() => {
             const map = new Map<string, PrefGroup>();
             for (const p of klien.preferensi) {
-              const sig = JSON.stringify([
-                p.jenis_transaksi ?? "", p.budget_min ?? "", p.budget_max ?? "",
-                p.luas_min ?? "", p.luas_max ?? "",
-                /* legalitas WAJIB ikut: tanpanya "Rumah SHM" dan "Rumah HGB"
-                   menyatu jadi satu kartu, dan salah satu sertifikatnya hilang
-                   saat kartu itu disunting lalu disimpan. */
-                p.legalitas ?? "",
-                p.dekat_nilai ?? "", p.dekat_radius ?? "", p.alamat_teks ?? "",
-                p.tujuan_beli ?? "", p.catatan ?? "",
-              ]);
+              /* Sidik jari yang SAMA dengan yang dipakai formulir klien saat
+                 mengelompokkan baris jadi kartu (src/.../FormPreferensi.tsx).
+                 Dua rumus terpisah untuk pertanyaan yang sama — "baris mana
+                 yang satu kartu" — akan menghasilkan jumlah kartu yang berbeda
+                 di dua layar untuk klien yang sama.
+
+                 Angkanya dinormalkan di dalam sidiknya: Decimal yang lewat JSON
+                 pernah datang sebagai "500000000" dari satu endpoint dan
+                 500000000 dari endpoint lain, dan itu memecah satu kartu jadi
+                 dua persis sesudah disimpan. */
+              const sig = sidikKriteria(p);
               let g = map.get(sig);
               if (!g) {
                 g = {
@@ -2358,6 +2429,7 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
                             ikon="solar:pen-2-bold-duotone"
                             labelSimpan="Simpan Perubahan"
                             menyimpan={savingEdit}
+                            galat={galatPref}
                             onBatal={cancelEdit}
                             onSimpan={() => handleSaveEdit(g)}
                           />
@@ -2431,6 +2503,7 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
                       ikon="solar:add-circle-bold-duotone"
                       labelSimpan="Simpan Preferensi"
                       menyimpan={savingTambah}
+                      galat={galatPref}
                       onBatal={batalTambah}
                       onSimpan={handleSaveTambah}
                     />
@@ -2760,8 +2833,29 @@ type IsiSimpanan = {
   adaWa: boolean;
   terpilih: string[];
   waktu: number;
+  /** Versi kriteria klien saat hasil ini diambil. Lihat `versiKriteria`. */
+  versi: number;
 };
 const simpananCocok = new Map<string, IsiSimpanan>();
+
+/* ── VERSI KRITERIA ────────────────────────────────────────────────────────
+   Membuang simpanan saja TIDAK CUKUP, dan inilah lubang yang paling lama tidak
+   terlihat.
+
+   Layar Asisten Aset menyegarkan dirinya diam-diam di belakang data yang sudah
+   terpampang. Kalau agent menyunting kriteria tepat saat penyegaran itu masih
+   di jalan, urutannya jadi: simpanan dibuang → jawaban LAMA tiba → jawaban itu
+   ditulis ke simpanan dengan stempel waktu BARU. Simpanan pun berisi hasil
+   dari kriteria yang sudah tidak ada lagi, dan karena stempelnya segar, layar
+   menampilkannya seketika tanpa merasa perlu memuat ulang.
+
+   Yang terlihat agent persis seperti aplikasi yang mengabaikan suntingannya:
+   wilayah sudah diganti, tombol cari ditekan, daftarnya sama saja.
+
+   Penghitung ini menutupnya. Tiap perubahan kriteria menaikkan versinya;
+   jawaban yang berangkat sebelum kenaikan itu tidak lagi berhak menulis. */
+const versiKriteria = new Map<string, number>();
+const versiKlien = (klienId: string) => versiKriteria.get(klienId) ?? 0;
 
 /** Umur simpanan sebelum layar memilih memuat dari nol (dengan pemintal)
  *  alih-alih menampilkan yang lama dulu. Lima menit: cukup lama untuk menutupi
@@ -2776,6 +2870,7 @@ function buangSimpanan(klienId: string) {
   for (const k of [...simpananCocok.keys()]) {
     if (k.startsWith(`${klienId}|`)) simpananCocok.delete(k);
   }
+  versiKriteria.set(klienId, versiKlien(klienId) + 1);
 }
 
 /**
@@ -2796,10 +2891,14 @@ function buangSimpanan(klienId: string) {
  */
 async function cariUlangDiamDiam(klienId: string): Promise<number | null> {
   buangSimpanan(klienId);
+  const versi = versiKlien(klienId);
   try {
     const r = await fetch(`/api/dashboard/klien/${klienId}/rekomendasi/siap`);
     const j = await r.json();
     if (!j?.ok) return null;
+    /* Kriteria berubah LAGI selagi pencarian ini berjalan? Jawabannya sudah
+       basi sebelum tiba. Dibuang diam-diam; putaran berikutnya yang benar. */
+    if (versiKlien(klienId) !== versi) return null;
     simpananCocok.set(`${klienId}|`, {
       items: j.items || [],
       idAgent: j.idAgent ?? null,
@@ -2810,10 +2909,10 @@ async function cariUlangDiamDiam(klienId: string): Promise<number | null> {
       adaWa: !!j.klien?.punyaWa,
       terpilih: Array.isArray(j.terpilih) ? j.terpilih : [],
       waktu: Date.now(),
+      versi,
     });
     return typeof j.total === "number" ? j.total : (j.items?.length ?? 0);
   } catch {
-    buangSimpanan(klienId);
     return null;
   }
 }
@@ -2821,17 +2920,33 @@ async function cariUlangDiamDiam(klienId: string): Promise<number | null> {
 /** Apakah dua daftar preferensi menyebut kriteria yang sama?
  *
  *  Dipakai untuk memutuskan apakah pencarian ulang perlu dijalankan. Formulir
- *  edit klien MENULIS ULANG seluruh preferensi (hapus semua → buat baru), jadi
- *  id-nya selalu berubah meskipun agent cuma mengganti nomor telepon —
- *  membandingkan id akan membuat setiap penyuntingan catatan memicu empat
- *  query pencocokan yang tidak ada gunanya. Yang dibandingkan ISI kriterianya. */
+ *  edit klien MENULIS ULANG seluruh preferensi, jadi id-nya selalu berubah
+ *  meskipun agent cuma mengganti nomor telepon — membandingkan id akan membuat
+ *  setiap penyuntingan catatan memicu empat query pencocokan yang tidak ada
+ *  gunanya. Yang dibandingkan ISI kriterianya.
+ *
+ *  ── HARUS MEMUAT SETIAP KOLOM YANG DIBACA MESIN PENCOCOKAN ───────────────
+ *  Versi sebelumnya menimbang tujuh kolom saja, dan melewatkan lima yang
+ *  seluruhnya ikut menentukan hasil: keempat kolom `loc_*` (ia cuma melihat
+ *  label `lokasi_dicari`), sertifikat, patokan tempat, radius, dan patokan
+ *  alamat. Akibatnya nyata: mengganti patokan dari "dekat UNESA" ke "dekat
+ *  Tunjungan Plaza" dianggap BUKAN perubahan, simpanan hasil tidak dibuang,
+ *  dan layar Asisten Aset menyajikan daftar dari kriteria yang sudah tidak
+ *  ada lagi.
+ *
+ *  Kolom yang TIDAK ikut cuma yang tidak dibaca mesin: `catatan` dan
+ *  `tujuan_beli` — keduanya keterangan untuk manusia. Menyertakannya hanya
+ *  akan membuat pembetulan salah ketik memicu pencarian penuh. */
 function kriteriaSama(a: PreferensiKlien[], b: PreferensiKlien[]): boolean {
   if (a.length !== b.length) return false;
+  const n = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(Number(v)));
   const sidik = (p: PreferensiKlien) => JSON.stringify([
-    p.tipe_properti, p.jenis_transaksi ?? "", p.lokasi_dicari ?? "",
-    p.budget_min ?? "", p.budget_max ?? "", p.luas_min ?? "", p.luas_max ?? "",
+    p.tipe_properti ?? "", p.jenis_transaksi ?? "",
+    p.loc_provinsi ?? "", p.loc_kota ?? "", p.loc_kecamatan ?? "", p.loc_kelurahan ?? "",
+    n(p.budget_min), n(p.budget_max), n(p.luas_min), n(p.luas_max),
+    p.legalitas ?? "", p.dekat_nilai ?? "", n(p.dekat_radius), p.alamat_teks ?? "",
   ]);
-  const kiri = a.map(sidik).sort();
+  const kiri  = a.map(sidik).sort();
   const kanan = b.map(sidik).sort();
   return kiri.every((v, i) => v === kanan[i]);
 }
@@ -2934,6 +3049,11 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
   const muatCocok = useCallback((diam = false) => {
     if (!diam) setLoading(true);
     setError(null);
+    /* Dicatat SEBELUM berangkat. Kalau agent menyunting kriteria selagi
+       permintaan ini di jalan, jawabannya sudah menjawab pertanyaan yang lain —
+       dan menampilkannya (apalagi menyimpannya) berarti menyajikan hasil
+       kriteria lama sebagai hasil kriteria baru. */
+    const versi = versiKlien(klienId);
     const url = kunciPref
       ? `/api/dashboard/klien/${klienId}/rekomendasi/siap?pref=${encodeURIComponent(kunciPref)}`
       : `/api/dashboard/klien/${klienId}/rekomendasi/siap`;
@@ -2941,6 +3061,7 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
       .then(r => r.json())
       .then(j => {
         if (!j.ok) { if (!diam) setError(j.message || "Gagal memuat"); return; }
+        if (versiKlien(klienId) !== versi) return;
         const isi: IsiSimpanan = {
           items: j.items || [],
           idAgent: j.idAgent ?? null,
@@ -2951,6 +3072,7 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
           adaWa: !!j.klien?.punyaWa,
           terpilih: Array.isArray(j.terpilih) ? j.terpilih : [],
           waktu: Date.now(),
+          versi,
         };
         simpananCocok.set(kunciSimpanan, isi);
         /* Saat menyegarkan diam-diam, centang TIDAK disetel ulang: agent bisa
@@ -2972,7 +3094,12 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
   }, [klienId]);
 
   useEffect(() => {
-    const c = simpananCocok.get(kunciSimpanan);
+    const tersimpan = simpananCocok.get(kunciSimpanan);
+    /* Sabuk kedua di samping `buangSimpanan`. Simpanan yang versinya tertinggal
+       diperlakukan seolah tidak ada — lebih baik memutar pemintal sebentar
+       daripada menampilkan daftar yang jawaban atas kriteria yang sudah
+       dihapus agent sendiri. */
+    const c = tersimpan && tersimpan.versi === versiKlien(klienId) ? tersimpan : undefined;
     if (c) {
       /* Tampilkan yang lama SEKETIKA, lalu segarkan di belakang layar. Yang
          dihindari bukan sekadar detik menunggunya, melainkan layar kosong

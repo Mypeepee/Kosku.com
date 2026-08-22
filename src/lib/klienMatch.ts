@@ -322,7 +322,19 @@ export function whereKasar(k: KriteriaMatch, opsi: OpsiMatch = {}): Prisma.Listi
     }
   }
 
-  if (kecuali.length) where.id_property = { notIn: kecuali };
+  /* `kecuali` MENYATU dengan penyaring id yang mungkin sudah dipasang cabang
+     "dekat X" di atas, bukan menimpanya. Versi sebelumnya menugaskan ulang
+     `where.id_property`, dan itu menghapus gerbang `{ in: [] }` yang menandai
+     "patokan tempatnya tidak bisa diterjemahkan" — sehingga preferensi dengan
+     patokan yatim diam-diam mengabaikan patokannya, TAPI hanya untuk klien yang
+     pernah dikirimi sesuatu. Bug yang berbeda perilakunya per klien adalah bug
+     yang tidak pernah bisa direproduksi. */
+  if (kecuali.length) {
+    const sudahDibatasi = where.id_property as { in?: bigint[] } | undefined;
+    where.id_property = sudahDibatasi?.in
+      ? { in: sudahDibatasi.in.filter(id => !kecuali.includes(id)) }
+      : { notIn: kecuali };
+  }
 
   /* ── LOKASI DISARING DI TINGKAT YANG MENGIKAT ───────────────────────────
      Versi lama hanya menyaring KOTA di SQL, dan menyerahkan kecamatan serta

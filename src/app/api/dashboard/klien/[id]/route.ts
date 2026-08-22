@@ -4,6 +4,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
 import { kunciProspek } from "@/lib/prospek";
 import { syncFollowUpAcara } from "../_syncFollowUp";
+import { serialisasiPreferensi } from "@/lib/preferensiInput";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -177,13 +178,6 @@ function serializeKlien(k: any) {
     propertiAsal: k.propertiAsal
       ? { ...k.propertiAsal, id_property: String(k.propertiAsal.id_property) }
       : null,
-    preferensi: (k.preferensi || []).map((p: any) => ({
-      ...p,
-      id_preferensi: String(p.id_preferensi),
-      budget_min: p.budget_min ? Number(p.budget_min) : null,
-      budget_max: p.budget_max ? Number(p.budget_max) : null,
-      luas_min:   p.luas_min   ? Number(p.luas_min)   : null,
-      luas_max:   p.luas_max   ? Number(p.luas_max)   : null,
-    })),
+    preferensi: (k.preferensi || []).map(serialisasiPreferensi),
   };
 }

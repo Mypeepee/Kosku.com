@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
 import { syncFollowUpAcara } from "./_syncFollowUp";
+import { bacaBanyakPreferensi, serialisasiPreferensi } from "@/lib/preferensiInput";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,12 +84,21 @@ export async function POST(req: Request) {
   if (rest.id_lead_asal)    klienData.id_lead_asal    = BigInt(rest.id_lead_asal);
   if (rest.id_properti_asal) klienData.id_properti_asal = BigInt(rest.id_properti_asal);
 
+  /* Preferensi dibaca dengan aturan yang SAMA PERSIS dengan endpoint
+     /preferensi — lokasi wajib, `maksud` diturunkan, patokan & sertifikat ikut
+     tersimpan. Versi sebelumnya punya penyaringnya sendiri di berkas ini, dan
+     penyaring itu diam-diam membuang empat kolom sekaligus melewatkan
+     kewajiban lokasi: kriteria yang lahir lewat "Tambah Klien" karena itu
+     mencari ke SELURUH Indonesia, sementara kriteria yang sama persis kalau
+     dibuat dari kartu klien tidak bisa disimpan tanpa wilayah. */
+  const prefDibaca = bacaBanyakPreferensi(preferensi);
+  if (!prefDibaca.ok)
+    return NextResponse.json({ ok: false, message: prefDibaca.message }, { status: 400 });
+
   const klien = await prisma.klien.create({
     data: {
       ...klienData,
-      ...(preferensi?.length ? {
-        preferensi: { create: preferensi.map(sanitizePreferensi) },
-      } : {}),
+      ...(prefDibaca.data.length ? { preferensi: { create: prefDibaca.data as any } } : {}),
     },
     include: { preferensi: true },
   });
@@ -101,24 +111,6 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, data: serializeKlien(klien) }, { status: 201 });
 }
 
-function sanitizePreferensi(p: any) {
-  return {
-    tipe_properti:   p.tipe_properti,
-    jenis_transaksi: p.jenis_transaksi || null,
-    lokasi_dicari:   p.lokasi_dicari || null,
-    loc_provinsi:    p.loc_provinsi || null,
-    loc_kota:        p.loc_kota || null,
-    loc_kecamatan:   p.loc_kecamatan || null,
-    loc_kelurahan:   p.loc_kelurahan || null,
-    budget_min:      p.budget_min ? Number(p.budget_min) : null,
-    budget_max:      p.budget_max ? Number(p.budget_max) : null,
-    luas_min:        p.luas_min   ? Number(p.luas_min)   : null,
-    luas_max:        p.luas_max   ? Number(p.luas_max)   : null,
-    tujuan_beli:     p.tujuan_beli || null,
-    catatan:         p.catatan || null,
-  };
-}
-
 function serializeKlien(k: any) {
   return {
     ...k,
@@ -127,13 +119,6 @@ function serializeKlien(k: any) {
     propertiAsal: k.propertiAsal
       ? { ...k.propertiAsal, id_property: String(k.propertiAsal.id_property) }
       : null,
-    preferensi: (k.preferensi || []).map((p: any) => ({
-      ...p,
-      id_preferensi: String(p.id_preferensi),
-      budget_min: p.budget_min ? Number(p.budget_min) : null,
-      budget_max: p.budget_max ? Number(p.budget_max) : null,
-      luas_min:   p.luas_min   ? Number(p.luas_min)   : null,
-      luas_max:   p.luas_max   ? Number(p.luas_max)   : null,
-    })),
+    preferensi: (k.preferensi || []).map(serialisasiPreferensi),
   };
 }

@@ -95,7 +95,21 @@ const SearchHero = ({
       </section>
 
       {/* === BAGIAN 2: FILTER FORM === */}
-      <div className="container mx-auto px-4 relative z-30 -mt-24 mb-10 zoom-safe" ref={wrapperRef}>
+      <div
+        /* z-index NAIK selagi ada dropdown terbuka.
+           Panel "Harga"/"Dimensi"/"Durasi" (TabFilterFields) dirender ABSOLUT
+           di dalam pembungkus ini, bukan lewat portal seperti LocationPicker.
+           Artinya `z-50` miliknya hanya berlaku DI DALAM stacking context yang
+           dibuat pembungkus ber-z-index ini — dan pembungkusnya (z-30) kalah
+           dari FilterCommandBar yang lengket (z-40), jadi panelnya tertutup bar
+           filter begitu terbuka. Menaikkan pembungkusnya hanya saat dropdown
+           terbuka memperbaiki itu tanpa membuat kartu hero melintas di atas bar
+           lengket saat halaman di-scroll. */
+        className={`container mx-auto px-4 relative ${
+          openDropdown ? "z-50" : "z-30"
+        } -mt-24 mb-10 zoom-safe`}
+        ref={wrapperRef}
+      >
         <TransactionTabs active={activeTab} onChange={setActiveTab} />
 
         {/* === MOBILE: command bar ringkas (detail filter pindah ke sheet) === */}

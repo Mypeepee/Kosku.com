@@ -20,9 +20,23 @@ export async function DELETE(_req: Request, { params }: Ctx) {
   });
   if (!owned) return NextResponse.json({ ok: false }, { status: 404 });
 
-  await prisma.preferensiKlien.delete({
-    where: { id_preferensi: BigInt(params.prefId) },
+  let id: bigint;
+  try { id = BigInt(params.prefId); }
+  catch { return NextResponse.json({ ok: false, message: "Id preferensi tidak sah" }, { status: 400 }); }
+
+  /* deleteMany, BUKAN delete, dan disaring ke id_klien.
+     Dua alasan, keduanya nyata:
+
+       1. `delete` melempar bila barisnya sudah tidak ada, dan itu keluar
+          sebagai 500 tanpa pesan. Menghapus sesuatu yang memang sudah hilang
+          BUKAN kegagalan — ketukan ganda, atau permintaan yang diulang setelah
+          koneksi putus, harus berakhir dengan keadaan yang sama.
+       2. Versi sebelumnya cuma memeriksa kepemilikan KLIEN, lalu menghapus id
+          preferensi apa pun. Id milik klien lain yang diselipkan ke URL akan
+          terhapus selama penyerang punya satu klien sendiri. */
+  const { count } = await prisma.preferensiKlien.deleteMany({
+    where: { id_preferensi: id, id_klien: params.id },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, terhapus: count });
 }

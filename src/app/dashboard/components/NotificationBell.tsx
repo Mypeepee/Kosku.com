@@ -8,7 +8,8 @@
    pengingat). Bell tampil di setiap halaman dashboard via topbar.tsx.
    ════════════════════════════════════════════════════════════════════ */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "@iconify/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, usePathname } from "next/navigation";
@@ -22,6 +23,10 @@ import {
   type TitipItem,
   type JenisProperti,
 } from "@/app/dashboard/components/agent/premium/titipLeads";
+import {
+  OVERLAY_Z,
+  useDashboardOverlay,
+} from "@/app/dashboard/components/overlay-context";
 
 /* ── Pembayaran Project — investor belum bayar komitmen ── */
 interface PembayaranItem {
@@ -154,8 +159,30 @@ export default function NotificationBell() {
   const [pembayaranItems, setPembayaranItems] = useState<PembayaranItem[]>([]);
   const [sysNotifs, setSysNotifs] = useState<SysNotif[]>([]);
   const [surveiActing, setSurveiActing] = useState<Set<string>>(new Set());
-  const [open, setOpen] = useState(false);
+  // Open state dititipkan ke koordinator chrome: begitu drawer menu atau
+  // dropdown profil dibuka, panel ini ikut tertutup (dan sebaliknya) —
+  // jadi tidak pernah ada dua overlay fixed saling menimpa di layar kecil.
+  const { isOpen, open: openOverlay, close: closeOverlay } = useDashboardOverlay();
+  const open = isOpen("notif");
+  const setOpen = useCallback(
+    (next: boolean | ((cur: boolean) => boolean)) => {
+      const value = typeof next === "function" ? next(open) : next;
+      if (value) openOverlay("notif");
+      else closeOverlay("notif");
+    },
+    [open, openOverlay, closeOverlay],
+  );
+
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [anchor, setAnchor] = useState<{
+    top: number;
+    right: number;
+    maxH: number;
+  } | null>(null);
   const seenCountRef = useRef<number>(0);
   const seenSurveiCountRef = useRef<number>(0);
   const seenPenawaranCountRef = useRef<number>(0);
@@ -165,23 +192,87 @@ export default function NotificationBell() {
   // Track timer per id supaya cleanup rapi dan tidak double-schedule
   const dismissTimersRef = useRef<Map<string, number>>(new Map());
 
-  // Tutup dropdown saat klik di luar
+  useEffect(() => setMounted(true), []);
+
+  // Lacak breakpoint sm: <640px panel jadi sheet lebar penuh di bawah
+  // topbar, >=640px tetap dropdown yang ter-anchor ke tombol lonceng.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  // Posisi panel diukur, bukan angka `top-[61px]` ajaib yang diam-diam
+  // meleset begitu tinggi topbar berubah.
+  //   desktop → gantung 8px di bawah tombol lonceng (dropdown ter-anchor)
+  //   mobile  → gantung 8px di bawah topbar (sheet lebar penuh; kalau
+  //             ikut tombol, sheet-nya nyelip menutupi garis border topbar
+  //             karena lonceng ter-center di baris yang lebih tinggi)
+  const updateAnchor = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+
+    // Cari bar sticky/fixed terdekat tanpa mengandalkan nama class.
+    let barBottom = r.bottom;
+    for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      const pos = getComputedStyle(n).position;
+      if (pos === "sticky" || pos === "fixed") {
+        barBottom = n.getBoundingClientRect().bottom;
+        break;
+      }
+    }
+
+    const desktop = window.matchMedia("(min-width: 640px)").matches;
+    const top = Math.round((desktop ? r.bottom : barBottom) + 8);
+    setAnchor({
+      top,
+      right: Math.round(Math.max(0, window.innerWidth - r.right)),
+      maxH: Math.max(200, Math.round(window.innerHeight - top - 16)),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateAnchor();
+    window.addEventListener("resize", updateAnchor);
+    // capture:true → ikut scroll container dalam, bukan cuma window
+    window.addEventListener("scroll", updateAnchor, true);
+    return () => {
+      window.removeEventListener("resize", updateAnchor);
+      window.removeEventListener("scroll", updateAnchor, true);
+    };
+  }, [open, updateAnchor]);
+
+  // Tutup dropdown saat klik di luar. Dua hal penting di sini:
+  //
+  // 1. Panel dirender lewat portal, jadi secara DOM dia BUKAN anak
+  //    wrapRef — harus dicek terpisah lewat panelRef.
+  // 2. Dengarkan "click", BUKAN "mousedown". Menutup panel di mousedown
+  //    memicu re-render, dan re-render itu mengganti isi <svg> milik
+  //    ikon tombol lain (Iconify pakai dangerouslySetInnerHTML) — node
+  //    yang menerima mousedown ikut terhapus, sehingga browser
+  //    membatalkan event click-nya. Efeknya: tap burger saat panel
+  //    terbuka cuma menutup panel dan menu tidak pernah terbuka.
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
+      closeOverlay("notif");
     };
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeOverlay("notif");
     };
-    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("click", onDoc);
     document.addEventListener("keydown", onEsc);
     return () => {
-      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("click", onDoc);
       document.removeEventListener("keydown", onEsc);
     };
-  }, []);
+  }, [closeOverlay]);
 
   // Load + Pusher realtime
   useEffect(() => {
@@ -597,58 +688,53 @@ export default function NotificationBell() {
     }
   };
 
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((s) => !s)}
-        className={`relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full border transition-all ${
-          open
-            ? "border-emerald-400/40 bg-emerald-500/15"
-            : "border-white/10 bg-[#050608] hover:bg-white/5"
-        }`}
-        title={count > 0 ? `${count} notifikasi baru` : "Notifikasi"}
-        aria-haspopup="true"
-        aria-expanded={open}
-      >
-        <Icon
-          icon={count > 0 ? "solar:bell-bing-bold-duotone" : "solar:bell-linear"}
-          className={`h-4 w-4 ${count > 0 ? "text-emerald-300" : "text-slate-200"}`}
-        />
-        {count > 0 && (
-          <motion.span
-            key={count}
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", stiffness: 480, damping: 22 }}
-            className="absolute -top-1 -right-1 inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-extrabold text-white ring-2 ring-[#050608]"
-          >
-            {count > 99 ? "99+" : count}
-          </motion.span>
-        )}
-        {/* pulse ring saat ada item baru */}
-        <AnimatePresence>
-          {pulse && (
-            <motion.span
-              aria-hidden
-              initial={{ opacity: 0.6, scale: 0.8 }}
-              animate={{ opacity: 0, scale: 1.8 }}
-              transition={{ duration: 1.6, repeat: 1 }}
-              exit={{ opacity: 0 }}
-              className="pointer-events-none absolute inset-0 rounded-full border-2 border-emerald-400/70"
-            />
-          )}
-        </AnimatePresence>
-      </button>
-
-      <AnimatePresence>
-        {open && (
+  /* ── Panel notifikasi ──────────────────────────────────────────────
+     Dirender via portal ke <body>. Topbar punya `backdrop-blur` +
+     `sticky z-20`, dua-duanya bikin stacking context / containing block
+     baru — panel yang dirender di dalamnya selalu kalah lapis dari
+     drawer menu mobile (bug: panel ketutupan list menu) dan posisinya
+     terikat ke kotak topbar. Portal + koordinat terukur melepas keduanya.
+     ────────────────────────────────────────────────────────────────── */
+  const panelNode = (
+    <AnimatePresence>
+      {open && anchor && (
+        <>
+          {/* Scrim — mobile saja; di desktop dropdown cukup ditutup lewat
+              klik di luar supaya layar tidak ikut gelap.
+              Mulai TEPAT di bawah topbar, bukan inset-0: topbar tetap
+              hidup, jadi tap burger langsung buka menu (bukan terbuang
+              cuma untuk menutup panel) dan tap lonceng menutup panel. */}
           <motion.div
+            key="notif-scrim"
+            aria-hidden
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={() => setOpen(false)}
+            style={{ zIndex: OVERLAY_Z.notifScrim, top: anchor.top - 8 }}
+            className="fixed inset-x-0 bottom-0 touch-none bg-black/50 backdrop-blur-[2px] sm:hidden"
+          />
+
+          <motion.div
+            key="notif-panel"
             initial={{ opacity: 0, y: -8, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.97 }}
             transition={{ type: "spring", stiffness: 460, damping: 30 }}
-            className="fixed left-3 right-3 top-[61px] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-[380px] max-h-[80dvh] sm:max-h-[480px] flex flex-col rounded-2xl border border-white/10 bg-[#0A0D14] shadow-[0_24px_70px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)] overflow-hidden z-50"
+            ref={panelRef}
+            role="dialog"
+            aria-label="Notifikasi"
+            style={{
+              zIndex: OVERLAY_Z.notif,
+              top: anchor.top,
+              // Mobile: sheet lebar penuh. Desktop: rata kanan tombol.
+              ...(isDesktop
+                ? { right: anchor.right }
+                : { left: 12, right: 12 }),
+              maxHeight: isDesktop ? Math.min(480, anchor.maxH) : anchor.maxH,
+            }}
+            className="fixed sm:w-[380px] flex flex-col rounded-2xl border border-white/10 bg-[#0A0D14] shadow-[0_24px_70px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)] overflow-hidden"
           >
             <div className="h-px bg-gradient-to-r from-transparent via-emerald-400/45 to-transparent" />
 
@@ -676,7 +762,7 @@ export default function NotificationBell() {
               </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto overscroll-contain">
               {items.length === 0 && surveiItems.length === 0 && penawaranItems.length === 0 && pembayaranItems.length === 0 && sysNotifs.length === 0 ? (
                 <div className="px-6 py-10 text-center">
                   <div className="mx-auto h-12 w-12 rounded-2xl border border-white/10 bg-white/[0.025] flex items-center justify-center">
@@ -775,11 +861,65 @@ export default function NotificationBell() {
               </button>
             )}
           </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => {
+          // Ukur dulu, baru buka — React batch keduanya jadi panel
+          // langsung muncul di posisi benar tanpa frame lompatan.
+          updateAnchor();
+          setOpen((s) => !s);
+        }}
+        className={`relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full border transition-all ${
+          open
+            ? "border-emerald-400/40 bg-emerald-500/15"
+            : "border-white/10 bg-[#050608] hover:bg-white/5"
+        }`}
+        title={count > 0 ? `${count} notifikasi baru` : "Notifikasi"}
+        aria-haspopup="true"
+        aria-expanded={open}
+      >
+        <Icon
+          icon={count > 0 ? "solar:bell-bing-bold-duotone" : "solar:bell-linear"}
+          className={`h-4 w-4 ${count > 0 ? "text-emerald-300" : "text-slate-200"}`}
+        />
+        {count > 0 && (
+          <motion.span
+            key={count}
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 480, damping: 22 }}
+            className="absolute -top-1 -right-1 inline-flex min-w-[18px] h-[18px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-extrabold text-white ring-2 ring-[#050608]"
+          >
+            {count > 99 ? "99+" : count}
+          </motion.span>
         )}
-      </AnimatePresence>
+        {/* pulse ring saat ada item baru */}
+        <AnimatePresence>
+          {pulse && (
+            <motion.span
+              aria-hidden
+              initial={{ opacity: 0.6, scale: 0.8 }}
+              animate={{ opacity: 0, scale: 1.8 }}
+              transition={{ duration: 1.6, repeat: 1 }}
+              exit={{ opacity: 0 }}
+              className="pointer-events-none absolute inset-0 rounded-full border-2 border-emerald-400/70"
+            />
+          )}
+        </AnimatePresence>
+      </button>
+      {mounted && createPortal(panelNode, document.body)}
     </div>
   );
 }
+
 
 function NotifRow({
   item,
