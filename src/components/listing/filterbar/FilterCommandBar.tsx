@@ -198,12 +198,22 @@ export default function FilterCommandBar({
   );
   const jumlahFilter = chips.length;
 
-  // Tab "Semua" mencampur jual, lelang, dan sewa — harga, lokasi, dan tipe
-  // aset tidak lagi berarti satu hal yang sama antar baris hasil (lihat
-  // peringatan yang sama di panel Harga), jadi trigger cepat & laci filter
-  // penuh disembunyikan di sana. Yang tetap masuk akal untuk daftar campuran
-  // hanyalah mengurutkannya.
-  const filterAktifDiBar = tabAktif !== "semua";
+  // Filter hanya hidup di JUAL dan SEWA. Dua tab lain sengaja tidak dapat
+  // trigger cepat maupun laci filter penuh:
+  //
+  //   • "Semua" mencampur jual, lelang, dan sewa — harga, lokasi, dan tipe aset
+  //     tidak lagi berarti satu hal yang sama antar baris hasil (lihat
+  //     peringatan yang sama di panel Harga).
+  //   • "Lelang" dicari lewat pertanyaan yang lain sama sekali: jadwal, kelas
+  //     aset, dan nilai limit — bukan kamar tidur/kondisi interior. Laci filter
+  //     properti biasa di sana memajang bidang yang hampir seluruh datanya
+  //     kosong pada listing hasil scrape, jadi setiap kombinasi berakhir "0
+  //     hasil" dan terbaca seperti situs yang rusak.
+  //
+  // Yang tetap masuk akal di kedua tab itu hanyalah mengurutkan — dan baris
+  // chip di bawah bar tetap dirender, supaya filter yang TERLANJUR dipasang
+  // lewat search bar hero masih terlihat dan masih bisa dilepas satuan.
+  const filterAktifDiBar = tabAktif === "jual" || tabAktif === "sewa";
 
   return (
     <div className={`sticky ${topClass} z-40`} style={BAR}>

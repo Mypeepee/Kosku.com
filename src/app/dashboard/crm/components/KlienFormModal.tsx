@@ -3,15 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@iconify/react";
 import {
-  Klien, KlienForm, KlienStatus, MetodePembayaran, PreferensiForm, PreferensiKlien, SumberKlien,
-  TipeProperti, JenisTransaksi, TujuanBeli,
-  EMPTY_PREFERENSI, JENIS_TRANSAKSI_LABEL, TIPE_PROPERTI_LABEL,
+  Klien, KlienForm, KlienStatus, MetodePembayaran, PreferensiForm, SumberKlien,
+  EMPTY_PREFERENSI,
 } from "./types";
 import { PremiumSelect, PremiumDateTimePicker, type PremiumOption } from "./CrmFormControls";
-import LocationPicker from "@/components/search/LocationPicker";
-import TypePicker from "@/components/search/TypePicker";
-import { regionKey, type RegionLevel, type SelectedRegion } from "@/lib/regionSearch";
-import { labelLuas } from "@/lib/klienRingkas";
+import {
+  KartuPreferensi, masalahPreferensi, buildPrefPayloads, groupPreferensi,
+} from "./FormPreferensi";
+
+/* Diteruskan, bukan didefinisikan ulang. Berkas ini sempat memiliki
+   salinannya sendiri, dan pemanggil lama (CrmPageClient) mengimpor dari sini —
+   jalur impornya dipertahankan supaya perpindahan ke modul bersama tidak
+   menyebar jadi perubahan di lima berkas sekaligus. */
+export {
+  formatRupiah, unformatRupiah, regionToLocFields, locFieldsToRegion,
+  buildPrefPayloads, groupPreferensi, sidikKriteria,
+  TIPE_ICONS, TIPE_LABELS, TUJUAN_OPTIONS,
+} from "./FormPreferensi";
 
 /* Opsi dropdown — dipakai PremiumSelect */
 const SUMBER_OPTIONS: PremiumOption[] = [
@@ -35,30 +43,6 @@ const METODE_OPTIONS: PremiumOption[] = [
   { value: "cash", label: "Cash",             icon: "solar:wallet-money-bold-duotone" },
   { value: "kpr",  label: "KPR",              icon: "solar:card-bold-duotone" },
 ];
-export const TUJUAN_OPTIONS: PremiumOption[] = [
-  { value: "",          label: "Belum tahu" },
-  { value: "ditempati", label: "Ditempati" },
-  { value: "investasi", label: "Investasi" },
-  { value: "disewakan", label: "Disewakan" },
-];
-
-// Icon per tipe properti — sama persis dengan PROPERTY_ICONS di Home/Hero/search.tsx
-export const TIPE_ICONS: Record<string, string> = {
-  "Rumah":         "solar:home-2-bold-duotone",
-  "Apartemen":     "solar:buildings-2-bold-duotone",
-  "Gudang":        "solar:box-minimalistic-bold-duotone",
-  "Tanah":         "solar:map-point-wave-bold-duotone",
-  "Pabrik":        "solar:garage-bold-duotone",
-  "Ruko":          "solar:shop-2-bold-duotone",
-  "Toko":          "solar:shop-bold-duotone",
-  "Hotel & Villa": "solar:bed-bold-duotone",
-};
-export const TIPE_LABELS = Object.values(TIPE_PROPERTI_LABEL);
-// Reverse map: label → enum key
-const LABEL_TO_TIPE = Object.fromEntries(
-  Object.entries(TIPE_PROPERTI_LABEL).map(([k, v]) => [v, k as TipeProperti])
-);
-
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -75,142 +59,6 @@ const INITIAL_FORM: KlienForm = {
   preferensi: [],
 };
 
-export function formatRupiah(raw: string) {
-  const num = raw.replace(/\D/g, "");
-  if (!num) return "";
-  return Number(num).toLocaleString("id-ID");
-}
-
-export function unformatRupiah(formatted: string) {
-  return formatted.replace(/\./g, "").replace(/,/g, "");
-}
-
-/** Sebuah wilayah terpilih → 4 kolom lokasi terstruktur (isi level terpilih + induknya). */
-export function regionToLocFields(r: SelectedRegion) {
-  const f: { loc_provinsi: string | null; loc_kota: string | null; loc_kecamatan: string | null; loc_kelurahan: string | null } =
-    { loc_provinsi: null, loc_kota: null, loc_kecamatan: null, loc_kelurahan: null };
-  switch (r.level) {
-    case "provinsi":  f.loc_provinsi = r.name; break;
-    case "kota":      f.loc_kota = r.name;      if (r.parent) f.loc_provinsi = r.parent; break;
-    case "kecamatan": f.loc_kecamatan = r.name; if (r.parent) f.loc_kota = r.parent; break;
-    case "kelurahan": f.loc_kelurahan = r.name; if (r.parent) f.loc_kecamatan = r.parent; break;
-  }
-  return f;
-}
-
-/** Kolom lokasi tersimpan → satu wilayah (level terdalam yang terisi) untuk hidrasi picker saat edit. */
-export function locFieldsToRegion(p: {
-  loc_provinsi: string | null; loc_kota: string | null;
-  loc_kecamatan: string | null; loc_kelurahan: string | null;
-}): SelectedRegion | null {
-  const mk = (level: RegionLevel, name: string, parent?: string | null): SelectedRegion =>
-    ({ id: `${level}:${name}`, name, level, ...(parent ? { parent } : {}) });
-  if (p.loc_kelurahan) return mk("kelurahan", p.loc_kelurahan, p.loc_kecamatan);
-  if (p.loc_kecamatan) return mk("kecamatan", p.loc_kecamatan, p.loc_kota);
-  if (p.loc_kota)      return mk("kota", p.loc_kota, p.loc_provinsi);
-  if (p.loc_provinsi)  return mk("provinsi", p.loc_provinsi);
-  return null;
-}
-
-/**
- * Expand satu kartu form → banyak payload preferensi (satu per kombinasi tipe × lokasi).
- * Tanpa lokasi → satu baris per tipe (lokasi null = berlaku semua wilayah).
- */
-export function buildPrefPayloads(p: PreferensiForm) {
-  const shared = {
-    jenis_transaksi: p.jenis_transaksi || null,
-    budget_min:      p.budget_min ? Number(unformatRupiah(p.budget_min)) : null,
-    budget_max:      p.budget_max ? Number(unformatRupiah(p.budget_max)) : null,
-    luas_min:        p.luas_min ? Number(unformatRupiah(p.luas_min)) : null,
-    luas_max:        p.luas_max ? Number(unformatRupiah(p.luas_max)) : null,
-    legalitas:       p.legalitas || null,
-    dekat_nilai:     p.dekat?.nilai ?? null,
-    dekat_radius:    p.dekat?.radius ?? null,
-    alamat_teks:     p.alamat_teks?.trim() || null,
-    tujuan_beli:     p.tujuan_beli || null,
-    catatan:         p.catatan.trim() || null,
-  };
-  const locs: (SelectedRegion | null)[] = p.locations.length ? p.locations : [null];
-  /* Tanpa tipe → SATU baris per lokasi dengan tipe null ("semua tipe").
-     Sebelumnya loop ini menghasilkan NOL baris saat tipe kosong, dan itulah
-     sebabnya tipe jadi wajib secara struktural: preferensi tersimpan tanpa
-     satu pun baris adalah preferensi yang tidak pernah mencocokkan apa pun. */
-  const tipes: (string | null)[] = p.tipe_properti.length ? p.tipe_properti : [null];
-  const rows: Record<string, unknown>[] = [];
-  for (const tipe of tipes) {
-    for (const loc of locs) {
-      rows.push({
-        tipe_properti: tipe,
-        lokasi_dicari: loc ? [loc.name, loc.parent].filter(Boolean).join(", ") : null,
-        ...(loc ? regionToLocFields(loc) : { loc_provinsi: null, loc_kota: null, loc_kecamatan: null, loc_kelurahan: null }),
-        ...shared,
-      });
-    }
-  }
-  return rows;
-}
-
-/**
- * Grup baris preferensi tersimpan → kartu form. Baris dengan kriteria bersama
- * yang sama (jenis transaksi, budget, luas, tujuan, catatan) digabung jadi satu
- * kartu dengan banyak tipe & banyak lokasi.
- */
-function groupPreferensi(rows: PreferensiKlien[]): PreferensiForm[] {
-  const map = new Map<string, PreferensiForm>();
-  for (const p of rows) {
-    const sig = JSON.stringify([
-      p.jenis_transaksi || "",
-      p.budget_min ?? "", p.budget_max ?? "",
-      p.luas_min ?? "", p.luas_max ?? "",
-      /* legalitas WAJIB ikut sidik grup. Tanpanya, "Rumah SHM" dan "Rumah HGB"
-         dianggap satu kartu, dan sertifikat salah satunya hilang begitu
-         formulir disimpan ulang. */
-      p.legalitas || "",
-      /* Ikut sidik grup, alasan yang sama dengan legalitas: "Rumah dekat UNESA"
-         dan "Rumah dekat Tunjungan Plaza" adalah dua kriteria berbeda. */
-      p.dekat_nilai || "", p.dekat_radius ?? "", p.alamat_teks || "",
-      p.tujuan_beli || "", p.catatan || "",
-    ]);
-    let card = map.get(sig);
-    if (!card) {
-      card = {
-        tipe_properti:   [],
-        jenis_transaksi: p.jenis_transaksi || "",
-        locations:       [],
-        budget_min:      p.budget_min ? formatRupiah(String(p.budget_min)) : "",
-        budget_max:      p.budget_max ? formatRupiah(String(p.budget_max)) : "",
-        luas_min:        p.luas_min ? formatRupiah(String(p.luas_min)) : "",
-        luas_max:        p.luas_max ? formatRupiah(String(p.luas_max)) : "",
-        legalitas:       p.legalitas || "",
-        alamat_teks:     p.alamat_teks || "",
-        /* Chip tempat dirakit ulang dari kolom yang tersimpan. Label & ikonnya
-           diisi seadanya di sini; KeywordField menggantinya dengan yang benar
-           begitu agent menyentuh kolomnya. Menanyakan kamus dari komponen
-           formulir hanya demi label akan menambah satu permintaan jaringan
-           untuk sesuatu yang tidak mengubah apa pun saat disimpan. */
-        dekat:           p.dekat_nilai
-          ? { nilai: p.dekat_nilai, nama: p.dekat_nilai, label: "Tempat",
-              icon: "solar:map-point-bold-duotone", warna: "emerald",
-              radius: p.dekat_radius ?? 1500 }
-          : null,
-        tujuan_beli:     p.tujuan_beli || "",
-        catatan:         p.catatan || "",
-      };
-      map.set(sig, card);
-    }
-    /* Baris ber-tipe null tidak menambah centang apa pun — "semua tipe" adalah
-       daftar centang yang KOSONG, dan itulah cara ia dibaca kembali. */
-    if (p.tipe_properti && !card.tipe_properti.includes(p.tipe_properti)) {
-      card.tipe_properti.push(p.tipe_properti);
-    }
-    const region = locFieldsToRegion(p);
-    if (region && !card.locations.some(l => regionKey(l) === regionKey(region))) {
-      card.locations.push(region);
-    }
-  }
-  return Array.from(map.values());
-}
-
 /** Nomor WA → tampil per 4 digit dengan tanda "-" (mis. 8812-3456-7890) */
 function formatPhone(digits: string) {
   const d = digits.replace(/\D/g, "");
@@ -222,6 +70,11 @@ export default function KlienFormModal({ open, onClose, onSaved, initialData, ed
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState<string | null>(null);
   const [shown, setShown]   = useState(false);
+  /* Menyala hanya SESUDAH agent menekan simpan. Memerahkan kartu yang belum
+     sempat diisi adalah teguran untuk sesuatu yang belum dilakukan siapa pun —
+     dan formulir yang menegur sejak dibuka mengajari mata untuk mengabaikan
+     warna merahnya. */
+  const [periksa, setPeriksa] = useState(false);
   const scrollRef           = useRef<HTMLDivElement>(null);
   const prefRefs            = useRef<Record<number, HTMLDivElement | null>>({});
 
@@ -249,6 +102,7 @@ export default function KlienFormModal({ open, onClose, onSaved, initialData, ed
         setForm({ ...INITIAL_FORM, ...initialData, preferensi: [] });
       }
       setErr(null);
+      setPeriksa(false);
       return () => cancelAnimationFrame(t);
     } else {
       setShown(false);
@@ -302,10 +156,38 @@ export default function KlienFormModal({ open, onClose, onSaved, initialData, ed
     return d ? `62${d}` : "";
   }
 
+  /** Kartu pertama yang belum sah, beserta alasannya. */
+  function kartuBermasalah(): { i: number; pesan: string } | null {
+    for (let i = 0; i < form.preferensi.length; i++) {
+      const m = masalahPreferensi(form.preferensi[i]);
+      if (m) return { i, pesan: `Preferensi #${i + 1}: ${m.toLowerCase()}` };
+    }
+    return null;
+  }
+
   async function handleSave() {
     if (!form.nama.trim()) { setErr("Nama klien wajib diisi"); return; }
+
+    /* ── DIPERIKSA SEBELUM APA PUN DIKIRIM ─────────────────────────────────
+       Dulu kartu tanpa tipe DIBUANG diam-diam oleh `filter(...)`, dan kartu
+       tanpa lokasi dikirim lalu ditolak server tanpa ada yang membaca
+       jawabannya. Keduanya berakhir sama: kriteria yang agent yakin sudah ia
+       isi tidak pernah tersimpan, tanpa satu pun tanda di layar.
+
+       Sekarang formulir tidak berangkat sampai seluruh kartunya sah, dan yang
+       bermasalah digulirkan ke tengah layar supaya tidak perlu dicari. */
+    setPeriksa(true);
+    const buruk = kartuBermasalah();
+    if (buruk) {
+      setErr(buruk.pesan);
+      prefRefs.current[buruk.i]?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
     setSaving(true); setErr(null);
     try {
+      const barisPref = form.preferensi.flatMap(buildPrefPayloads);
+
       const payload: any = {
         nama:             form.nama.trim(),
         nomor_whatsapp:   buildPhone() || null,
@@ -319,9 +201,7 @@ export default function KlienFormModal({ open, onClose, onSaved, initialData, ed
         tanggal_follow_up: form.tanggal_follow_up || null,
         id_lead_asal:     form.id_lead_asal || undefined,
         id_properti_asal: form.id_properti_asal || undefined,
-        preferensi: form.preferensi
-          .filter(p => p.tipe_properti.length > 0)
-          .flatMap(buildPrefPayloads),
+        preferensi:       barisPref,
       };
 
       const url    = isEdit ? `/api/dashboard/klien/${editTarget!.id_klien}` : "/api/dashboard/klien";
@@ -332,40 +212,36 @@ export default function KlienFormModal({ open, onClose, onSaved, initialData, ed
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.message || `HTTP ${res.status}`);
-      }
-      const { data } = await res.json();
+      const j = await res.json().catch(() => ({} as any));
+      if (!res.ok || !j?.ok) throw new Error(j?.message || `Gagal menyimpan (HTTP ${res.status})`);
 
-      // Untuk edit, preferensi sudah dihandle di-update. Untuk create, sudah include dalam POST.
-      // Kalau edit: sync preferensi secara individual (hapus lama, tambah baru)
-      if (isEdit) {
-        const old = editTarget!.preferensi;
-        // hapus semua preferensi lama
-        await Promise.all(old.map(p =>
-          fetch(`/api/dashboard/klien/${editTarget!.id_klien}/preferensi/${p.id_preferensi}`, { method: "DELETE" })
-        ));
-        // tambah preferensi baru (expand tiap kartu → baris per tipe × lokasi)
-        const newRows = form.preferensi
-          .filter(p => p.tipe_properti.length > 0)
-          .flatMap(buildPrefPayloads);
-        await Promise.all(
-          newRows.map(payload =>
-            fetch(`/api/dashboard/klien/${editTarget!.id_klien}/preferensi`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            })
-          )
-        );
-        // fetch ulang data terbaru
-        const fresh = await fetch(`/api/dashboard/klien/${editTarget!.id_klien}`).then(r => r.json());
-        onSaved(fresh.data);
-      } else {
-        onSaved(data);
+      if (!isEdit) { onSaved(j.data); handleClose(); return; }
+
+      /* ── PREFERENSI DITULIS ULANG DALAM SATU TRANSAKSI ─────────────────
+         PATCH klien sengaja tidak menyentuh preferensi (kolom kontak dan
+         kriteria punya siklus hidup yang berbeda), jadi kriteria dikirim
+         terpisah — tapi sebagai SATU permintaan, bukan rentetan DELETE lalu
+         POST seperti sebelumnya.
+
+         Rentetan itu punya dua akhir buruk yang sama-sama senyap: gagal di
+         tengah membuat kriteria klien lenyap sebagian, dan DELETE yang gagal
+         sementara POST berhasil meninggalkan baris lama sebagai hantu —
+         layar menampilkan wilayah yang baru sementara pencarian aset masih
+         memakai yang lama. */
+      const resPref = await fetch(`/api/dashboard/klien/${editTarget!.id_klien}/preferensi`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferensi: barisPref }),
+      });
+      const jPref = await resPref.json().catch(() => ({} as any));
+      if (!resPref.ok || !jPref?.ok) {
+        throw new Error(jPref?.message || "Data kontak tersimpan, tapi preferensi gagal disimpan.");
       }
 
+      /* Klien dari PATCH + preferensi dari PUT. Tidak perlu satu GET lagi:
+         keduanya sudah mengembalikan bentuk yang sama dengan yang dibaca
+         daftar, dan permintaan ketiga cuma menambah satu kesempatan gagal. */
+      onSaved({ ...j.data, preferensi: jPref.data });
       handleClose();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Gagal menyimpan");
@@ -518,19 +394,29 @@ export default function KlienFormModal({ open, onClose, onSaved, initialData, ed
 
           {/* ── BAGIAN 3: PREFERENSI PROPERTI ── */}
           <Section icon="solar:home-bold-duotone" title="Preferensi Properti">
+            {/* Keadaan kosong yang MENJELASKAN, bukan sekadar melaporkan.
+                Preferensi bukan kolom pelengkap: ia satu-satunya bahan bakar
+                pencarian aset, email pengingat, dan tugas otomatis. Klien tanpa
+                kriteria tidak akan pernah muncul di mana pun, dan kalimat
+                "belum ada preferensi" tidak memberi tahu siapa pun soal itu. */}
             {form.preferensi.length === 0 && (
-              <p className="text-[12px] text-slate-500 text-center py-2">
-                Belum ada preferensi. Klik tombol di bawah untuk tambah.
-              </p>
+              <div className="rounded-2xl border border-dashed border-white/[0.1] bg-white/[0.02] px-4 py-4 text-center">
+                <p className="text-[12.5px] font-bold text-slate-200">Belum ada kriteria</p>
+                <p className="mx-auto mt-1 max-w-[17rem] text-[11.5px] leading-relaxed text-slate-500">
+                  Isi lokasi yang dicari — asisten langsung mencarikan asetnya dan
+                  mengabari Anda saat ada yang baru masuk. Boleh ditambahkan nanti.
+                </p>
+              </div>
             )}
 
             {form.preferensi.map((pref, i) => (
               <div key={i} ref={el => { prefRefs.current[i] = el; }}>
-                <PreferensiCard
+                <KartuPreferensi
                   index={i}
-                  pref={pref}
-                  onChange={(key, val) => setPrefField(i, key, val)}
-                  onRemove={() => removePreferensi(i)}
+                  form={pref}
+                  onUbah={(key, val) => setPrefField(i, key, val)}
+                  onHapus={() => removePreferensi(i)}
+                  sorotMasalah={periksa}
                 />
               </div>
             ))}
@@ -613,153 +499,6 @@ export default function KlienFormModal({ open, onClose, onSaved, initialData, ed
             </button>
           </div>
         </footer>
-      </div>
-    </div>
-  );
-}
-
-/* ── PREFERENSI CARD ── */
-function PreferensiCard({
-  index, pref, onChange, onRemove,
-}: {
-  index: number;
-  pref: PreferensiForm;
-  onChange: <K extends keyof PreferensiForm>(key: K, val: PreferensiForm[K]) => void;
-  onRemove: () => void;
-}) {
-  const [openPicker, setOpenPicker] = useState<"type" | "transaksi" | "location" | null>(null);
-  return (
-    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">
-          Preferensi #{index + 1}
-        </span>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="grid h-7 w-7 place-items-center rounded-lg border border-rose-400/20 bg-rose-500/10 text-rose-300 transition-colors hover:bg-rose-500/20"
-        >
-          <Icon icon="solar:trash-bin-2-bold-duotone" className="text-sm" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Tipe Properti" required>
-          <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] px-1 transition-all hover:border-white/20">
-            <TypePicker
-              theme="dark"
-              label=""
-              value={pref.tipe_properti.map(k => TIPE_PROPERTI_LABEL[k])}
-              options={TIPE_LABELS}
-              icons={TIPE_ICONS}
-              open={openPicker === "type"}
-              onOpenChange={v => setOpenPicker(v ? "type" : null)}
-              onChange={labels => onChange(
-                "tipe_properti",
-                labels.map(l => LABEL_TO_TIPE[l]).filter(Boolean)
-              )}
-            />
-          </div>
-        </Field>
-
-        <Field label="Jenis Transaksi">
-          <PremiumSelect
-            value={pref.jenis_transaksi}
-            onChange={v => onChange("jenis_transaksi", v as JenisTransaksi)}
-            placeholder="-- Semua --"
-            open={openPicker === "transaksi"}
-            onOpenChange={v => setOpenPicker(v ? "transaksi" : null)}
-            options={[
-              { value: "", label: "-- Semua --" },
-              ...(Object.entries(JENIS_TRANSAKSI_LABEL) as [JenisTransaksi, string][]).map(([k, v]) => ({ value: k, label: v })),
-            ]}
-          />
-        </Field>
-      </div>
-
-      <Field label="Lokasi yang Diinginkan">
-        <div className="h-[42px] rounded-xl border border-white/[0.08] bg-white/[0.03] px-1 transition-all hover:border-white/20">
-          <LocationPicker
-            theme="dark"
-            label=""
-            value={pref.locations}
-            onChange={next => onChange("locations", next)}
-            open={openPicker === "location"}
-            onOpenChange={v => setOpenPicker(v ? "location" : null)}
-          />
-        </div>
-        {pref.locations.length === 0 && (
-          <p className="mt-1 text-[10px] text-slate-500">Kosongkan untuk semua wilayah.</p>
-        )}
-      </Field>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Budget Min (Rp)">
-          <input
-            type="text"
-            inputMode="numeric"
-            value={pref.budget_min}
-            onChange={e => onChange("budget_min", formatRupiah(e.target.value))}
-            placeholder="500.000.000"
-            className={inputCls}
-          />
-        </Field>
-        <Field label="Budget Max (Rp)">
-          <input
-            type="text"
-            inputMode="numeric"
-            value={pref.budget_max}
-            onChange={e => onChange("budget_max", formatRupiah(e.target.value))}
-            placeholder="1.000.000.000"
-            className={inputCls}
-          />
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        {/* Label MENYEBUT dimensinya. "Luas Min" saja adalah sumber bug yang
-            baru diperbaiki: agent mengetik 500 untuk gudang bermaksud luas
-            tanah, sementara mesin dulu menerima luas bangunan juga. */}
-        <Field label={`${labelLuas(pref.tipe_properti)} min (m²)`}>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={pref.luas_min}
-            onChange={e => onChange("luas_min", formatRupiah(e.target.value))}
-            placeholder="1.000"
-            className={inputCls}
-          />
-        </Field>
-        <Field label={`${labelLuas(pref.tipe_properti)} max (m²)`}>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={pref.luas_max}
-            onChange={e => onChange("luas_max", formatRupiah(e.target.value))}
-            placeholder="5.000"
-            className={inputCls}
-          />
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Tujuan Beli">
-          <PremiumSelect
-            value={pref.tujuan_beli}
-            onChange={v => onChange("tujuan_beli", v as TujuanBeli)}
-            placeholder="-- Belum tahu --"
-            options={TUJUAN_OPTIONS}
-          />
-        </Field>
-        <Field label="Catatan Preferensi">
-          <input
-            type="text"
-            value={pref.catatan}
-            onChange={e => onChange("catatan", e.target.value)}
-            placeholder="Hal lain yang diinginkan..."
-            className={inputCls}
-          />
-        </Field>
       </div>
     </div>
   );

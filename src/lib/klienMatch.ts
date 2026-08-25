@@ -402,10 +402,20 @@ export function whereKasar(k: KriteriaMatch, opsi: OpsiMatch = {}): Prisma.Listi
     }
   }
 
-  /* Lewat `dan`, BUKAN `where.id_property` langsung: kalau tokennya juga tidak
-     bisa diterjemahkan (baris di atas), penugasan kedua akan menimpa yang
-     pertama — gerbang "dekat X" hilang tanpa jejak dan agent menerima daftar
-     yang mengabaikan kriteria yang paling ia yakini sedang berlaku. */
+  /* `kecuali` MENYATU dengan penyaring id yang mungkin sudah dipasang cabang
+     "dekat X" di atas, bukan menimpanya. Versi sebelumnya menugaskan ulang
+     `where.id_property`, dan itu menghapus gerbang `{ in: [] }` yang menandai
+     "patokan tempatnya tidak bisa diterjemahkan" — sehingga preferensi dengan
+     patokan yatim diam-diam mengabaikan patokannya, TAPI hanya untuk klien yang
+     pernah dikirimi sesuatu. Bug yang berbeda perilakunya per klien adalah bug
+     yang tidak pernah bisa direproduksi.
+
+     Penyatuannya lewat `dan`, bukan dengan membaca-lalu-menulis ulang
+     `where.id_property`: keduanya memperbaiki bug yang sama, tapi array `AND`
+     sudah menampung gerbang budget, luas, dan bentuk — menaruh gerbang keempat
+     di sana berarti tidak ada yang perlu tahu urutan penulisannya. Yang
+     membaca-lalu-menulis hanya benar selama cabang di atasnya kebetulan
+     dijalankan lebih dulu. */
   if (kecuali.length) dan.push({ id_property: { notIn: kecuali } });
 
   /* ── LOKASI DISARING DI TINGKAT YANG MENGIKAT ───────────────────────────

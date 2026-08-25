@@ -1,6 +1,7 @@
 // src/app/dashboard/components/mobile-sidebar.tsx
 "use client";
 
+import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "@iconify/react";
 import Image from "next/image";
@@ -8,6 +9,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { getDashboardMenu, type MenuItem } from "./list-menu";
+import { OVERLAY_Z } from "./overlay-context";
 
 type MobileSidebarProps = {
   open: boolean;
@@ -26,14 +28,26 @@ export default function MobileSidebar({ open, onClose }: MobileSidebarProps) {
   const jabatan = (session?.user as any)?.jabatan ?? null;
   const { homepage: homepageMenu, apps: appsMenu } = getDashboardMenu(jabatan);
 
+  // Esc menutup drawer — sama seperti dropdown chrome lain.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   return (
     <AnimatePresence>
       {open && (
         <>
           {/* Backdrop */}
           <motion.div
-            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+            className="fixed inset-0 touch-none bg-black/60 backdrop-blur-sm md:hidden"
+            style={{ zIndex: OVERLAY_Z.sidebarBackdrop }}
             onClick={onClose}
+            aria-hidden
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -41,10 +55,15 @@ export default function MobileSidebar({ open, onClose }: MobileSidebarProps) {
 
           {/* Sidebar */}
           <motion.aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu navigasi"
+            style={{ zIndex: OVERLAY_Z.sidebar }}
             className="
-              fixed inset-y-0 left-0 z-50 w-72
+              fixed inset-y-0 left-0 w-[min(18rem,86vw)]
               bg-[#040608] border-r border-white/10
               flex flex-col
+              pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]
               md:hidden
             "
             initial={{ x: -280 }}
@@ -53,7 +72,7 @@ export default function MobileSidebar({ open, onClose }: MobileSidebarProps) {
             transition={{ type: "tween", duration: 0.2 }}
           >
             {/* ── SCROLLABLE ZONE ────────────────────────── */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-5 pt-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pt-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 
               {/* Header */}
               <div className="mb-6 flex items-center justify-between">

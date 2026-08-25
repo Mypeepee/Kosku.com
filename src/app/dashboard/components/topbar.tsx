@@ -4,33 +4,32 @@
 import { Icon } from "@iconify/react";
 import Image from "next/image";
 import { useSession, signOut } from "next-auth/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import GlobalSearch from "./global-search";
 import NotificationBell from "./NotificationBell";
+import { useDashboardOverlay } from "./overlay-context";
 
-type DashboardTopbarProps = {
-  onOpenMobileSidebar?: () => void;
-};
-
-export default function DashboardTopbar({
-  onOpenMobileSidebar,
-}: DashboardTopbarProps) {
+export default function DashboardTopbar() {
   const { data: session } = useSession();
-  const [open, setOpen] = useState(false);
+  const { active, isOpen, open: openOverlay, toggle, close } = useDashboardOverlay();
+  const open = isOpen("profile");
   const profileRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click (works on touch devices)
+  // Close dropdown on outside click (works on touch devices).
+  // Pakai "click", bukan "pointerdown": menutup dropdown lebih awal
+  // memicu re-render yang mengganti node <svg> ikon tombol lain, dan
+  // browser membatalkan click untuk node yang hilang di tengah jalan.
   useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
+    const onDocClick = (e: MouseEvent) => {
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
-        setOpen(false);
+        close("profile");
       }
     };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, []);
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [close]);
 
   return (
     <div className="sticky top-0 z-20 flex items-center gap-2 sm:gap-3 border-b border-white/5 bg-[#050608]/90 backdrop-blur px-3 sm:px-5 py-3 sm:py-4">
@@ -38,7 +37,9 @@ export default function DashboardTopbar({
       {/* Burger — mobile only, shrink-0 so it never gets squeezed */}
       <button
         type="button"
-        onClick={onOpenMobileSidebar}
+        onClick={() => toggle("sidebar")}
+        aria-label="Buka menu"
+        aria-expanded={isOpen("sidebar")}
         className="flex md:hidden h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-[#050608] text-slate-200 hover:bg-white/5 active:scale-95 transition-transform"
       >
         <Icon icon="solar:hamburger-menu-linear" className="h-4 w-4" />
@@ -57,12 +58,14 @@ export default function DashboardTopbar({
         <div
           ref={profileRef}
           className="relative"
-          onMouseEnter={() => setOpen(true)}
-          onMouseLeave={() => setOpen(false)}
+          // Hover-open hanya kalau tidak ada overlay lain yang sedang
+          // terbuka — biar melintasi avatar tidak menutup panel notifikasi.
+          onMouseEnter={() => { if (!active) openOverlay("profile"); }}
+          onMouseLeave={() => close("profile")}
         >
           <button
             type="button"
-            onClick={() => setOpen((s) => !s)}
+            onClick={() => toggle("profile")}
             className="flex items-center gap-2 rounded-full border border-white/10 bg-[#050608] p-[3px] sm:pl-1.5 sm:pr-3 sm:py-1 hover:bg-white/5 active:scale-95 transition-all"
             aria-label="Menu profil"
           >
@@ -116,7 +119,7 @@ export default function DashboardTopbar({
 
                 <Link
                   href="/profile"
-                  onClick={() => setOpen(false)}
+                  onClick={() => close("profile")}
                   className="flex items-center gap-2.5 px-4 py-3 text-sm text-slate-300 hover:bg-white/5 hover:text-emerald-300 transition-colors"
                 >
                   <Icon icon="solar:user-id-bold" className="text-base shrink-0" />
