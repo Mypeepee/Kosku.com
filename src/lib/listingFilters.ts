@@ -501,7 +501,16 @@ export function jadwalMenimpaSort(
 export function buildListingWhere(
   state: FilterState,
   konteks: KonteksFilter,
-  sekarang: Date = new Date()
+  sekarang: Date = new Date(),
+  /**
+   * Kolom yang dipakai filter harga. Bawaannya `harga_efektif` — angka yang
+   * tercetak di kartu. Pemanggil di sisi server mengoper hasil
+   * `kolomHargaListing()` supaya filter memakai kolom yang SAMA dengan
+   * urutannya, termasuk saat database itu belum menjalankan
+   * prisma/migration_harga_efektif.sql (kolom turunannya ada tapi NULL, dan
+   * filter di atasnya diam-diam nol hasil). Lihat src/lib/listingSortRuntime.ts.
+   */
+  kolomHarga: "harga_efektif" | "nilai_limit_lelang" | "harga" = "harga_efektif"
 ): Prisma.ListingWhereInput {
   // Pencarian ID bersifat eksak. Filter sekunder sengaja tidak ikut membatasi:
   // pemakai yang mengetik nomor properti ingin properti ITU, bukan "properti
@@ -538,16 +547,15 @@ export function buildListingWhere(
     and.push({ kategori: { in: state.kategori as any } });
   }
 
-  // Harga memakai `harga_efektif` — kolom yang SAMA dengan yang diurut
-  // (listingSort.ts) dan yang dicetak kartu. Kolom ini dijaga trigger, lihat
-  // prisma/migration_harga_efektif.sql.
+  // Harga memakai kolom yang SAMA dengan yang diurut (listingSort.ts) dan yang
+  // dicetak kartu — lihat parameter `kolomHarga` di atas.
   if (aktif("harga") && (state.minHarga !== undefined || state.maxHarga !== undefined)) {
     and.push({
-      harga_efektif: {
+      [kolomHarga]: {
         ...(state.minHarga !== undefined && { gte: state.minHarga }),
         ...(state.maxHarga !== undefined && { lte: state.maxHarga }),
       },
-    });
+    } as Prisma.ListingWhereInput);
   }
 
   if (aktif("luasTanah") && (state.minLT !== undefined || state.maxLT !== undefined)) {

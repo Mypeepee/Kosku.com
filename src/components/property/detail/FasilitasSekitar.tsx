@@ -211,19 +211,7 @@ export default function FasilitasSekitar({
           dipakai: pembacanya tidak tahu apakah artinya meleset 50 m (tidak
           apa-apa) atau 8 km (asetnya bahkan bukan di kecamatan yang ia kira).
           Yang berguna adalah SEBERAPA, dan dari mana angka itu berasal. */}
-      <p className="mt-5 flex items-start gap-1.5 text-[11px] leading-relaxed text-white/25">
-        <Icon icon="solar:info-circle-linear" className="mt-0.5 shrink-0" />
-        <span>
-          Jarak dihitung garis lurus dari titik properti; sumber data
-          OpenStreetMap.
-          {titikPerkiraan && (
-            <span className={presisi && presisi !== "ALAMAT" ? "text-amber-300/60" : undefined}>
-              {" "}
-              {catatanPresisi}
-            </span>
-          )}
-        </span>
-      </p>
+
     </div>
   );
 }

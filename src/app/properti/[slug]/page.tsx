@@ -11,12 +11,12 @@ import {
   parseFilters,
 } from "@/lib/listingFilters";
 import {
-  buildOrderBy,
   buildSortWhere,
   parseHalaman,
   parseSort,
   urlHalamanTerakhir,
 } from "@/lib/listingSort";
+import { kolomHargaListing, orderByListing } from "@/lib/listingSortRuntime";
 import KategoriPageClient from "./KategoriPageClient";
 import {
   ambilJarakKeTempat,
@@ -238,6 +238,9 @@ export default async function KategoriPage({ params, searchParams }: Props) {
         siapTempat.tempat ? { ...filters, q: siapTempat.q } : filters,
         konteks,
         sekarang,
+        // Kolom harga yang benar-benar terisi di database ini — sama dengan
+        // yang dipakai orderBy di bawah. Lihat listingSortRuntime.ts.
+        await kolomHargaListing(konteks),
       ),
       ...(tempatWhere ? [tempatWhere] : []),
       ...(sortWhere ? [sortWhere] : []),
@@ -255,8 +258,12 @@ export default async function KategoriPage({ params, searchParams }: Props) {
   // mengapung, TAPI hanya pada urutan bawaan "terbaru". Pada urutan eksplisit
   // ia tidak boleh ikut campur — kartu pertama daftar "harga terendah" harus
   // benar-benar yang termurah, bukan hot deal yang kebetulan lebih mahal.
-  const orderBy: Prisma.ListingOrderByWithRelationInput[] = (() => {
-    const inti = buildOrderBy(sort, konteks);
+  const orderBy: Prisma.ListingOrderByWithRelationInput[] = await (async () => {
+    // Lewat lapis sisi-server, bukan buildOrderBy langsung: di database yang
+    // belum menjalankan prisma/migration_harga_efektif.sql, `harga_efektif`
+    // ada tapi seluruhnya NULL dan ORDER BY di atasnya diam-diam tidak
+    // mengurutkan apa pun. Lihat src/lib/listingSortRuntime.ts.
+    const inti = await orderByListing(sort, konteks);
     if (sort !== "terbaru") return inti;
     const [status, ...sisa] = inti;
     return [status, { is_hot_deal: "desc" }, ...sisa];

@@ -9,6 +9,7 @@ import {
   type SumberParam,
 } from "@/lib/listingFilters";
 import { buildSortWhere, parseSort } from "@/lib/listingSort";
+import { kolomHargaListing } from "@/lib/listingSortRuntime";
 
 /**
  * Pratinjau jumlah hasil untuk kriteria yang BELUM diterapkan.
@@ -55,7 +56,15 @@ export async function GET(req: NextRequest) {
     // jadwalnya persis di batas hari bisa terhitung di satu sisi saja.
     const sekarang = new Date();
 
-    const filterWhere = buildListingWhere(state, konteks, sekarang);
+    // Kolom harga diambil dari lapis yang sama dengan halaman
+    // (listingSortRuntime), supaya angka pratinjau di tombol "Terapkan" tidak
+    // pernah dihitung dari kolom yang berbeda dengan isi halamannya.
+    const filterWhere = buildListingWhere(
+      state,
+      konteks,
+      sekarang,
+      await kolomHargaListing(konteks),
+    );
 
     // Sebagian pilihan urut di lelang ikut menyaring jadwal. Kalau pemakai
     // sudah memilih filter jadwal sendiri, filternya yang menang — kalau tidak,

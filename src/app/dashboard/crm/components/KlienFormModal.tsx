@@ -11,6 +11,7 @@ import { PremiumSelect, PremiumDateTimePicker, type PremiumOption } from "./CrmF
 import LocationPicker from "@/components/search/LocationPicker";
 import TypePicker from "@/components/search/TypePicker";
 import { regionKey, type RegionLevel, type SelectedRegion } from "@/lib/regionSearch";
+import { labelLuas } from "@/lib/klienRingkas";
 
 /* Opsi dropdown — dipakai PremiumSelect */
 const SUMBER_OPTIONS: PremiumOption[] = [
@@ -716,7 +717,10 @@ function PreferensiCard({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Luas Min (m²)">
+        {/* Label MENYEBUT dimensinya. "Luas Min" saja adalah sumber bug yang
+            baru diperbaiki: agent mengetik 500 untuk gudang bermaksud luas
+            tanah, sementara mesin dulu menerima luas bangunan juga. */}
+        <Field label={`${labelLuas(pref.tipe_properti)} min (m²)`}>
           <input
             type="text"
             inputMode="numeric"
@@ -726,7 +730,7 @@ function PreferensiCard({
             className={inputCls}
           />
         </Field>
-        <Field label="Luas Max (m²)">
+        <Field label={`${labelLuas(pref.tipe_properti)} max (m²)`}>
           <input
             type="text"
             inputMode="numeric"

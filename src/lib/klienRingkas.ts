@@ -32,6 +32,37 @@ const TIPE_LABEL: Record<string, string> = {
 const angka = (v: Prisma.Decimal | number | null | undefined): number | null =>
   v === null || v === undefined ? null : Number(v);
 
+/* ── DIMENSI LUAS ──────────────────────────────────────────────────────────
+   Preferensi hanya punya SATU pasang kolom luas, dan mesin pencocokan
+   (`luasMengikat()` di klienMatch.ts) membandingkannya dengan LUAS TANAH —
+   kecuali untuk apartemen, yang memang tidak punya tanah.
+
+   Label WAJIB mengatakan yang mana. Kolom bertuliskan "Luas Min" adalah
+   sumber bug yang baru saja diperbaiki: agent mengetik 500 untuk gudang,
+   bermaksud luas tanah, sementara mesin menerima luas bangunan juga. Kalau
+   layarnya sendiri tidak menyebut dimensinya, agent tidak punya cara menduga
+   angka mana yang sedang dibandingkan — dan ia akan menyalahkan hasilnya,
+   bukan isiannya. */
+
+/** Dimensi yang mengikat untuk sekumpulan tipe yang dipilih bersamaan.
+ *  Apartemen hanya jadi "bangunan" bila ia SATU-SATUNYA tipe: "apartemen atau
+ *  ruko, minimal 100 m²" tetap diukur dari tanah, sama seperti mesinnya
+ *  (baris ruko memakai luas tanah, baris apartemen memakai luas unit). */
+export function dimensiLuas(tipes: (string | null | undefined)[]): "TANAH" | "BANGUNAN" {
+  const t = tipes.filter(Boolean) as string[];
+  return t.length > 0 && t.every(x => x === "APARTEMEN") ? "BANGUNAN" : "TANAH";
+}
+
+/** "Luas tanah" / "Luas bangunan" — untuk label formulir. */
+export function labelLuas(tipes: (string | null | undefined)[]): string {
+  return dimensiLuas(tipes) === "BANGUNAN" ? "Luas bangunan" : "Luas tanah";
+}
+
+/** "LT" / "LB" — untuk chip & label ringkas yang ruangnya sempit. */
+export function singkatanLuas(tipes: (string | null | undefined)[]): string {
+  return dimensiLuas(tipes) === "BANGUNAN" ? "LB" : "LT";
+}
+
 /** Rupiah sependek mungkin tanpa jadi ambigu. "Rp 1,5 M" bukan pemanisan:
  *  chip preferensi dan subjek email keduanya punya ruang yang sangat sempit,
  *  dan "Rp 1.500.000.000" memakan seluruhnya. */
@@ -187,9 +218,13 @@ export function ringkasGrup(rows: PrefRingkas[]): string {
 
   const lmin = (rows[0] as any).luas_min == null ? null : Number((rows[0] as any).luas_min);
   const lmax = (rows[0] as any).luas_max == null ? null : Number((rows[0] as any).luas_max);
-  if (lmin && lmax) bagian.push(`${lmin.toLocaleString("id-ID")}–${lmax.toLocaleString("id-ID")} m²`);
-  else if (lmin) bagian.push(`≥ ${lmin.toLocaleString("id-ID")} m²`);
-  else if (lmax) bagian.push(`≤ ${lmax.toLocaleString("id-ID")} m²`);
+  /* "LT ≥ 500 m²", bukan "≥ 500 m²". Dua huruf, dan mereka yang menjawab
+     pertanyaan pertama agent saat melihat hasil: 500 itu tanahnya atau
+     bangunannya? */
+  const dim = singkatanLuas(rows.map(r => r.tipe_properti));
+  if (lmin && lmax) bagian.push(`${dim} ${lmin.toLocaleString("id-ID")}–${lmax.toLocaleString("id-ID")} m²`);
+  else if (lmin) bagian.push(`${dim} ≥ ${lmin.toLocaleString("id-ID")} m²`);
+  else if (lmax) bagian.push(`${dim} ≤ ${lmax.toLocaleString("id-ID")} m²`);
 
   return bagian.join(" · ");
 }

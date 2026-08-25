@@ -145,12 +145,71 @@ export function tingkatLokasi(k: KriteriaMatch): { tingkat: TingkatLokasi; nilai
   return { tingkat: "bebas", nilai: null };
 }
 
-/** Kolom listing yang dipakai membandingkan luas.
- *  APARTEMEN tidak punya luas tanah sama sekali (lihat guard di form
- *  add-property), jadi membandingkannya dengan luas_tanah akan membuang
- *  SELURUH apartemen begitu klien mengisi luas minimum. */
-function kolomLuas(tipe: kategori_properti_enum): "luas_bangunan" | "luas_tanah" {
-  return tipe === "APARTEMEN" ? "luas_bangunan" : "luas_tanah";
+/* ── LUAS: SATU ANGKA, DAN IA BERARTI LUAS TANAH ───────────────────────────
+   Formulir preferensi hanya punya SATU pasang kolom luas, dan agent yang
+   mengetik "500" untuk gudang bermaksud LUAS TANAH. Aturan lama menerima
+   `luas_tanah ATAU luas_bangunan` — "paling murah hati", supaya apartemen
+   (tanpa tanah) dan tanah (tanpa bangunan) sama-sama terlayani satu kolom.
+
+   Kemurahan hati itu BOCOR ke arah yang salah, dan terukur: rumah dengan
+   LT 72 / LB 90 lolos untuk klien yang meminta minimal 80 m² tanah — lewat
+   luas BANGUNANnya. Agent membaca kartunya, melihat "LT 72", dan menyimpulkan
+   pencariannya rusak. Pada gudang & pabrik selisihnya jauh lebih besar:
+   LT 100 dengan bangunan bertingkat bisa lolos syarat "minimal 500 m²".
+
+   Aturan sekarang: bangunan HANYA dipakai ketika tanah tidak ada angkanya
+   sama sekali. Ia tidak pernah bisa MENYELAMATKAN baris yang luas tanahnya
+   sudah terisi dan tidak memenuhi syarat — di situlah letak seluruh bocornya.
+
+   APARTEMEN dibalik, dan bukan karena selera: apartemen tidak punya tanah.
+   Yang penting, arah cadangannya juga dibalik. Pada basis data ini hanya
+   SATU dari 1.325 apartemen yang punya `luas_bangunan`; 1.324 sisanya menaruh
+   luas unitnya di `luas_tanah` (begitulah lot lelang menuliskannya). Aturan
+   lama memaksa apartemen dibandingkan dengan `luas_bangunan` saja, jadi SETIAP
+   pencarian apartemen yang menyebut luas mengembalikan NOL — pemadaman total,
+   tanpa satu pun galat. Diuji: 29 apartemen di Jawa Timur, 0 begitu luas
+   minimum diisi. */
+
+/** Luas yang MENGIKAT untuk sebuah listing, menurut tipe yang diminta klien.
+ *  Mengembalikan 0 bila tidak ada angka yang bisa dipakai — dan 0 selalu
+ *  gagal memenuhi syarat minimum, bukan lolos diam-diam. */
+export function luasMengikat(
+  l: { luas_tanah?: Prisma.Decimal | number | null; luas_bangunan?: Prisma.Decimal | number | null },
+  tipe: kategori_properti_enum | null,
+): number {
+  const lt = l.luas_tanah ? Number(l.luas_tanah) : 0;
+  const lb = l.luas_bangunan ? Number(l.luas_bangunan) : 0;
+  // Apartemen tidak punya tanah: angka mana pun yang terisi adalah luas unitnya.
+  if (tipe === "APARTEMEN") return lb > 0 ? lb : lt;
+  // Tanah tidak punya bangunan: tidak ada cadangan yang masuk akal.
+  if (tipe === "TANAH") return lt;
+  // Sisanya: tanah dulu. Bangunan hanya bila tanahnya memang tak berangka.
+  return lt > 0 ? lt : lb;
+}
+
+/* ── BENTUK ASET: TANAH KOSONG vs TERBANGUN ────────────────────────────────
+   Gerbang kategori memakai kolom `kategori`, dan pada data lelang kolom itu
+   adalah EMBER TEMPAT LOT ITU DIAMBIL — bukan jenis asetnya. `bukan_properti`
+   sudah membuang lot yang bukan properti sama sekali; yang tersisa adalah
+   kesalahan yang lebih halus: lot yang memang properti tapi bentuknya bukan
+   yang diminta. Di basis data ini 2.467 lot di ember TANAH sebenarnya
+   "berikut bangunan", dan 238 lot di ember RUMAH sebenarnya tanah kosong —
+   termasuk 76 hektar kebun yang dikirim ke orang yang mencari rumah tinggal.
+
+   `listing.ada_bangunan` (trigger, prisma/migration_listing_ada_bangunan.sql)
+   menjawab satu bit itu. NULL = tidak diketahui, dan NULL TIDAK PERNAH
+   dibuang: yang dibuang hanya nilai yang bertentangan dengan permintaan. */
+
+/** Bentuk yang dituntut sebuah kategori, atau null bila kategori itu tidak
+ *  menuntut apa pun (KOS bisa berupa gedung maupun kamar dalam rumah, dan
+ *  "semua tipe" jelas tidak menuntut apa-apa). */
+export function bentukDiminta(tipe: kategori_properti_enum | null): boolean | null {
+  if (!tipe) return null;
+  if (tipe === "TANAH") return false;
+  if (tipe === "APARTEMEN") return true;
+  if (tipe === "KOS") return null;
+  // RUMAH, RUKO, GUDANG, PABRIK, TOKO, HOTEL_DAN_VILLA — semuanya bangunan.
+  return true;
 }
 
 /* ── NORMALISASI LOKASI ────────────────────────────────────────────────────
@@ -234,7 +293,7 @@ export type OpsiMatch = {
   kecuali?: bigint[];
   /** Longgarkan satu gerbang. HANYA dipakai diagnosaKosong() untuk menjelaskan
    *  kenapa hasilnya nol — jalur normal tidak pernah memakainya. */
-  longgar?: "budget" | "lokasi" | "luas" | null;
+  longgar?: "budget" | "lokasi" | "luas" | "bentuk" | null;
 };
 
 /** TAHAP 1 — penyempit kolam di SQL. Sengaja LEBIH LONGGAR dari kriteria
@@ -243,6 +302,13 @@ export type OpsiMatch = {
  *  cocok, karena tidak ada tahap berikutnya yang bisa mengembalikannya. */
 export function whereKasar(k: KriteriaMatch, opsi: OpsiMatch = {}): Prisma.ListingWhereInput {
   const { kecuali = [], longgar = null } = opsi;
+
+  /* Syarat yang butuh OR dikumpulkan di sini lalu dipasang sebagai `AND`.
+     Bukan gaya penulisan: `where.OR` hanya ADA SATU. Versi sebelumnya memakai
+     `where.OR` untuk budget; menambahkan gerbang ber-OR kedua langsung di
+     `where.OR` akan MENIMPA gerbang budget tanpa satu pun galat — plafon
+     harga klien hilang diam-diam dan hasilnya terlihat "cuma agak longgar". */
+  const dan: Prisma.ListingWhereInput[] = [];
 
   const where: Prisma.ListingWhereInput = {
     // Gerbang keras 1: aset yang tidak tersedia bukan rekomendasi, ia kabar buruk.
@@ -273,6 +339,20 @@ export function whereKasar(k: KriteriaMatch, opsi: OpsiMatch = {}): Prisma.Listi
      memperlakukannya sebagai "harus NULL juga" akan mengosongkan hasil untuk
      hampir semua klien. */
   if (k.legalitas) where.legalitas = k.legalitas;
+
+  /* Gerbang keras 5: BENTUK ASET (tanah kosong vs terbangun).
+     Lapis kedua atas kebohongan kolom `kategori`, lihat catatan di
+     bentukDiminta(). `null` pada listing berarti "tidak diketahui" dan HARUS
+     ikut lolos — kalau tidak, seluruh listing yang diinput agent sendiri
+     (judulnya bebas, jadi sering tak terdeteksi) lenyap dari rekomendasi. */
+  const bentuk = longgar === "bentuk" ? null : bentukDiminta(k.tipe_properti);
+  if (bentuk !== null) {
+    /* Ditulis sebagai OR eksplisit, BUKAN `{ not: !bentuk }`: perlakuan Prisma
+       atas NULL di dalam `not` berbeda antar versi, dan gerbang yang diam-diam
+       berubah arti saat naik versi adalah persis jenis kerusakan yang tidak
+       akan ada yang lihat sampai seorang klien menerima aset yang salah. */
+    dan.push({ OR: [{ ada_bangunan: bentuk }, { ada_bangunan: null }] });
+  }
 
   /* Patokan teks alamat. Murah karena `alamat_lengkap` sudah ber-index
      trigram (5 ms pada 120 ribu baris) — tanpa index itu ini akan jadi
@@ -318,11 +398,15 @@ export function whereKasar(k: KriteriaMatch, opsi: OpsiMatch = {}): Prisma.Listi
          kamus). Dibiarkan TANPA penyaring akan menghasilkan daftar yang
          mengabaikan kriteria diam-diam — jauh lebih menyesatkan daripada nol
          hasil, karena agent mengira asetnya memang dekat. */
-      where.id_property = { in: [] };
+      dan.push({ id_property: { in: [] } });
     }
   }
 
-  if (kecuali.length) where.id_property = { notIn: kecuali };
+  /* Lewat `dan`, BUKAN `where.id_property` langsung: kalau tokennya juga tidak
+     bisa diterjemahkan (baris di atas), penugasan kedua akan menimpa yang
+     pertama — gerbang "dekat X" hilang tanpa jejak dan agent menerima daftar
+     yang mengabaikan kriteria yang paling ia yakini sedang berlaku. */
+  if (kecuali.length) dan.push({ id_property: { notIn: kecuali } });
 
   /* ── LOKASI DISARING DI TINGKAT YANG MENGIKAT ───────────────────────────
      Versi lama hanya menyaring KOTA di SQL, dan menyerahkan kecamatan serta
@@ -365,16 +449,55 @@ export function whereKasar(k: KriteriaMatch, opsi: OpsiMatch = {}): Prisma.Listi
   const bmaxAsli = angka(k.budget_max);
   const bmax = longgar === "budget" && bmaxAsli ? bmaxAsli * 1.1 : bmaxAsli;
   if (bmin !== null || bmax !== null) {
-    where.OR = [
-      {
-        harga_efektif: {
-          ...(bmin !== null ? { gte: new Prisma.Decimal(bmin) } : {}),
-          ...(bmax !== null ? { lte: new Prisma.Decimal(bmax) } : {}),
+    dan.push({
+      OR: [
+        {
+          harga_efektif: {
+            ...(bmin !== null ? { gte: new Prisma.Decimal(bmin) } : {}),
+            ...(bmax !== null ? { lte: new Prisma.Decimal(bmax) } : {}),
+          },
         },
-      },
-      { harga_efektif: null },
-    ];
+        { harga_efektif: null },
+      ],
+    });
   }
+
+  /* ── LUAS DISARING DI SQL, BUKAN CUMA DI JAVASCRIPT ─────────────────────
+     Dulu luas sepenuhnya diserahkan ke tahap kedua, dan itu bug yang sama
+     bentuknya dengan bug lokasi di atas — hanya lebih sulit dilihat.
+
+     Kolamnya dibatasi (KOLAM = 1.200 baris, dan panel "Siap dikirim" bahkan
+     memakai 80) dan diurutkan menurut TANGGAL, bukan menurut luas. Untuk
+     kriteria seperti "gudang di Jawa Timur minimal 500 m²", 1.200 baris
+     TERBARU bisa saja hampir seluruhnya berluas kecil: aset yang benar
+     tersaring keluar sebelum sempat dinilai, dan agent melihat sepuluh hasil
+     padahal ada ratusan. Tidak ada galat, tidak ada tanda.
+
+     Ditulis sebagai OR agar tetap SUPERSET yang aman dari `luasMengikat()`:
+     cabang kedua menangkap baris yang kolom utamanya kosong sehingga
+     cadangannya yang berlaku. Keputusan akhirnya tetap di `lolosKetat()`. */
+  const lmin = longgar === "luas" ? null : angka(k.luas_min);
+  const lmax = longgar === "luas" ? null : angka(k.luas_max);
+  if (lmin !== null || lmax !== null) {
+    const rentang = {
+      ...(lmin !== null ? { gte: new Prisma.Decimal(lmin) } : {}),
+      ...(lmax !== null ? { lte: new Prisma.Decimal(lmax) } : {}),
+    };
+    const utama = k.tipe_properti === "APARTEMEN" ? "luas_bangunan" : "luas_tanah";
+    const cadangan = utama === "luas_bangunan" ? "luas_tanah" : "luas_bangunan";
+    const cocok = (kolom: string): Prisma.ListingWhereInput => ({ [kolom]: rentang });
+    const takBerangka = (kolom: string): Prisma.ListingWhereInput => ({
+      OR: [{ [kolom]: null }, { [kolom]: { lte: new Prisma.Decimal(0) } }],
+    });
+    dan.push(
+      k.tipe_properti === "TANAH"
+        // Tanah tidak punya bangunan — tidak ada cadangan yang masuk akal.
+        ? cocok("luas_tanah")
+        : { OR: [cocok(utama), { AND: [takBerangka(utama), cocok(cadangan)] }] },
+    );
+  }
+
+  if (dan.length) where.AND = dan;
 
   return where;
 }
@@ -412,25 +535,15 @@ export function lolosKetat(l: ListingRingkas & {
     const lmin = angka(k.luas_min);
     const lmax = angka(k.luas_max);
     if (lmin !== null || lmax !== null) {
-      const lt = l.luas_tanah ? Number(l.luas_tanah) : 0;
-      const lb = l.luas_bangunan ? Number(l.luas_bangunan) : 0;
-      const dalamRentang = (v: number) =>
-        v > 0 && (lmin === null || v >= lmin) && (lmax === null || v <= lmax);
-
-      /* Tanpa tipe, aturan yang dipakai adalah yang PALING MURAH HATI: salah
-         satu dimensi masuk sudah cukup. Memilih salah satu kolom secara
-         sepihak akan membuang seluruh apartemen (tanpa luas tanah) atau
-         seluruh tanah (tanpa luas bangunan). */
-      const tipe = k.tipe_properti ? String(k.tipe_properti).toUpperCase() : "";
-      /* TANAH hanya punya luas tanah; APARTEMEN hanya punya luas bangunan
-         (lihat guard form add-property) — membandingkan apartemen dengan
-         luas_tanah akan membuang SELURUH apartemen. Sisanya lolos bila SALAH
-         SATU dimensinya masuk: rumah LT 90 / LB 120 memang layak muncul untuk
-         orang yang minta "minimal 100 m²". */
-      const ok = tipe === "TANAH" ? dalamRentang(lt)
-               : tipe === "APARTEMEN" ? dalamRentang(lb)
-               : dalamRentang(lt) || dalamRentang(lb);
-      if (!ok) return false;
+      /* SATU angka yang mengikat, dipilih menurut tipe — bukan "salah satu
+         dari dua dimensi boleh masuk". Aturan lama meloloskan rumah LT 72
+         untuk klien yang minta minimal 80 m² tanah, lewat luas BANGUNANnya;
+         pada gudang & pabrik selisihnya jadi LT 100 melawan syarat 500 m².
+         Lihat catatan panjang di luasMengikat(). */
+      const v = luasMengikat(l, k.tipe_properti);
+      if (!(v > 0)) return false;
+      if (lmin !== null && v < lmin) return false;
+      if (lmax !== null && v > lmax) return false;
     }
   }
 
@@ -457,7 +570,15 @@ export async function cariCocok<T extends Parameters<typeof lolosKetat>[0]>(
   k: KriteriaMatch,
   opsi: OpsiMatch & { select?: any; tambahanWhere?: Prisma.ListingWhereInput; maks?: number } = {},
 ): Promise<T[]> {
-  const where: Prisma.ListingWhereInput = { ...whereKasar(k, opsi), ...(opsi.tambahanWhere ?? {}) };
+  /* Digabung lewat `AND`, BUKAN dengan menyebar dua objek jadi satu.
+     `whereKasar()` memakai `AND` untuk menampung gerbang-gerbang ber-OR
+     (budget, luas, bentuk), dan penyebaran objek akan MENIMPA seluruh isinya
+     begitu `tambahanWhere` kebetulan juga punya `AND` — plafon harga, batas
+     luas, dan syarat bentuk hilang sekaligus, tanpa satu pun galat. */
+  const tambahan = opsi.tambahanWhere;
+  const where: Prisma.ListingWhereInput = tambahan
+    ? { AND: [whereKasar(k, opsi), tambahan] }
+    : whereKasar(k, opsi);
   const kolam = (await prisma.listing.findMany({
     where,
     take: Math.min(opsi.maks ?? KOLAM, KOLAM),
@@ -500,6 +621,7 @@ export function lolosSemuaGerbang(
   l: ListingRingkas & {
     status_tayang?: string;
     bukan_properti?: boolean;
+    ada_bangunan?: boolean | null;
     legalitas?: string | null;
     alamat_lengkap?: string | null;
     tempatDekat?: { id_tempat: bigint; jarak_meter: number; presisi: string }[];
@@ -522,6 +644,19 @@ export function lolosSemuaGerbang(
     l.jenis_transaksi !== undefined &&
     !transaksiUntuk(k.maksud, k.jenis_transaksi).includes(l.jenis_transaksi as jenis_transaksi_enum)
   ) return false;
+  /* Gerbang 4a — BENTUK ASET. Kembaran gerbang `ada_bangunan` di whereKasar.
+     Sama seperti gerbang di atasnya, ia hanya menghakimi bila kolomnya ikut
+     ter-select; kolom yang tidak diambil TIDAK boleh diam-diam meloloskan
+     baris, jadi pemanggil wajib memasukkan `ada_bangunan` ke select-nya
+     (lihat SELECT_ASET_BARU di cron). NULL = tidak diketahui = lolos. */
+  const bentuk = bentukDiminta(k.tipe_properti);
+  if (
+    bentuk !== null &&
+    (l as any).ada_bangunan !== undefined &&
+    (l as any).ada_bangunan !== null &&
+    (l as any).ada_bangunan !== bentuk
+  ) return false;
+
   // Gerbang 4b — patokan teks alamat.
   const teksAlamat = (k.alamat_teks || "").trim().toLowerCase();
   if (teksAlamat.length >= 3) {
@@ -803,9 +938,15 @@ export type Diagnosa = {
   jikaBudgetNaik10: number;
   jikaLokasiDiperluas: number;
   jikaLuasDiabaikan: number;
+  /** Berapa yang muncul kalau syarat BENTUK aset (tanah kosong vs terbangun)
+   *  dilepas. Tanpa angka ini, klien yang mencari TANAH bisa melihat layar
+   *  kosong sementara ada 40 lot "tanah berikut bangunan" di daerah itu —
+   *  dan tidak ada satu pun petunjuk bahwa itulah yang menahannya. */
+  jikaBentukDiabaikan: number;
   tingkatLokasi: TingkatLokasi;
   adaBudget: boolean;
   adaLuas: boolean;
+  adaBentuk: boolean;
 };
 
 export async function diagnosaKosong(
@@ -824,10 +965,16 @@ export async function diagnosaKosong(
     ...(k.tipe_properti ? { kategori: k.tipe_properti } : {}),
     jenis_transaksi: { in: transaksiUntuk(k.maksud, k.jenis_transaksi) },
     ...(opsi.kecuali?.length ? { id_property: { notIn: opsi.kecuali } } : {}),
+    /* Gerbang bentuk ikut, alasan yang sama: kolam dasar yang lebih longgar
+       daripada jalur sungguhan membuat seluruh angka diagnosa membesar. */
+    ...(bentukDiminta(k.tipe_properti) !== null
+      ? { OR: [{ ada_bangunan: bentukDiminta(k.tipe_properti) }, { ada_bangunan: null }] }
+      : {}),
   };
 
   const adaBudget = angka(k.budget_max) !== null || angka(k.budget_min) !== null;
   const adaLuas = angka(k.luas_min) !== null || angka(k.luas_max) !== null;
+  const adaBentuk = bentukDiminta(k.tipe_properti) !== null;
   const lok = tingkatLokasi(k);
 
   /* Tiap pelonggaran dijalankan lewat cariCocok() yang sama, bukan lewat
@@ -835,11 +982,12 @@ export async function diagnosaKosong(
      menjanjikan "4 aset kalau plafon dinaikkan" padahal setelah normalisasi
      lokasi hasilnya nol — dan saran yang bohong lebih buruk daripada tidak
      ada saran. */
-  const [total, budget, lokasi, luas] = await Promise.all([
+  const [total, budget, lokasi, luas, bentuk] = await Promise.all([
     prisma.listing.count({ where: dasar }),
     adaBudget ? cariCocok(prisma, k, { ...opsi, longgar: "budget" }).then(r => r.length) : Promise.resolve(0),
     lok.nilai ? cariCocok(prisma, k, { ...opsi, longgar: "lokasi" }).then(r => r.length) : Promise.resolve(0),
     adaLuas ? cariCocok(prisma, k, { ...opsi, longgar: "luas" }).then(r => r.length) : Promise.resolve(0),
+    adaBentuk ? cariCocok(prisma, k, { ...opsi, longgar: "bentuk" }).then(r => r.length) : Promise.resolve(0),
   ]);
 
   return {
@@ -847,8 +995,10 @@ export async function diagnosaKosong(
     jikaBudgetNaik10: budget,
     jikaLokasiDiperluas: lokasi,
     jikaLuasDiabaikan: luas,
+    jikaBentukDiabaikan: bentuk,
     tingkatLokasi: lok.tingkat,
     adaBudget,
     adaLuas,
+    adaBentuk,
   };
 }

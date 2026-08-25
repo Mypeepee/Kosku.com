@@ -192,6 +192,9 @@ export function orderByDasbor(
     // LIMIT/OFFSET akan menampilkan listing yang sama dua kali.
     return [{ tanggal_diupdate: "desc" }, { id_property: "desc" }];
   }
+  // Murni, tanpa menyentuh database: berkas ini ikut dimuat komponen klien
+  // (ListingFilterBar), jadi ia tidak boleh mengimpor Prisma. Penyesuaian
+  // kolom harga dilakukan pemanggilnya di server lewat sesuaikanKolomHarga().
   return buildOrderBy(sort, konteksUrut(jenis));
 }
 

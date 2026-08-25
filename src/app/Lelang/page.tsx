@@ -18,12 +18,12 @@ import TempatAktifBar from "@/components/listing/TempatAktifBar";
 import { parseCategoryDbList } from "@/lib/propertyType";
 import { OPSI_JADWAL, whereJadwal, type JadwalLelang } from "@/lib/listingFilters";
 import {
-  buildOrderBy,
   buildSortWhere,
   parseHalaman,
   parseSort,
   urlHalamanTerakhir,
 } from "@/lib/listingSort";
+import { orderByListing, whereHargaListing } from "@/lib/listingSortRuntime";
 import { ambilLimitLelangSebelumnya } from "@/lib/auctionDiscount";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
@@ -226,6 +226,10 @@ export default async function SearchPage({ searchParams }: Props) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Rentang harga dibangun di sisi server karena kolomnya bisa berbeda per
+  // database (lihat catatan di blok filter harga di bawah).
+  const hargaWhere = await whereHargaListing("LELANG", minHarga, maxHarga);
+
   // Pencarian by ID bersifat eksak — filter sekunder (kategori, lokasi,
   // harga, dimensi, dll) tidak ikut membatasi supaya properti yang dicari
   // pasti tampil selama jenis_transaksi-nya memang LELANG.
@@ -294,16 +298,12 @@ export default async function SearchPage({ searchParams }: Props) {
     //    tanpa sebab yang terlihat.
     ...(!idPropertyRaw && jadwal && whereJadwal(jadwal, today)),
 
-    // ✅ Filter HARGA pakai `harga_efektif` — kolom yang sama dengan "Urutkan
-    //    → harga terendah". Untuk lelang nilainya identik dengan
-    //    nilai_limit_lelang (diperiksa: 0 dari 121.821 baris berbeda), tapi
-    //    memakai satu kolom membuat filter & urutan mustahil berselisih.
-    ...(!idPropertyRaw && (minHarga !== undefined || maxHarga !== undefined) && {
-      harga_efektif: {
-        ...(minHarga !== undefined && { gte: minHarga }),
-        ...(maxHarga !== undefined && { lte: maxHarga }),
-      },
-    }),
+    // ✅ Filter HARGA memakai kolom YANG SAMA dengan "Urutkan → harga terendah"
+    //    — keduanya lewat satu pintu (whereHargaListing/orderByListing) supaya
+    //    mustahil berselisih. Normalnya `harga_efektif`; kalau kolom turunan
+    //    itu belum terisi di database ini, keduanya sama-sama pindah ke kolom
+    //    cadangan. Lihat src/lib/listingSortRuntime.ts.
+    ...(!idPropertyRaw && hargaWhere ? hargaWhere : {}),
 
     // ✅ Filter LUAS TANAH
     ...(!idPropertyRaw && (minLT !== undefined || maxLT !== undefined) && {
@@ -332,12 +332,13 @@ export default async function SearchPage({ searchParams }: Props) {
       : {}),
   };
 
-  // ✅ Urutan dari katalog bersama. Harga memakai `harga_efektif` (bukan
-  //    `nilai_limit_lelang`): keduanya identik untuk lelang — sudah diperiksa,
-  //    0 dari 121.821 baris berbeda — tapi itulah kolom yang dicetak kartu dan
-  //    dipakai filter, jadi satu kolom saja yang perlu diurus. Setiap urutan
-  //    ditutup pemecah seri `id_property` supaya paginasi tidak pernah bocor.
-  const orderBy = buildOrderBy(sort, "LELANG");
+  // ✅ Urutan dari katalog bersama, lewat lapis sisi-server yang memastikan
+  //    kolom harganya benar-benar terisi di database ini — di server yang
+  //    belum menjalankan prisma/migration_harga_efektif.sql, `harga_efektif`
+  //    ada tapi NULL, dan ORDER BY di atasnya diam-diam tidak mengurutkan apa
+  //    pun. Setiap urutan ditutup pemecah seri `id_property` supaya paginasi
+  //    tidak pernah bocor.
+  const orderBy = await orderByListing(sort, "LELANG");
 
   const sertakanAgent = {
     agent: {

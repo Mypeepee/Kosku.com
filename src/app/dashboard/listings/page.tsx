@@ -9,11 +9,13 @@ import { listingScopeWhere } from "@/lib/listingStatusPermission";
 import { ambilLimitLelangSebelumnya } from "@/lib/auctionDiscount";
 import {
   buildListingWhere,
+  konteksUrut,
   orderByDasbor,
   parseListingFilters,
   JENIS_OPTIONS,
   KATEGORI_OPTIONS,
 } from "./lib/filters";
+import { sesuaikanKolomHarga } from "@/lib/listingSortRuntime";
 import {
   DASHBOARD_LISTING_INCLUDE,
   toDashboardListing,
@@ -78,6 +80,15 @@ export default async function DashboardListingsPage({ searchParams }: Props) {
   const sekarang = new Date();
   const scopeWhere = scope as Prisma.ListingWhereInput;
   const where = buildListingWhere({ filters, scope: scopeWhere, sekarang });
+  // Urutannya murni (orderByDasbor tidak boleh menyentuh database — berkasnya
+  // ikut dimuat komponen klien), lalu kolom harganya disesuaikan di sini: di
+  // database yang belum menjalankan prisma/migration_harga_efektif.sql,
+  // `harga_efektif` ada tapi seluruhnya NULL dan urutan harga diam-diam tidak
+  // berpengaruh. Lihat src/lib/listingSortRuntime.ts.
+  const orderBy = await sesuaikanKolomHarga(
+    orderByDasbor(filters.sort, filters.jenis),
+    konteksUrut(filters.jenis),
+  );
 
   const [headerStats, totalItems, properties, facetJenis, facetKategori] =
     await Promise.all([
@@ -85,7 +96,7 @@ export default async function DashboardListingsPage({ searchParams }: Props) {
       prisma.listing.count({ where }),
       prisma.listing.findMany({
         where,
-        orderBy: orderByDasbor(filters.sort, filters.jenis),
+        orderBy,
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
         include: DASHBOARD_LISTING_INCLUDE,

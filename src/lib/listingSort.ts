@@ -103,6 +103,19 @@ export function catatanUrut(
   sort: SortKey,
   konteks: KonteksListing
 ): string | null {
+  // Di /Sewa, `harga` menyimpan harga durasi UTAMA pilihan pemilik — satu
+  // daftar bisa memuat kos Rp 500rb/hari bersebelahan dengan rumah
+  // Rp 60jt/tahun, dan keduanya dibandingkan sebagai angka rupiah polos. Itu
+  // bukan hal yang bisa diperbaiki dengan mengurutkan lebih pintar; yang
+  // benar adalah menyebutkan jalan keluarnya, dan jalan keluarnya nyata:
+  // memilih durasi membuat urutan ikut memakai kolom harga durasi itu (lihat
+  // src/app/Sewa/page.tsx).
+  if (konteks === "SEWA") {
+    if (sort === "termurah" || sort === "termahal") {
+      return "Harga dibandingkan menurut durasi utama tiap listing (harian, bulanan, tahunan). Pilih satu durasi di filter supaya perbandingannya setara.";
+    }
+    return null;
+  }
   if (konteks !== "SEMUA") return null;
   if (sort === "termurah" || sort === "termahal") {
     return "Harga sewa (per durasi) dan harga jual dibandingkan apa adanya. Pilih tab Jual, Lelang, atau Sewa untuk perbandingan yang setara.";

@@ -59,6 +59,7 @@ import {
 } from "@/lib/klienMatch";
 import { ringkasGrup, kunciGrup, rapikanAlamat, saringAlasan } from "@/lib/klienRingkas";
 import { siapkanDekat, dekatUntuk, type PrefDekat } from "@/lib/klienDekat";
+import { muatPengecualian, gabung } from "@/lib/klienPengecualian";
 import { urlListing, rupiah } from "@/lib/klienPesan";
 import { buatTiket } from "@/lib/asistenToken";
 import { sendAsistenAsetEmail, isMailConfigured, type AsistenAsetKlien } from "@/lib/mailer";
@@ -440,6 +441,12 @@ const SELECT_ASET_BARU = {
   harga: true, harga_promo: true, harga_efektif: true, nilai_limit_lelang: true,
   is_hot_deal: true, tanggal_dibuat: true, tanggal_lelang: true,
   legalitas: true,
+  /* WAJIB ikut, alasan yang sama dengan `tempatDekat` di bawah: pemindai
+     terbalik menilai gerbang BENTUK ASET (tanah kosong vs terbangun) di
+     memori, dan kolom yang tidak ter-select membuat gerbang itu diam. Tanpa
+     ini cron mengirimi klien "cari tanah" lot yang berikut bangunan,
+     sementara layar CRM — yang menyaringnya di SQL — tidak. */
+  ada_bangunan: true,
   /* WAJIB ikut. Pemindai terbalik menilai gerbang "dekat X" DI MEMORI, dan
      `lolosSemuaGerbang()` MENOLAK aset yang relasinya tidak ter-select —
      meloloskannya berarti mengirim aset yang belum tentu dekat ke klien yang
@@ -586,20 +593,13 @@ function keKriteria(p: BarisPref): KriteriaMatch {
 }
 
 /** Aset yang sudah pernah dikirim, per klien. Satu query untuk semua. */
-async function muatTerkirim(idKlien: string[]): Promise<Map<string, Set<string>>> {
-  const peta = new Map<string, Set<string>>();
-  if (idKlien.length === 0) return peta;
-  const rows = await prisma.kirimanRekomendasi.findMany({
-    where: { id_klien: { in: idKlien } },
-    select: { id_klien: true, id_property: true },
-  });
-  for (const r of rows) {
-    const set = peta.get(r.id_klien) ?? new Set<string>();
-    set.add(r.id_property.toString());
-    peta.set(r.id_klien, set);
-  }
-  return peta;
-}
+/* Dulu hanya membaca `kiriman_rekomendasi`. Sekarang lewat
+   `muatPengecualian()` supaya penyingkiran manual agent ikut berlaku di sini
+   juga — kalau tidak, agent membuang sebuah aset di layar CRM lalu MENERIMA
+   ASET ITU LAGI lewat email dua jam kemudian, dan tidak ada cara menduga
+   kenapa. Nama lamanya sengaja diganti: fungsi bernama `muatTerkirim` yang
+   diam-diam juga memuat penyingkiran adalah jebakan untuk pembaca berikutnya. */
+const muatDikecualikan = (idKlien: string[]) => muatPengecualian(prisma, idKlien);
 
 function temuanBaru(p: BarisPref): TemuanKlien {
   return {
@@ -680,7 +680,7 @@ async function pindaiAsetBaru(dryRun: boolean) {
     return { ...kosong, listingBaru: baru.length };
   }
 
-  const petaTerkirim = await muatTerkirim([...new Set(prefs.map(p => p.id_klien))]);
+  const petaDikecualikan = await muatDikecualikan([...new Set(prefs.map(p => p.id_klien))]);
 
   /* INTI: tiap listing baru diadu dengan seluruh preferensi DI MEMORI.
      Dua query untuk seluruh putaran, apa pun jumlah kliennya. */
@@ -690,12 +690,12 @@ async function pindaiAsetBaru(dryRun: boolean) {
   for (let i = 0; i < prefs.length; i++) {
     const p = prefs[i];
     const k = kriteriaCache[i];
-    const sudah = petaTerkirim.get(p.id_klien);
+    const sudah = petaDikecualikan.get(p.id_klien);
     const asal = p.klien.id_properti_asal?.toString();
 
     for (const l of baru as AsetCocok[]) {
       const id = l.id_property.toString();
-      if (sudah?.has(id)) continue;      // sudah pernah dikirim ke klien ini
+      if (sudah?.has(id)) continue;      // sudah dikirim ATAU disingkirkan agent
       if (asal && asal === id) continue; // aset milik klien itu sendiri
       if (!lolosSemuaGerbang(l as any, k)) continue;
 
@@ -780,7 +780,7 @@ async function pindaiPreferensiBaru(dryRun: boolean) {
   if (prefs.length === 0) return kosong;
   petaDekatPutaran = await siapkanDekat(prefs);
 
-  const petaTerkirim = await muatTerkirim([...new Set(prefs.map(p => p.id_klien))]);
+  const petaDikecualikan = await muatDikecualikan([...new Set(prefs.map(p => p.id_klien))]);
   const perKlien = new Map<string, TemuanKlien>();
 
   for (let i = 0; i < prefs.length; i += PARALEL) {
@@ -788,8 +788,7 @@ async function pindaiPreferensiBaru(dryRun: boolean) {
     const hasil = await Promise.all(
       potongan.map(p => {
         const k = keKriteria(p);
-        const kecuali = [...(petaTerkirim.get(p.id_klien) ?? [])].map(BigInt);
-        if (p.klien.id_properti_asal) kecuali.push(p.klien.id_properti_asal);
+        const kecuali = gabung(petaDikecualikan, p.id_klien, p.klien.id_properti_asal);
         /* `maks` dibatasi: yang dibutuhkan cuma beberapa aset TERBAIK untuk
            satu email. Menarik enam ratus baris demi menampilkan tiga adalah
            biaya yang dibayar berulang kali tanpa ada yang membacanya. */
@@ -1385,11 +1384,13 @@ async function diagnosa(idKlienDicari: string | null) {
        diagnosa tidak menjalankan query mahal untuk klien yang jelas tertahan. */
     let cocok: number | null = null;
     if (statusOk && punyaPref) {
-      const kirim = await prisma.kirimanRekomendasi.findMany({
-        where: { id_klien: k.id_klien }, select: { id_property: true },
-      });
-      const kecuali = kirim.map(x => x.id_property);
-      if (k.id_properti_asal) kecuali.push(k.id_properti_asal);
+      /* Lewat pintu yang sama dengan jalur sungguhan. Diagnosa yang memakai
+         pengecualian lebih longgar akan melaporkan "12 aset cocok" untuk klien
+         yang sebenarnya tidak akan menerima satu pun — dan urutan gerbang
+         diagnosa memang WAJIB sama persis dengan jalur sungguhan. */
+      const kecuali = gabung(
+        await muatDikecualikan([k.id_klien]), k.id_klien, k.id_properti_asal,
+      );
       const prefs = await prisma.preferensiKlien.findMany({ where: { id_klien: k.id_klien } });
       const set = new Set<string>();
       for (const p of prefs) {
@@ -1452,14 +1453,13 @@ async function kirimEmailUji(tujuan: string) {
     return { ok: false as const, mode: "test" as const, error: "Belum ada preferensi klien untuk dijadikan contoh" };
   }
 
-  const petaTerkirim = await muatTerkirim([...new Set(kandidat.map(p => p.id_klien))]);
+  const petaDikecualikan = await muatDikecualikan([...new Set(kandidat.map(p => p.id_klien))]);
   const perKlien = new Map<string, TemuanKlien>();
 
   for (const p of kandidat) {
     if (perKlien.size >= 2) break; // dua blok sudah cukup mewakili
     const k = keKriteria(p);
-    const kecuali = [...(petaTerkirim.get(p.id_klien) ?? [])].map(BigInt);
-    if (p.klien.id_properti_asal) kecuali.push(p.klien.id_properti_asal);
+    const kecuali = gabung(petaDikecualikan, p.id_klien, p.klien.id_properti_asal);
     const daftar = await cariCocok<any>(prisma, k, {
       kecuali, select: SELECT_ASET_BARU, maks: KOLAM_PREFERENSI_BARU,
     }) as AsetCocok[];

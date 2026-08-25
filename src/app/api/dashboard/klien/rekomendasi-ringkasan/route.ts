@@ -21,6 +21,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
 import { cariCocok, type KriteriaMatch } from "@/lib/klienMatch";
 import { siapkanDekat, dekatUntuk } from "@/lib/klienDekat";
+import { muatPengecualian, gabung } from "@/lib/klienPengecualian";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,16 +70,11 @@ export async function GET(_req: NextRequest) {
   });
   if (kandidat.length === 0) return NextResponse.json({ ok: true, items: [], dipindai: 0 });
 
-  const terkirim = await prisma.kirimanRekomendasi.findMany({
-    where: { id_klien: { in: kandidat.map(k => k.id_klien) } },
-    select: { id_klien: true, id_property: true },
-  });
-  const petaTerkirim = new Map<string, bigint[]>();
-  for (const t of terkirim) {
-    const a = petaTerkirim.get(t.id_klien) ?? [];
-    a.push(t.id_property);
-    petaTerkirim.set(t.id_klien, a);
-  }
+  /* Sudah dikirim + disingkirkan agent, sekaligus untuk seluruh kandidat.
+     Lewat satu pintu bersama layar Asisten Aset: lencana yang menghitung aset
+     yang sudah dibuang agent akan membuatnya membuka layar untuk daftar
+     kosong, dan lencana yang berbohong sekali akan diabaikan selamanya. */
+  const petaKecuali = await muatPengecualian(prisma, kandidat.map(k => k.id_klien));
 
   const items: { id_klien: string; nama: string; status: string; jumlah: number; punyaWa: boolean; telat: boolean }[] = [];
 
@@ -101,8 +97,7 @@ export async function GET(_req: NextRequest) {
   const petaDekat = await siapkanDekat(kandidat.flatMap(k => k.preferensi));
 
   const periksaSatu = async (k: (typeof kandidat)[number]) => {
-    const kecuali = [...(petaTerkirim.get(k.id_klien) ?? [])];
-    if (k.id_properti_asal) kecuali.push(k.id_properti_asal);
+    const kecuali = gabung(petaKecuali, k.id_klien, k.id_properti_asal);
 
     const ditemukan = new Set<string>();
     for (const p of k.preferensi) {

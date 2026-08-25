@@ -32,6 +32,7 @@ import {
 } from "@/lib/klienMatch";
 import { ringkasGrup, kunciGrup, bagiSlot } from "@/lib/klienRingkas";
 import { siapkanDekat, dekatUntuk } from "@/lib/klienDekat";
+import { muatPengecualian, gabung } from "@/lib/klienPengecualian";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,12 +99,18 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     });
   }
 
-  const terkirim = await prisma.kirimanRekomendasi.findMany({
-    where: { id_klien: params.id },
-    select: { id_property: true },
-  });
-  const kecuali = terkirim.map(t => t.id_property);
-  if (klien.id_properti_asal) kecuali.push(klien.id_properti_asal);
+  /* Sudah dikirim, DISINGKIRKAN agent, dan aset milik klien itu sendiri —
+     ketiganya lewat satu pintu. Merakitnya di sini berarti permukaan lain
+     (panel ringkasan, cron email) bisa lupa salah satunya, dan yang lupa akan
+     mengirim ulang aset yang baru saja dibuang agent. */
+  const [pengecualian, jumlahDisingkirkan] = await Promise.all([
+    muatPengecualian(prisma, [params.id]),
+    /* Dihitung di sini, bukan dibiarkan tab "Disingkirkan" menghitungnya
+       sendiri saat dibuka: lencana yang baru muncul SETELAH tabnya diketuk
+       tidak pernah memberi tahu agent bahwa di sana ada sesuatu. */
+    prisma.rekomendasiDisingkirkan.count({ where: { id_klien: params.id } }),
+  ]);
+  const kecuali = gabung(pengecualian, params.id, klien.id_properti_asal);
 
   /* Token "dekat X" diterjemahkan SEKALI untuk seluruh preferensi klien ini.
      Menerjemahkannya di dalam keKriteria() berarti satu query kamus tiap kali
@@ -278,6 +285,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     terpilih: items.slice(0, PILIH_AWAL).map(i => i.id_property),
     diagnosa,
     tanpaPreferensi: false,
+    jumlahDisingkirkan,
     preferensi,
     klien: { nama: klien.nama, punyaWa: !!klien.nomor_whatsapp },
     /* Kode agent yang sedang login. Dipakai layar untuk menempelkannya di ekor

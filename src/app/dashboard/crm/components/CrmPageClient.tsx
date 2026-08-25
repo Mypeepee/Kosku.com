@@ -20,7 +20,7 @@ import TypePicker from "@/components/search/TypePicker";
 import LocationPicker from "@/components/search/LocationPicker";
 import KeywordField from "@/components/search/KeywordField";
 import { regionKey, type SelectedRegion } from "@/lib/regionSearch";
-import { rapikanAlamat, saringAlasan } from "@/lib/klienRingkas";
+import { rapikanAlamat, saringAlasan, labelLuas } from "@/lib/klienRingkas";
 import { pathListing } from "@/lib/klienPesan";
 import {
   Klien, KlienStatus, PreferensiKlien, PreferensiForm,
@@ -1849,14 +1849,15 @@ function FormPreferensi({
       {/* Luas */}
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Min (m²)</label>
+          {/* Label MENYEBUT dimensinya — lihat catatan di labelLuas(). */}
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">{labelLuas(form.tipe_properti)} min (m²)</label>
           <input type="text" inputMode="numeric" placeholder="60"
             value={form.luas_min}
             onChange={e => setForm(f => f ? { ...f, luas_min: fmtRup(e.target.value) } : f)}
             className={KELAS_INPUT} />
         </div>
         <div>
-          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Luas Max (m²)</label>
+          <label className="mb-1 block text-[10px] font-extrabold uppercase tracking-wider text-slate-400">{labelLuas(form.tipe_properti)} max (m²)</label>
           <input type="text" inputMode="numeric" placeholder="500"
             value={form.luas_max}
             onChange={e => setForm(f => f ? { ...f, luas_max: fmtRup(e.target.value) } : f)}
@@ -2398,7 +2399,7 @@ function KlienDetailDrawer({ klien, onClose, onEdit, onDelete, onMove, onKlienUp
                               <InfoRow label="Budget" value={"Rp " + [formatRp(g.budget_min), formatRp(g.budget_max)].filter(Boolean).join(" – ")} />
                             )}
                             {(g.luas_min || g.luas_max) && (
-                              <InfoRow label="Luas" value={[g.luas_min, g.luas_max].filter(Boolean).join(" – ") + " m²"} />
+                              <InfoRow label={labelLuas(g.types)} value={[g.luas_min, g.luas_max].filter(Boolean).join(" – ") + " m²"} />
                             )}
                             {g.dekat_nilai && <InfoRow label="Dekat" value={`${g.dekat_nilai}${g.dekat_radius ? ` · ${(g.dekat_radius/1000).toFixed(1).replace(".", ",")} km` : ""}`} />}
                             {g.legalitas && <InfoRow label="Sertifikat" value={SERTIFIKAT_LABEL[g.legalitas as Sertifikat] ?? g.legalitas} />}
@@ -2677,9 +2678,11 @@ type Diagnosa = {
   jikaBudgetNaik10: number;
   jikaLokasiDiperluas: number;
   jikaLuasDiabaikan: number;
+  jikaBentukDiabaikan: number;
   tingkatLokasi: string;
   adaBudget: boolean;
   adaLuas: boolean;
+  adaBentuk: boolean;
   /** Preferensi mana yang didiagnosa. Klien bisa punya beberapa, dan saran
    *  "naikkan plafon 10%" tanpa menyebut plafon yang mana tidak bisa
    *  ditindaklanjuti. */
@@ -2715,6 +2718,29 @@ type ItemTerkirim = {
   tanggapan: string;
   alasan_tanggapan: string | null;
   perubahan: PerubahanKiriman[];
+};
+
+/** Aset yang disingkirkan agent dari daftar rekomendasi seorang klien.
+ *  Sengaja BUKAN `MatchedListing`: barisnya tidak punya skor, alasan, maupun
+ *  preferensi asal — semua itu dihitung saat pencocokan, dan aset ini justru
+ *  yang dikeluarkan dari pencocokan. Memakai bentuk yang sama akan memaksa
+ *  separuh medannya diisi nilai palsu. */
+type ItemDisingkirkan = {
+  id_property: string;
+  slug: string;
+  judul: string;
+  kategori: string;
+  jenis_transaksi: string;
+  alamat_lengkap: string;
+  harga: number;
+  gambar: string;
+  luas_tanah: number;
+  luas_bangunan: number;
+  alasan: string | null;
+  disingkirkan_pada: string;
+  /** Aset yang sudah terjual tidak akan kembali ke daftar "Cocok" walau
+   *  dipulihkan — dikatakan di kartunya, bukan dibiarkan jadi teka-teki. */
+  masih_tersedia: boolean;
 };
 
 const TANGGAPAN_META: Record<string, { label: string; kelas: string; ikon: string }> = {
@@ -2759,6 +2785,11 @@ type IsiSimpanan = {
   nama: string;
   adaWa: boolean;
   terpilih: string[];
+  /** Berapa aset yang sedang disingkirkan. Datang dari server bersama daftar
+   *  "cocok" supaya lencana tab "Disingkirkan" sudah benar SEBELUM tabnya
+   *  pernah dibuka — lencana yang baru muncul setelah diketuk tidak pernah
+   *  memberi tahu agent bahwa di sana ada sesuatu. */
+  jumlahSingkir: number;
   waktu: number;
 };
 const simpananCocok = new Map<string, IsiSimpanan>();
@@ -2809,6 +2840,7 @@ async function cariUlangDiamDiam(klienId: string): Promise<number | null> {
       nama: j.klien?.nama || "",
       adaWa: !!j.klien?.punyaWa,
       terpilih: Array.isArray(j.terpilih) ? j.terpilih : [],
+      jumlahSingkir: j.jumlahDisingkirkan ?? 0,
       waktu: Date.now(),
     });
     return typeof j.total === "number" ? j.total : (j.items?.length ?? 0);
@@ -2861,7 +2893,7 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
   onClose: () => void;
 }) {
   const [shown, setShown] = useState(false);
-  const [tab, setTab] = useState<"cocok" | "terkirim">("cocok");
+  const [tab, setTab] = useState<"cocok" | "terkirim" | "disingkirkan">("cocok");
 
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<MatchedListing[]>([]);
@@ -2874,6 +2906,50 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
   const [dipilih, setDipilih] = useState<Set<string>>(new Set());
   const [mengirim, setMengirim] = useState(false);
   const [draf, setDraf] = useState<{ pesan: string; waUrl: string | null } | null>(null);
+
+  /* ── PENYINGKIRAN ────────────────────────────────────────────────────────
+     Aset yang tidak cocok karena alasan yang tidak punya kolom di preferensi
+     (menghadap makam, sertifikat bersengketa, klien sudah pernah melihatnya).
+     Tanpa ini, aset yang sama naik ke puncak daftar tiap kali layar dibuka
+     sampai agent berhenti membaca daftarnya. */
+  const [disingkirkan, setDisingkirkan] = useState<ItemDisingkirkan[]>([]);
+  /** Hitungan dari server, dipakai lencana tab SEBELUM daftarnya pernah dimuat.
+   *  Begitu daftarnya ada, daftarnya yang jadi kebenaran — angka yang lebih
+   *  besar daripada jumlah baris yang muncul saat diketuk akan terbaca sebagai
+   *  kerusakan, dan agent tidak punya cara memastikan mana yang benar. */
+  const [jumlahSingkir, setJumlahSingkir] = useState(0);
+  const [loadingSingkir, setLoadingSingkir] = useState(false);
+  const [singkirDimuat, setSingkirDimuat] = useState(false);
+  const [memulihkan, setMemulihkan] = useState<Set<string>>(new Set());
+  /** Batch terakhir yang disingkirkan, untuk bilah "Urungkan".
+   *  Menyimpan POSISI aslinya, bukan cuma id: mengembalikan aset ke ujung
+   *  daftar setelah "Urungkan" membuat agent kehilangan tempatnya dan mengira
+   *  yang kembali adalah aset yang berbeda. */
+  const [urung, setUrung] = useState<{ item: MatchedListing; indeks: number }[]>([]);
+  const urungTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Galat SATU KETUKAN — dipisahkan dari `error`, yang mengganti seluruh isi
+   *  tab. Kegagalan menyingkirkan satu kartu tidak boleh menghapus daftar yang
+   *  barusan dibaca agent; ia cukup dikatakan di tempat yang sama dengan bilah
+   *  "Urungkan", lalu pergi sendiri. */
+  /** Berapa aset yang disingkirkan per grup preferensi SEJAK muatan terakhir.
+   *  Dipakai mengoreksi `total` dari server, yang tidak tahu apa-apa tentang
+   *  penyingkiran yang baru terjadi sedetik lalu. Disetel ulang tiap kali data
+   *  segar datang — sesudah itu server sudah memperhitungkannya sendiri. */
+  const [kurangGrup, setKurangGrup] = useState<Map<string, number>>(new Map());
+  const [aksiGalat, setAksiGalat] = useState<string | null>(null);
+  const galatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Penyegaran "susulan" yang diredam — lihat catatan di `singkirkan()`. */
+  const susulTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lapor = useCallback((pesan: string) => {
+    setAksiGalat(pesan);
+    if (galatTimer.current) clearTimeout(galatTimer.current);
+    galatTimer.current = setTimeout(() => setAksiGalat(null), 4000);
+  }, []);
+  useEffect(() => () => {
+    if (urungTimer.current) clearTimeout(urungTimer.current);
+    if (galatTimer.current) clearTimeout(galatTimer.current);
+    if (susulTimer.current) clearTimeout(susulTimer.current);
+  }, []);
 
   useEffect(() => { const t = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(t); }, []);
   const close = useCallback(() => { setShown(false); setTimeout(onClose, 200); }, [onClose]);
@@ -2910,6 +2986,11 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
     setDaftarPref(c.daftarPref);
     setNama(c.nama);
     setAdaWa(c.adaWa);
+    setJumlahSingkir(c.jumlahSingkir);
+    /* Data segar sudah memperhitungkan penyingkiran; koreksi lokalnya habis
+       masa berlakunya di sini. Lupa menyetelnya ulang membuat sisa "menyusul"
+       terus mengecil tiap penyegaran sampai jadi nol selamanya. */
+    setKurangGrup(new Map());
     if (pilihkan) {
       /* Tautan dari email sudah menyebut aset mana yang dimaksud; centangnya
          harus mengikuti itu, bukan tiga teratas versi server — kalau tidak,
@@ -2950,6 +3031,7 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
           nama: j.klien?.nama || klienNama,
           adaWa: !!j.klien?.punyaWa,
           terpilih: Array.isArray(j.terpilih) ? j.terpilih : [],
+          jumlahSingkir: j.jumlahDisingkirkan ?? 0,
           waktu: Date.now(),
         };
         simpananCocok.set(kunciSimpanan, isi);
@@ -2970,6 +3052,167 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
       .catch(() => {})
       .finally(() => setLoadingKirim(false));
   }, [klienId]);
+
+  const muatDisingkirkan = useCallback(() => {
+    setLoadingSingkir(true);
+    return fetch(`/api/dashboard/klien/${klienId}/rekomendasi/singkirkan`)
+      .then(r => r.json())
+      .then(j => { if (j.ok) { setDisingkirkan(j.items || []); setJumlahSingkir((j.items || []).length); } })
+      .catch(() => {})
+      .finally(() => { setLoadingSingkir(false); setSingkirDimuat(true); });
+  }, [klienId]);
+
+  /** Tulis ulang daftar "cocok" ke simpanan.
+   *
+   *  WAJIB, dan ini yang paling mudah terlupa: `items` di layar dan
+   *  `simpananCocok` adalah dua salinan dari daftar yang sama. Menyingkirkan
+   *  aset hanya dari `items` membuatnya muncul lagi begitu agent menutup dan
+   *  membuka layar dalam lima menit — persis perilaku yang sedang diperbaiki
+   *  fitur ini, dan agent akan menyimpulkan tombolnya tidak berfungsi. */
+  const simpanItems = useCallback((baru: MatchedListing[]) => {
+    const c = simpananCocok.get(kunciSimpanan);
+    if (c) simpananCocok.set(kunciSimpanan, { ...c, items: baru });
+  }, [kunciSimpanan]);
+
+  /** Singkirkan satu aset — OPTIMISTIS.
+   *
+   *  Kartunya hilang seketika, permintaannya menyusul. Menunggu jawaban server
+   *  sebelum menganimasikan keluar membuat tombol terasa macet pada koneksi
+   *  4G yang biasa dipakai agent di lapangan; kalau gagal, kartunya kembali ke
+   *  posisi semula dan galatnya dikatakan. */
+  const singkirkan = useCallback(async (id: string) => {
+    const indeks = items.findIndex(x => x.id_property === id);
+    if (indeks < 0) return;
+    const dibuang = { item: items[indeks], indeks };
+
+    /* Efek samping (menulis simpanan) dihitung DI LUAR updater `setItems`.
+       React StrictMode memanggil updater dua kali, dan simpanan yang ditulis
+       dari dalamnya akan ditulis dua kali juga — kebetulan tidak berbahaya di
+       sini, tapi pola yang sama sudah pernah menggandakan permintaan jaringan
+       di berkas ini. */
+    const sisa = items.filter(x => x.id_property !== id);
+    setItems(sisa);
+    simpanItems(sisa);
+    /* Centangnya ikut dicabut. Aset yang tidak lagi di layar tapi masih
+       terhitung di "Siapkan pesan · 3 aset" adalah cara paling cepat mengirim
+       aset yang baru saja dibuang. */
+    setDipilih(prev => { const n = new Set(prev); n.delete(id); return n; });
+
+    /* Batch, bukan satu: agent yang membuang lima aset berturut-turut tidak
+       ingin lima bilah "Urungkan" bergantian — ia ingin satu yang mengembalikan
+       kelimanya. Timernya disetel ulang tiap penambahan. */
+    setUrung(prev => [...prev, dibuang]);
+    setJumlahSingkir(n => n + 1);
+    setKurangGrup(prev => {
+      const n = new Map(prev);
+      for (const g of dibuang.item.cocok_grup ?? []) n.set(g, (n.get(g) ?? 0) + 1);
+      return n;
+    });
+    if (urungTimer.current) clearTimeout(urungTimer.current);
+    urungTimer.current = setTimeout(() => setUrung([]), 7000);
+
+    try {
+      const r = await fetch(`/api/dashboard/klien/${klienId}/rekomendasi/singkirkan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id_property: id }),
+      });
+      const j = await r.json();
+      if (!j?.ok) throw new Error(j?.message || "gagal");
+      /* Tab "Disingkirkan" hanya disegarkan kalau memang sudah pernah dibuka.
+         Menariknya untuk tab yang belum pernah dilihat agent adalah permintaan
+         jaringan yang tidak menghasilkan satu piksel pun. */
+      if (singkirDimuat) muatDisingkirkan();
+      /* SUSULAN. Daftar ini dipotong (24 teratas), jadi menyingkirkan satu aset
+         membuka satu slot — dan aset berikutnya seharusnya naik menggantikannya.
+         Tanpa ini agent harus menutup lalu membuka layar untuk melihatnya, dan
+         daftar yang menyusut terus tanpa pernah terisi ulang terbaca seperti
+         persediaan yang habis.
+
+         Diredam: agent yang membuang lima kartu beruntun akan memicu lima
+         pencarian penuh, dan yang keempat tiba saat ia sudah membaca hasil
+         kelima — daftar yang berubah sendiri di bawah kursor. Satu penyegaran,
+         1,2 detik sesudah ketukan TERAKHIR. */
+      if (susulTimer.current) clearTimeout(susulTimer.current);
+      susulTimer.current = setTimeout(() => { buangSimpanan(klienId); muatCocok(true); }, 1200);
+    } catch {
+      /* Kembalikan ke POSISI SEMULA, bukan ke ujung daftar. */
+      setItems(prev => {
+        if (prev.some(x => x.id_property === id)) return prev;
+        const baru = [...prev];
+        baru.splice(Math.min(dibuang.indeks, baru.length), 0, dibuang.item);
+        return baru;
+      });
+      setUrung(prev => prev.filter(u => u.item.id_property !== id));
+      setJumlahSingkir(n => Math.max(0, n - 1));
+      setKurangGrup(prev => {
+        const n = new Map(prev);
+        for (const g of dibuang.item.cocok_grup ?? []) n.set(g, Math.max(0, (n.get(g) ?? 0) - 1));
+        return n;
+      });
+      /* `aksiGalat`, BUKAN `error`. `error` mengganti SELURUH isi tab dengan
+         satu baris merah — kegagalan satu ketukan tidak boleh menghapus daftar
+         yang barusan dibaca agent. */
+      lapor("Gagal menyingkirkan aset — coba lagi");
+    }
+  }, [items, klienId, simpanItems, singkirDimuat, muatDisingkirkan]);
+
+  /** Kembalikan aset ke daftar. Dipakai bilah "Urungkan" DAN tombol "Pulihkan"
+   *  di tab Disingkirkan — satu jalur, supaya keduanya tidak menyimpang. */
+  const pulihkan = useCallback(async (ids: string[], kembalikan?: { item: MatchedListing; indeks: number }[]) => {
+    if (ids.length === 0) return;
+    setMemulihkan(prev => new Set([...prev, ...ids]));
+    try {
+      const r = await fetch(
+        `/api/dashboard/klien/${klienId}/rekomendasi/singkirkan?id=${ids.join(",")}`,
+        { method: "DELETE" },
+      );
+      const j = await r.json();
+      if (!j?.ok) throw new Error();
+      setDisingkirkan(prev => prev.filter(d => !ids.includes(d.id_property)));
+      setJumlahSingkir(n => Math.max(0, n - ids.length));
+      if (kembalikan?.length) {
+        /* Jalur "Urungkan": kartunya masih ada di memori, jadi bisa dikembalikan
+           ke posisi semula tanpa menembak server lagi. Dimasukkan dari indeks
+           terkecil supaya posisi yang tersimpan tetap berarti. */
+        const baru = [...items];
+        for (const u of [...kembalikan].sort((a, b) => a.indeks - b.indeks)) {
+          if (baru.some(x => x.id_property === u.item.id_property)) continue;
+          baru.splice(Math.min(u.indeks, baru.length), 0, u.item);
+        }
+        setItems(baru);
+        simpanItems(baru);
+        setKurangGrup(prev => {
+          const n = new Map(prev);
+          for (const u of kembalikan) {
+            for (const g of u.item.cocok_grup ?? []) n.set(g, Math.max(0, (n.get(g) ?? 0) - 1));
+          }
+          return n;
+        });
+      } else {
+        /* Jalur "Pulihkan" dari tab Disingkirkan: kartunya tidak ada di memori
+           (bentuk datanya pun berbeda — tanpa skor & alasan), dan menebak
+           posisinya di daftar berperingkat adalah menebak. Muat ulang. */
+        buangSimpanan(klienId);
+        muatCocok(true);
+      }
+    } catch {
+      lapor("Gagal memulihkan aset — coba lagi");
+    } finally {
+      setMemulihkan(prev => { const n = new Set(prev); ids.forEach(i => n.delete(i)); return n; });
+    }
+  }, [items, klienId, simpanItems, muatCocok]);
+
+  const urungkan = useCallback(() => {
+    if (urungTimer.current) clearTimeout(urungTimer.current);
+    /* WAJIB. Penyegaran susulan yang terlanjur dijadwalkan akan menimpa daftar
+       tepat setelah kartunya dikembalikan — kartu yang muncul lalu hilang lagi
+       sendiri adalah kerusakan yang paling meyakinkan. */
+    if (susulTimer.current) clearTimeout(susulTimer.current);
+    const batch = urung;
+    setUrung([]);
+    pulihkan(batch.map(u => u.item.id_property), batch);
+  }, [urung, pulihkan]);
 
   useEffect(() => {
     const c = simpananCocok.get(kunciSimpanan);
@@ -3040,13 +3283,32 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
   const adaBanyakPref = daftarPref.length > 1;
   /* Berapa kecocokan yang ADA tapi belum muat di daftar — dihitung untuk
      lingkup yang sedang dilihat, bukan global. */
+  /* Angka di pill DIHITUNG ULANG dari `items` yang ada di layar, bukan dipakai
+     apa adanya dari server (`p.ditampilkan`).
+     Sebabnya penyingkiran: begitu satu kartu dibuang, angka dari server jadi
+     lebih besar satu daripada jumlah baris yang benar-benar terlihat — dan
+     angka yang meleset satu pun akan terlihat, lalu membuat agent meragukan
+     seluruh daftarnya. Server tetap yang menentukan APA isinya; layar yang
+     menentukan BERAPA yang sedang ditampilkannya. */
+  const hitungGrup = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const it of items) for (const g of it.cocok_grup ?? []) m.set(g, (m.get(g) ?? 0) + 1);
+    return m;
+  }, [items]);
+
   const sisaBelumTampil = useMemo(() => {
+    /* `total` (persediaan seluruhnya) ikut dikoreksi oleh penyingkiran yang
+       belum sempat disegarkan ke server — aset yang dibuang tidak akan
+       "menyusul setelah ini dikirim", jadi menghitungnya di sana adalah janji
+       yang tidak akan ditepati. */
     if (sorot) {
       const g = daftarPref.find(p => p.id_grup === sorot);
-      return g ? Math.max(0, g.total - g.ditampilkan) : 0;
+      if (!g) return 0;
+      return Math.max(0, g.total - (kurangGrup.get(sorot) ?? 0) - (hitungGrup.get(sorot) ?? 0));
     }
-    return Math.max(0, daftarPref.reduce((n, p) => n + p.total, 0) - items.length);
-  }, [daftarPref, sorot, items.length]);
+    const total = daftarPref.reduce((n, p) => n + p.total - (kurangGrup.get(p.id_grup) ?? 0), 0);
+    return Math.max(0, total - items.length);
+  }, [daftarPref, sorot, items.length, hitungGrup, kurangGrup]);
   const tampil = useMemo(
     () => (sorot ? items.filter(i => (i.cocok_grup ?? []).includes(sorot)) : items),
     [items, sorot],
@@ -3055,7 +3317,7 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
     ? "Dari seluruh preferensi klien ini"
     : daftarPref.length === 1
       ? daftarPref[0].label
-      : `${daftarPref.length} preferensi · ${daftarPref.reduce((n, p) => n + p.total, 0)} kecocokan`;
+      : `${daftarPref.length} preferensi · ${daftarPref.reduce((n, p) => n + p.total - (kurangGrup.get(p.id_grup) ?? 0), 0)} kecocokan`;
 
   return (
     <div
@@ -3107,12 +3369,12 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
                   className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
                     sorot === p.id_grup
                       ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200"
-                      : p.ditampilkan === 0
+                      : (hitungGrup.get(p.id_grup) ?? 0) === 0
                         ? "border-white/[0.06] bg-white/[0.02] text-slate-600 hover:text-slate-400"
                         : "border-white/[0.08] bg-white/[0.03] text-slate-400 hover:text-slate-200"
                   }`}
                 >
-                  {p.label} · {p.ditampilkan}
+                  {p.label} · {hitungGrup.get(p.id_grup) ?? 0}
                 </button>
               ))}
             </div>
@@ -3122,10 +3384,19 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
             {([
               { k: "cocok" as const, label: "Cocok", n: items.length },
               { k: "terkirim" as const, label: "Terkirim", n: terkirim.length },
+              /* Tab ketiga BUKAN hiasan. Tindakan yang tidak bisa dilihat lagi
+                 setelah bilah "Urungkan" menghilang adalah tindakan yang
+                 menakutkan, dan agent yang takut salah buang akan berhenti
+                 memakai tombolnya sama sekali. */
+              { k: "disingkirkan" as const, label: "Disingkirkan", n: singkirDimuat ? disingkirkan.length : jumlahSingkir },
             ]).map(t => (
               <button
                 key={t.k}
-                onClick={() => setTab(t.k)}
+                /* Dimuat MALAS: daftar penyingkiran hanya diambil saat tabnya
+                   benar-benar dibuka. Sebagian besar sesi tidak pernah
+                   menyentuhnya, dan permintaan yang tidak menghasilkan piksel
+                   tetap ikut mengantre di depan yang menghasilkan. */
+                onClick={() => { setTab(t.k); if (t.k === "disingkirkan" && !singkirDimuat) muatDisingkirkan(); }}
                 className={`relative flex items-center gap-1.5 rounded-t-lg px-3.5 py-2 text-[12.5px] font-bold transition-colors ${
                   tab === t.k ? "text-white" : "text-slate-500 hover:text-slate-300"
                 }`}
@@ -3157,7 +3428,32 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
             ) : error ? (
               <div className="py-20 text-center text-[13px] text-rose-300">{error}</div>
             ) : items.length === 0 ? (
-              <PanelKosong diagnosa={diagnosa} tanpaPref={tanpaPref} />
+              /* Habis karena DITINJAU, bukan karena tidak ada persediaan.
+                 Dua keadaan yang terlihat identik di layar tapi menuntut
+                 tindakan yang berlawanan: yang satu minta kriteria digeser,
+                 yang lain justru kabar baik. Menampilkan diagnosa "coba
+                 naikkan plafon" kepada agent yang baru saja menyingkirkan
+                 sepuluh aset terakhirnya adalah saran yang menyesatkan. */
+              jumlahSingkir > 0 && !diagnosa ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="grid h-16 w-16 place-items-center rounded-3xl border border-emerald-400/20 bg-emerald-500/[0.06]">
+                    <Icon icon="solar:check-circle-bold-duotone" className="text-3xl text-emerald-300" />
+                  </div>
+                  <p className="mt-3 text-[14px] font-bold text-white">Semua sudah ditinjau</p>
+                  <p className="mt-1 max-w-xs text-[12px] leading-relaxed text-slate-500">
+                    Tidak ada aset yang tersisa untuk klien ini sekarang. Aset baru yang cocok akan
+                    muncul di sini sendiri.
+                  </p>
+                  <button
+                    onClick={() => { setTab("disingkirkan"); if (!singkirDimuat) muatDisingkirkan(); }}
+                    className="mt-4 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-[12px] font-bold text-slate-300 transition-colors hover:bg-white/[0.08]"
+                  >
+                    Lihat {jumlahSingkir} yang disingkirkan
+                  </button>
+                </div>
+              ) : (
+                <PanelKosong diagnosa={diagnosa} tanpaPref={tanpaPref} />
+              )
             ) : tampil.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
                 <Icon icon="solar:filter-bold-duotone" className="text-3xl text-slate-700" />
@@ -3180,15 +3476,86 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
                     </span>
                   )}
                 </p>
-                {tampil.map(it => (
-                  <KartuCocok
-                    key={it.id_property}
-                    it={it}
-                    idAgent={idAgent}
-                    dipilih={dipilih.has(it.id_property)}
-                    onToggle={() => togglePilih(it.id_property)}
-                  />
-                ))}
+                {/* JARAK ANTAR KARTU ADA DI DALAM KOTAK YANG DIANIMASIKAN
+                    (pb-2.5), bukan di `space-y` induknya — dan pembungkus
+                    <div> ini yang membuat induk hanya melihat SATU anak.
+                    Kalau jaraknya milik induk, kartu yang tingginya menyusut
+                    ke nol tetap menyisakan celah 10px: hantu yang membuat
+                    daftar terlihat seperti punya baris rusak. */}
+                <div>
+                  <AnimatePresence initial={false}>
+                    {tampil.map(it => (
+                      <motion.div
+                        key={it.id_property}
+                        /* `layout` — kartu di bawahnya NAIK dengan mulus alih-alih
+                           melompat. Lompatan itulah yang membuat agent kehilangan
+                           tempatnya dan mengetuk kartu yang salah berikutnya. */
+                        layout
+                        initial={false}
+                        exit={{ height: 0, opacity: 0, transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] } }}
+                        className="overflow-hidden"
+                      >
+                        <div className="pb-2.5">
+                          <KartuCocok
+                            it={it}
+                            idAgent={idAgent}
+                            dipilih={dipilih.has(it.id_property)}
+                            onToggle={() => togglePilih(it.id_property)}
+                            onSingkirkan={() => singkirkan(it.id_property)}
+                          />
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </>
+            )
+          ) : tab === "disingkirkan" ? (
+            loadingSingkir && disingkirkan.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-20 text-slate-400">
+                <Icon icon="svg-spinners:ring-resize" className="text-3xl text-emerald-400" />
+              </div>
+            ) : disingkirkan.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="grid h-16 w-16 place-items-center rounded-3xl border border-white/[0.06] bg-white/[0.02]">
+                  <Icon icon="solar:trash-bin-minimalistic-bold-duotone" className="text-3xl text-slate-600" />
+                </div>
+                <p className="mt-3 text-[14px] font-bold text-white">Tidak ada yang disingkirkan</p>
+                <p className="mt-1 max-w-xs text-[12px] leading-relaxed text-slate-500">
+                  Aset yang Anda singkirkan dari daftar “Cocok” berhenti muncul untuk klien ini —
+                  di layar maupun di email otomatis. Semuanya bisa dipulihkan dari sini.
+                </p>
+              </div>
+            ) : (
+              <>
+                <p className="px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  {disingkirkan.length} aset disingkirkan
+                  <span className="ml-1 normal-case tracking-normal text-slate-600">
+                    (tidak akan muncul lagi untuk klien ini, termasuk di email otomatis)
+                  </span>
+                </p>
+                <div>
+                  <AnimatePresence initial={false}>
+                    {disingkirkan.map(d => (
+                      <motion.div
+                        key={d.id_property}
+                        layout
+                        initial={false}
+                        exit={{ height: 0, opacity: 0, transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] } }}
+                        className="overflow-hidden"
+                      >
+                        <div className="pb-2.5">
+                          <KartuDisingkirkan
+                            d={d}
+                            idAgent={idAgent}
+                            memulihkan={memulihkan.has(d.id_property)}
+                            onPulihkan={() => pulihkan([d.id_property])}
+                          />
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
               </>
             )
           ) : loadingKirim ? (
@@ -3215,6 +3582,77 @@ function MatchListingModal({ klienId, klienNama, punyaWa, klienEmail, prefIds, p
             ))
           )}
         </div>
+
+        {/* ── Bilah "Urungkan" ──
+            Pola yang sama dengan arsip di Gmail, dan alasannya sama: konfirmasi
+            SEBELUM tindakan membuat agent membaca dialog di setiap kartu yang
+            ia buang — puluhan kali sehari — sementara jalan keluar SESUDAH
+            tindakan hanya dipakai saat benar-benar salah. Yang pertama menagih
+            biaya dari semua orang untuk melindungi yang jarang.
+
+            Melayang di ATAS daftar, bukan mendorongnya: daftar yang bergeser
+            naik-turun tiap kali satu kartu dibuang membuat kartu berikutnya
+            pindah dari bawah kursor tepat sebelum diketuk. */}
+        <AnimatePresence>
+          {aksiGalat && (
+            <motion.div
+              key="aksi-galat"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+              className={`pointer-events-none absolute inset-x-0 z-40 flex justify-center px-4 ${
+                tab === "cocok" && dipilih.size > 0 ? "bottom-[74px]" : "bottom-4"
+              }`}
+            >
+              <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-rose-400/25 bg-[#2a1418]/95 px-4 py-2.5 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.9)] backdrop-blur-xl">
+                <Icon icon="solar:danger-triangle-bold-duotone" className="shrink-0 text-base text-rose-300" />
+                <span className="text-[12.5px] font-semibold text-rose-100">{aksiGalat}</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {urung.length > 0 && !aksiGalat && (
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+              /* Naik di atas kaki kirim saat kaki itu muncul. Bilah yang
+                 menutupi tombol "Siapkan pesan" adalah bilah yang menghalangi
+                 pekerjaan utama layar ini demi memberitahu sesuatu yang sudah
+                 selesai. */
+              className={`pointer-events-none absolute inset-x-0 z-30 flex justify-center px-4 ${
+                tab === "cocok" && dipilih.size > 0 ? "bottom-[74px]" : "bottom-4"
+              }`}
+            >
+              <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-white/[0.1] bg-[#161a23]/95 py-2 pl-4 pr-2 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.9)] backdrop-blur-xl">
+                <Icon icon="solar:trash-bin-minimalistic-bold-duotone" className="shrink-0 text-base text-slate-400" />
+                <span className="text-[12.5px] font-semibold text-slate-200">
+                  {urung.length === 1 ? "1 aset disingkirkan" : `${urung.length} aset disingkirkan`}
+                </span>
+                <button
+                  onClick={urungkan}
+                  className="rounded-xl bg-white/[0.08] px-3 py-1.5 text-[12px] font-extrabold text-emerald-300 transition-colors hover:bg-white/[0.14] hover:text-emerald-200"
+                >
+                  Urungkan
+                </button>
+                {/* Menutup bilahnya, BUKAN membatalkan penyingkirannya. Diberi
+                    label yang jelas lewat aria-label supaya tidak tertukar
+                    dengan "Urungkan" oleh pembaca layar. */}
+                <button
+                  onClick={() => { if (urungTimer.current) clearTimeout(urungTimer.current); setUrung([]); }}
+                  aria-label="Tutup pemberitahuan"
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-300"
+                >
+                  <Icon icon="solar:close-circle-linear" className="text-base" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── Kaki: bilah kirim ──
             Hanya muncul saat ada yang dipilih. Bilah aksi permanen yang
@@ -3281,6 +3719,12 @@ function PanelKosong({ diagnosa, tanpaPref }: { diagnosa: Diagnosa | null; tanpa
       saran.push({ ikon: "solar:map-point-bold-duotone", teks: "kalau lokasi diperluas satu tingkat", n: diagnosa.jikaLokasiDiperluas });
     if (diagnosa.adaLuas && diagnosa.jikaLuasDiabaikan > 0)
       saran.push({ ikon: "solar:ruler-angular-bold-duotone", teks: "kalau batas luas dilepas", n: diagnosa.jikaLuasDiabaikan });
+    /* Gerbang paling tidak terduga dari sisi agent: ia mengisi "Tanah" dan
+       tidak pernah membayangkan bahwa lot "tanah berikut bangunan" ikut
+       tersaring keluar. Tanpa baris ini, layar kosongnya tidak punya
+       penjelasan sama sekali. */
+    if (diagnosa.adaBentuk && diagnosa.jikaBentukDiabaikan > 0)
+      saran.push({ ikon: "solar:home-2-bold-duotone", teks: "kalau tanah kosong & yang sudah ada bangunannya sama-sama diterima", n: diagnosa.jikaBentukDiabaikan });
   }
 
   return (
@@ -3379,8 +3823,9 @@ function FotoAset({ src, alt, ikon }: { src: string; alt: string; ikon: string }
 
 /* ── Kartu aset yang cocok ─────────────────────────────────── */
 
-function KartuCocok({ it, idAgent, dipilih, onToggle }: {
+function KartuCocok({ it, idAgent, dipilih, onToggle, onSingkirkan }: {
   it: MatchedListing; idAgent: string | null; dipilih: boolean; onToggle: () => void;
+  onSingkirkan: () => void;
 }) {
   const isLel = it.jenis_transaksi.toUpperCase() === "LELANG";
   const harga = isLel ? (it.nilai_limit_lelang ?? it.harga) : it.harga;
@@ -3479,17 +3924,103 @@ function KartuCocok({ it, idAgent, dipilih, onToggle }: {
             • jalur relatif (pathListing), bukan URL berdomain — SITE_URL
               menunjuk ke solusindoaset.com, jadi tautan berdomain akan
               melempar agent ke situs produksi saat menguji di localhost. */}
-        <a
-          href={pathListing({ slug: it.slug, id_property: it.id_property, jenis_transaksi: it.jenis_transaksi }, idAgent)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={e => e.stopPropagation()}
-          aria-label={`Lihat detail ${it.judul} di tab baru`}
-          className="flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-bold text-slate-300 transition-colors hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200"
-        >
-          Lihat detail
-          <Icon icon="solar:arrow-right-up-linear" className="text-[12px]" />
-        </a>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* SINGKIRKAN.
+              Berlabel, bukan ikon telanjang — alasan yang sama dengan tombol di
+              sebelahnya, dan di sini taruhannya lebih besar: ikon "X" di pojok
+              kartu terbaca sebagai "tutup" oleh separuh orang, dan yang salah
+              tebak sedang membuang aset dari daftar kliennya.
+
+              Warnanya sengaja NETRAL, bukan merah. Merah menandakan kerusakan
+              atau tindakan yang tak bisa ditarik; ini keputusan kerja biasa
+              yang bisa diurungkan sedetik kemudian, dan agent yang membuang
+              belasan aset per klien tidak boleh disambut peringatan tiap kali.
+              Merah baru muncul saat kursor di atasnya — cukup untuk memisahkan
+              tombol ini dari "Lihat detail" di sebelahnya.
+
+              stopPropagation WAJIB: seluruh kartu ini saklar pilih, dan tanpa
+              itu menyingkirkan aset sekaligus mencentangnya. */}
+          <button
+            onClick={e => { e.stopPropagation(); onSingkirkan(); }}
+            aria-label={`Singkirkan ${it.judul} dari daftar`}
+            title="Aset ini tidak cocok — sembunyikan dari daftar klien ini"
+            className="flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.02] px-2.5 py-1.5 text-[11px] font-bold text-slate-400 transition-colors hover:border-rose-400/35 hover:bg-rose-500/10 hover:text-rose-200"
+          >
+            <Icon icon="solar:close-circle-linear" className="text-[12px]" />
+            Singkirkan
+          </button>
+
+          <a
+            href={pathListing({ slug: it.slug, id_property: it.id_property, jenis_transaksi: it.jenis_transaksi }, idAgent)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            aria-label={`Lihat detail ${it.judul} di tab baru`}
+            className="flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-bold text-slate-300 transition-colors hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200"
+          >
+            Lihat detail
+            <Icon icon="solar:arrow-right-up-linear" className="text-[12px]" />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Kartu aset yang disingkirkan ──────────────────────────────────────────
+   Sengaja LEBIH SEPI daripada kartu "Cocok": tanpa foto besar, tanpa chip
+   alasan, tanpa kotak centang. Isinya bukan antrean kerja — ia daftar yang
+   dibuka sesekali untuk memastikan tidak ada yang terbuang keliru, dan kartu
+   yang sama menonjolnya dengan daftar utama akan menarik perhatian yang tidak
+   dibutuhkannya. */
+function KartuDisingkirkan({ d, idAgent, memulihkan, onPulihkan }: {
+  d: ItemDisingkirkan; idAgent: string | null; memulihkan: boolean; onPulihkan: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] p-2.5 transition-colors hover:border-white/[0.1]">
+      <div className="flex gap-3">
+        <div className="relative h-[52px] w-[68px] shrink-0 overflow-hidden rounded-lg bg-white/[0.04] opacity-60">
+          <FotoAset src={d.gambar} alt={d.judul} ikon="text-base" />
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col justify-center">
+          <p className="line-clamp-1 text-[12.5px] font-bold text-slate-300">{d.judul}</p>
+          <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500">
+            <Icon icon="solar:map-point-linear" className="mr-0.5 inline align-[-2px] text-[11px]" />
+            {d.alamat_lengkap || "—"}
+          </p>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="text-[12px] font-bold text-slate-400">{formatRpFull(d.harga)}</span>
+            {/* Dikatakan terus terang. Tombol "Pulihkan" yang seolah tidak
+                berefek — karena asetnya memang sudah tidak tersedia — akan
+                terbaca sebagai kerusakan, dan agent akan mengetuknya berkali
+                kali sebelum menyerah. */}
+            {!d.masih_tersedia && (
+              <span className="rounded-md bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-300/90">
+                sudah tidak tersedia
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col items-end justify-center gap-1.5">
+          <button
+            onClick={onPulihkan}
+            disabled={memulihkan}
+            className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[11px] font-bold text-slate-300 transition-colors hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-emerald-200 disabled:opacity-50"
+          >
+            <Icon icon={memulihkan ? "svg-spinners:ring-resize" : "solar:restart-linear"} className="text-[12px]" />
+            {memulihkan ? "Memulihkan…" : "Pulihkan"}
+          </button>
+          <a
+            href={pathListing({ slug: d.slug, id_property: d.id_property, jenis_transaksi: d.jenis_transaksi }, idAgent)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10.5px] font-semibold text-slate-500 transition-colors hover:text-slate-300"
+          >
+            Lihat detail →
+          </a>
+        </div>
       </div>
     </div>
   );

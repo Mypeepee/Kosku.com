@@ -13,6 +13,8 @@
     "db:reset": "prisma db execute --file prisma/sql/_reset_db.sql --schema prisma/schema.prisma && prisma db push",
     "migrate:users": "node scripts/migrate-users.js",
     "migrate:agents": "node scripts/migrate-agents.js",
+    "db:urut": "node scripts/periksa-urut.mjs",
+    "db:urut:perbaiki": "node scripts/periksa-urut.mjs --perbaiki",
     "pindai:sekitar": "node scripts/pindai-sekitar.mjs",
     "kamus:tempat": "node scripts/kamus-tempat.mjs"
   },

@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
+import { muatPengecualian, gabung } from "@/lib/klienPengecualian";
 import {
   cariCocok,
   skorListing,
@@ -80,6 +81,11 @@ export async function GET(req: NextRequest, { params }: Ctx) {
   const kecuali: bigint[] = [];
   if (!termasukTerkirim) kecuali.push(...terkirim.map(t => t.id_property));
   if (klien?.id_properti_asal) kecuali.push(klien.id_properti_asal);
+  /* Penyingkiran manual agent TIDAK ikut dilonggarkan oleh `termasukTerkirim`:
+     bendera itu berarti "tampilkan juga yang sudah pernah dikirim", bukan
+     "tampilkan yang sudah saya buang". */
+  kecuali.push(...gabung(await muatPengecualian(prisma, [params.id]), params.id)
+    .filter(id => !kecuali.includes(id)));
 
   const kriteria: KriteriaMatch = {
     id_preferensi: pref.id_preferensi,

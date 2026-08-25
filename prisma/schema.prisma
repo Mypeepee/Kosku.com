@@ -88,6 +88,7 @@ model Agent {
   targetBulanan           TargetAgent[]               @relation("AgentTarget")
   tugas                   Tugas[]
   kiriman                 KirimanRekomendasi[]
+  disingkirkan            RekomendasiDisingkirkan[]
   ProspekDiabaikan        ProspekDiabaikan[]
   email_asisten           EmailAsisten[]
 
@@ -146,6 +147,15 @@ model Listing {
   /// Diisi trigger `trg_listing_bukan_properti`, JANGAN ditulis dari aplikasi;
   /// hakimnya luas, bukan kata di judul (lihat prisma/migration_listing_bukan_properti.sql).
   bukan_properti     Boolean                @default(false)
+  /// TRUE = di atas tanahnya ada bangunan, FALSE = tanah kosong, NULL = tidak
+  /// bisa disimpulkan. Lapis kedua atas masalah yang sama dengan
+  /// `bukan_properti`: barisnya memang properti, tapi BENTUKNYA bukan yang
+  /// diminta — 2.467 lot di ember TANAH sebenarnya berikut bangunan, dan 238
+  /// lot di ember RUMAH sebenarnya tanah kosong. NULL sengaja tidak pernah
+  /// dibuang mesin pencocokan; hanya nilai yang BERTENTANGAN yang dibuang.
+  /// Diisi trigger `trg_listing_ada_bangunan`, JANGAN ditulis dari aplikasi
+  /// (lihat prisma/migration_listing_ada_bangunan.sql).
+  ada_bangunan       Boolean?
   jumlah_lantai      Int                    @default(1)
   kamar_tidur        Int?
   kamar_mandi        Int?
@@ -181,6 +191,7 @@ model Listing {
   sekitar            ListingSekitar?
   tempatDekat        ListingTempat[]
   kiriman            KirimanRekomendasi[]
+  disingkirkan       RekomendasiDisingkirkan[]
 
   @@index([kota], map: "idx_property_lokasi")
   @@index([jenis_transaksi], map: "idx_property_jenis")
@@ -1466,6 +1477,7 @@ model Klien {
   preferensi    PreferensiKlien[]
   followUpAcara Acara[]              @relation("KlienFollowUpAcara")
   kiriman       KirimanRekomendasi[]
+  disingkirkan  RekomendasiDisingkirkan[]
   tugas         Tugas[]
 
   @@index([id_agent], map: "idx_klien_agent")
@@ -1660,6 +1672,35 @@ model KirimanRekomendasi {
   @@index([id_agent, terakhir_dikirim(sort: Desc)], map: "idx_kiriman_agent")
   @@index([id_property], map: "idx_kiriman_listing")
   @@map("kiriman_rekomendasi")
+}
+
+/// Penilaian agent bahwa sebuah aset TIDAK cocok untuk seorang klien, dengan
+/// alasan yang tidak punya kolom di preferensi (menghadap makam, sertifikat
+/// bersengketa, klien sudah pernah melihatnya). Tanpa tabel ini aset yang sama
+/// naik ke puncak daftar setiap kali layar dibuka, sampai agent berhenti
+/// membaca daftarnya sama sekali — dan aset baru ikut terlewat.
+///
+/// Dikecualikan dari SELURUH pencarian rekomendasi klien itu lewat
+/// `src/lib/klienPengecualian.ts` — satu pintu, supaya layar CRM, panel
+/// ringkasan, dan cron email tidak bisa menyimpang.
+/// Butuh migrasi manual — prisma/migration_rekomendasi_disingkirkan.sql.
+model RekomendasiDisingkirkan {
+  id          BigInt   @id @default(autoincrement())
+  id_klien    String   @db.VarChar(20)
+  id_property BigInt
+  /// Jejak siapa yang memutuskan — BUKAN bagian dari kuncinya. Penilaiannya
+  /// melekat pada pasangan klien–aset, dan klien bisa berpindah tangan.
+  id_agent    String   @db.VarChar(20)
+  alasan      String?
+  dibuat_pada DateTime @default(now()) @db.Timestamptz(6)
+
+  klien   Klien   @relation(fields: [id_klien], references: [id_klien], onDelete: Cascade, map: "disingkirkan_klien_fk")
+  listing Listing @relation(fields: [id_property], references: [id_property], onDelete: Cascade, map: "disingkirkan_listing_fk")
+  agent   Agent   @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade, map: "disingkirkan_agent_fk")
+
+  @@unique([id_klien, id_property], map: "disingkirkan_unik")
+  @@index([id_property], map: "idx_disingkirkan_listing")
+  @@map("rekomendasi_disingkirkan")
 }
 
 /// Antrean kabar: apa yang berubah pada aset yang SUDAH terlanjur dikirim.

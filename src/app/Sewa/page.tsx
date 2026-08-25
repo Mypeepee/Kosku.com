@@ -17,11 +17,11 @@ import TempatAktifBar from "@/components/listing/TempatAktifBar";
 import { parseCategoryDbList } from "@/lib/propertyType";
 import { OPSI_KAMAR_MANDI_TIPE, OPSI_TIPE_UNIT } from "@/lib/listingFilters";
 import {
-  buildOrderBy,
   parseHalaman,
   parseSort,
   urlHalamanTerakhir,
 } from "@/lib/listingSort";
+import { orderByListing, whereHargaListing } from "@/lib/listingSortRuntime";
 
 // --- TIPE DATA URL PARAMETERS ---
 type Props = {
@@ -179,21 +179,6 @@ export default async function SewaSearchPage({ searchParams }: Props) {
       ? DURASI_FIELD_MAP[durasi as keyof typeof DURASI_FIELD_MAP]
       : undefined;
 
-  // Filter harga generik (harga/harga_promo di Listing) — dipakai cuma kalau
-  // user TIDAK memilih durasi spesifik (lihat sewaDetailWhere di bawah).
-  // Memakai kolom `harga_efektif` — sama dengan yang dipakai "Urutkan → harga
-  // terendah" dan yang dicetak kartu, jadi filter dan urutan tidak mungkin
-  // saling bertentangan.
-  const buildGenericPriceFilter = (): Prisma.ListingWhereInput | undefined => {
-    if (minHarga === undefined && maxHarga === undefined) return undefined;
-    return {
-      harga_efektif: {
-        ...(minHarga !== undefined && { gte: minHarga }),
-        ...(maxHarga !== undefined && { lte: maxHarga }),
-      },
-    };
-  };
-
   // Semua filter yang menyasar tabel ListingSewaDetail (durasi+harga, gender)
   // WAJIB digabung jadi SATU object relasi `sewaDetail` — kalau dipisah jadi
   // beberapa spread `{ sewaDetail: {...} }`, spread belakangan akan menimpa
@@ -217,7 +202,20 @@ export default async function SewaSearchPage({ searchParams }: Props) {
   }
   const hasSewaDetailFilter = Object.keys(sewaDetailFilter).length > 0;
 
-  const genericPriceFilter = durasiField ? undefined : buildGenericPriceFilter();
+  // Filter harga generik (kolom harga di Listing) — dipakai cuma kalau user
+  // TIDAK memilih durasi spesifik; kalau ia memilih, yang disaring adalah
+  // kolom harga per durasi di listing_sewa_detail (lihat sewaDetailWhere).
+  //
+  // Kolomnya ditentukan di sisi server lewat pintu yang SAMA dengan urutannya
+  // (whereHargaListing/orderByListing), jadi filter & urutan mustahil memakai
+  // kolom yang berbeda. Normalnya `harga_efektif` — angka yang tercetak di
+  // kartu, harga promo bila diskonnya sah. Di database yang belum menjalankan
+  // prisma/migration_harga_efektif.sql kolom itu ada tapi seluruhnya NULL, dan
+  // filter di atasnya diam-diam mengembalikan NOL hasil; di situ keduanya
+  // pindah bersama ke kolom cadangan.
+  const genericPriceFilter = durasiField
+    ? undefined
+    : await whereHargaListing("SEWA", minHarga, maxHarga);
   const locationWhere = buildLocationWhere(searchParams);
 
   // Filter "dekat X" — menangani `?dekat=…` maupun `?q=deket unesa`. Di /Sewa
@@ -292,7 +290,34 @@ export default async function SewaSearchPage({ searchParams }: Props) {
   // "Harga terendah" memakai `harga_efektif` (harga promo bila ada), yaitu
   // angka yang benar-benar tercetak di kartu. "Terluas" memakai luas BANGUNAN
   // di konteks sewa, karena unit apartemen tidak punya luas tanah.
-  const orderBy = buildOrderBy(sort, "SEWA");
+  const orderByDasar = await orderByListing(sort, "SEWA");
+
+  // Satu penyesuaian khas /Sewa: kalau pemakai memilih DURASI, harga yang
+  // diurut harus harga durasi ITU.
+  //
+  // `Listing.harga` (dan turunannya `harga_efektif`) hanya menyimpan harga
+  // durasi UTAMA pilihan pemilik — kos yang utamanya bulanan tapi juga
+  // menawarkan tahunan tetap tersimpan sebagai harga bulanannya. Jadi ketika
+  // pemakai menyaring "tahunan, 20–40 juta", filternya menyasar
+  // listing_sewa_detail.harga_sewa_tahunan sementara urutannya dulu memakai
+  // harga bulanan — daftar yang katanya "termurah" tampil dengan angka yang
+  // naik-turun tanpa pola, karena yang diurut memang bukan angka yang tampil.
+  // Filter dan urutan sekarang menunjuk kolom yang sama.
+  //
+  // Aman terhadap NULL tanpa klausa khusus: saat `durasiField` terisi,
+  // sewaDetailFilter sudah mensyaratkan kolom itu `not: null`.
+  const orderBy =
+    durasiField && (sort === "termurah" || sort === "termahal")
+      ? orderByDasar.map((bagian) =>
+          "harga_efektif" in bagian ||
+          "harga" in bagian ||
+          "nilai_limit_lelang" in bagian
+            ? ({
+                sewaDetail: { [durasiField]: sort === "termurah" ? "asc" : "desc" },
+              } as Prisma.ListingOrderByWithRelationInput)
+            : bagian,
+        )
+      : orderByDasar;
 
   // D. QUERY
   // `totalAktif` = seluruh listing sewa yang tayang, TANPA filter — dipakai

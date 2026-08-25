@@ -16,11 +16,11 @@ import {
 import TempatAktifBar from "@/components/listing/TempatAktifBar";
 import { parseCategoryDbList } from "@/lib/propertyType";
 import {
-  buildOrderBy,
   parseHalaman,
   parseSort,
   urlHalamanTerakhir,
 } from "@/lib/listingSort";
+import { orderByListing, whereHargaListing } from "@/lib/listingSortRuntime";
 
 // --- TIPE DATA URL PARAMETERS ---
 type Props = {
@@ -210,17 +210,12 @@ export default async function SearchPage({ searchParams }: Props) {
   // mentah, jadi keduanya bisa tidak sepakat: listing harga Rp 1 M berpromo
   // Rp 5 M (promo lebih mahal — bukan diskon, dan kartu menampilkan Rp 1 M)
   // dulu ikut tersaring ke rentang Rp 5 M. Satu kolom, satu kebenaran.
-  const buildPriceFilter = (): Prisma.ListingWhereInput | undefined => {
-    if (minHarga === undefined && maxHarga === undefined) return undefined;
-    return {
-      harga_efektif: {
-        ...(minHarga !== undefined && { gte: minHarga }),
-        ...(maxHarga !== undefined && { lte: maxHarga }),
-      },
-    };
-  };
-
-  const priceFilter = buildPriceFilter();
+  //
+  // Kolomnya ditentukan di sisi server (whereHargaListing) dan dipakai bersama
+  // dengan urutannya — di database yang belum menjalankan
+  // prisma/migration_harga_efektif.sql, `harga_efektif` ada tapi seluruhnya
+  // NULL, dan filter di atasnya diam-diam mengembalikan NOL hasil.
+  const priceFilter = await whereHargaListing("JUAL", minHarga, maxHarga);
 
   // Filter lokasi multi-wilayah (provinsi/kota/kecamatan/kelurahan) → grup OR.
   const locationWhere = buildLocationWhere(searchParams);
@@ -310,7 +305,7 @@ export default async function SearchPage({ searchParams }: Props) {
   // id_property) ada di @/lib/listingSort supaya /Jual, /Sewa, dan /Lelang
   // tidak pernah berbeda perilaku.
   const sort = parseSort(sortMentah, "JUAL", siapTempat.chip?.nama);
-  const orderBy = buildOrderBy(sort, "JUAL");
+  const orderBy = await orderByListing(sort, "JUAL");
 
   // D. EKSEKUSI QUERY DATABASE (TRANSACTION)
   //

@@ -36,6 +36,20 @@
 --
 -- Idempoten: aman dijalankan berulang kali. WAJIB diulang setiap kali
 -- `prisma db push --force-reset` dipakai (reset menghapus seluruh schema).
+--
+-- ⚠️ KALAU LANGKAH INI TERLEWAT DI SEBUAH SERVER, tidak ada error yang muncul.
+-- Kolomnya tetap dibuat `prisma db push` (ia ada di schema.prisma), hanya
+-- ISINYA yang NULL — dan ORDER BY pada kolom NULL tidak membandingkan apa pun.
+-- Yang terlihat: "urutkan termurah/termahal" tidak mengubah daftar sama sekali,
+-- dan filter harga min/maks mengembalikan NOL hasil dari puluhan ribu listing.
+-- Benar di lokal, mati di produksi, tanpa satu baris log pun.
+--
+-- Periksa kapan saja, di server mana pun:
+--   npm run db:urut              (periksa saja)
+--   npm run db:urut:perbaiki     (periksa, jalankan migrasi ini, periksa lagi)
+--   curl "https://…/api/diagnostik/urut?secret=$CRON_SECRET"
+-- Aplikasi ikut menjaga diri: src/lib/listingSortRuntime.ts mendeteksi keadaan
+-- ini saat berjalan, pindah ke kolom cadangan, dan meneriakkannya ke log.
 
 -- ── 1. Kolom ──────────────────────────────────────────────────────────────
 -- Normalnya sudah dibuat `prisma db push` dari schema.prisma. Baris ini
