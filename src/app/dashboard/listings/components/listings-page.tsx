@@ -1,10 +1,12 @@
 // app/dashboard/listings/components/listings-page.tsx
 "use client";
 
+import { isOwner } from "@/lib/sessionJabatan";
 import type { ListingHeaderStats } from "../lib/property-stats";
 import { MetricCard } from "./metric-card";
 import { AddListingCard } from "./AddListingCard";
 import ListingCardGrid from "./ListingCardGrid";
+import PanelPembersihan from "./pembersihan/PanelPembersihan";
 import type { DashboardListing } from "../lib/listing-item";
 import type { ListingFilters } from "../lib/filters";
 
@@ -90,6 +92,14 @@ export default function ListingsPage({
 
         <AddListingCard />
       </div>
+
+      {/* PEMBERSIHAN DATA — OWNER SAJA
+          Wewenangnya dinilai lewat `jabatan` (isOwner), bukan `userRole`:
+          `userRole` isinya peran_enum yang cuma USER|AGENT, jadi
+          `userRole === "OWNER"` tidak pernah benar dan pitanya tidak akan
+          pernah muncul untuk siapa pun. Ini pengaman TAMPILAN saja —
+          setiap panggilan API-nya memeriksa ulang jabatan dari database. */}
+      {isOwner({ jabatan: currentJabatan }) && <PanelPembersihan />}
 
       {/* CARD GRID */}
       <div className="mx-auto max-w-6xl">

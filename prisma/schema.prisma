@@ -204,6 +204,45 @@ model Listing {
   @@map("listing")
 }
 
+/// Arsip baris `listing` yang dihapus fitur Pembersihan Data (Owner-only, di
+/// /dashboard/listings). Lihat prisma/migration_listing_pembersihan.sql —
+/// tabelnya dibuat SQL manual seperti migrasi lain di proyek ini.
+///
+/// KENAPA ADA. Pembersihan menghapus baris sungguhan (DELETE), karena lot
+/// sepeda motor & sapi potong hasil scraping lelang tidak akan pernah jadi
+/// properti dan menyimpannya sebagai "ditarik" hanya memindahkan sampahnya.
+/// DELETE tidak punya tombol batal, jadi setiap baris disalin utuh ke sini
+/// dalam transaksi yang sama: `data` = to_jsonb(listing), seluruh kolom apa
+/// adanya. Pemulihan: jsonb_populate_record — caranya ada di berkas migrasinya.
+///
+/// TIDAK dipakai kode aplikasi (jalur tulisnya raw SQL, supaya arsipnya tidak
+/// ikut basi tiap kali `listing` bertambah kolom). Modelnya ada di sini semata
+/// supaya `prisma db push` di environment baru ikut membuat tabelnya.
+model ListingDibersihkan {
+  id              BigInt   @id @default(autoincrement())
+  id_property     BigInt
+  judul           String?  @db.VarChar(255)
+  jenis_transaksi String?  @db.VarChar(20)
+  kategori        String?  @db.VarChar(30)
+  kota            String?  @db.VarChar(355)
+  harga           Decimal? @db.Decimal(20, 2)
+  id_agent        String?  @db.VarChar(20)
+  /// Id aturan yang menangkapnya, atau MANUAL bila dipilih sendiri oleh Owner.
+  aturan          String   @db.VarChar(40)
+  alasan          String?
+  dihapus_oleh    String?  @db.VarChar(20)
+  nama_pelaku     String?  @db.VarChar(255)
+  dihapus_pada    DateTime @default(now()) @db.Timestamptz(6)
+  /// to_jsonb(listing) — baris utuh, termasuk kolom yang belum ada saat model
+  /// ini ditulis.
+  data            Json
+
+  @@index([dihapus_pada(sort: Desc)], map: "idx_listing_dibersihkan_waktu")
+  @@index([id_property], map: "idx_listing_dibersihkan_property")
+  @@index([aturan], map: "idx_listing_dibersihkan_aturan")
+  @@map("listing_dibersihkan")
+}
+
 /// Hasil pemindaian "apa saja yang ada di sekitar aset ini" — SATU baris per
 /// listing, ditulis sekali lalu dipakai selamanya.
 ///
