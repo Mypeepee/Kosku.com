@@ -7,6 +7,8 @@ import { Pencil, Share2 } from "lucide-react";
 
 type UserInvestment = {
   nominalKomitmen: number;
+  /** Modal yang sudah disetor — dasar hitung modal awal & profit. */
+  nominalTerbayar?: number;
   persentaseKepemilikan?: number | null;
   status: "lunas" | "menunggu_pembayaran" | string;
   updatedAt?: string | null;
@@ -39,7 +41,12 @@ export type ProjectCampaign = {
   jenisPendanaan: "terbuka" | "tertutup";
   thumbnail: string;
   targetPendanaan: number;
+  /** Σ komitmen — BUKAN dasar progres. */
   totalPendanaan: number;
+  /** Σ modal disetor — dasar progres pendanaan. */
+  danaTerkumpul?: number;
+  /** Dijanjikan tapi belum disetor. */
+  danaBelumSetor?: number;
   estimasiHargaJual: number;
   estimasiProfit: number;
   hariTersisa: number;
@@ -173,7 +180,35 @@ function resolveEstimasiSelesaiBulan(project: ProjectCampaign) {
   return Math.max(1, Math.ceil(project.hariTersisa / 30) || 1);
 }
 
+/** Uang yang benar-benar sudah masuk. Fallback ke Σ komitmen hanya untuk data
+ *  lama yang belum mengirim `danaTerkumpul`. */
+function getDanaTerkumpul(project: ProjectCampaign) {
+  return project.danaTerkumpul !== undefined
+    ? toNumber(project.danaTerkumpul)
+    : toNumber(project.totalPendanaan);
+}
+
+/**
+ * Progres pendanaan dihitung dari modal yang SUDAH DISETOR, bukan komitmen —
+ * kalau tidak, bar-nya langsung 100% begitu slot investor dialokasikan padahal
+ * belum ada uang masuk. Lihat summarizeFunding di src/lib/investor-ownership.ts.
+ */
 function getProgress(project: ProjectCampaign) {
+  if (toNumber(project.targetPendanaan) <= 0) return 0;
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        (getDanaTerkumpul(project) / toNumber(project.targetPendanaan)) * 100
+      )
+    )
+  );
+}
+
+/** Porsi target yang sudah dijanjikan investor (dibayar atau belum). */
+function getProgressKomitmen(project: ProjectCampaign) {
   if (toNumber(project.targetPendanaan) <= 0) return 0;
 
   return Math.max(
@@ -516,34 +551,55 @@ function MetricCard({
 }
 
 /* ─── Funding Progress Panel ────────────────────────── */
+/**
+ * Progres = uang yang SUDAH MASUK (modal disetor). Komitmen yang belum dibayar
+ * ditampilkan sebagai bayangan di bar dan baris terpisah — bukan dihitung
+ * sebagai pendanaan yang tercapai.
+ */
 function FundingPanel({
   progress,
-  totalPendanaan,
+  progressKomitmen,
+  danaTerkumpul,
+  belumSetor,
   targetPendanaan,
   sisaPendanaan,
   investor,
 }: {
   progress: number;
-  totalPendanaan: number;
+  progressKomitmen: number;
+  danaTerkumpul: number;
+  belumSetor: number;
   targetPendanaan: number;
   sisaPendanaan: number;
   investor: number;
 }) {
+  const penuh = targetPendanaan > 0 && progress >= 100;
+
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       {/* Progress header */}
       <div className="flex items-center justify-between gap-3 px-4 pt-4">
         <div className="min-w-0">
           <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-500">
-            Funding Progress
+            Dana masuk
           </p>
           <div className="mt-1.5 flex items-baseline gap-2">
             <span className="text-[28px] font-bold leading-none tracking-[-0.04em] text-white">
               {progress}%
             </span>
-            <Pill className="border-emerald-400/25 bg-emerald-500/12 text-emerald-300">
-              ACTIVE
-            </Pill>
+            {penuh ? (
+              <Pill className="border-emerald-400/25 bg-emerald-500/12 text-emerald-300">
+                PENUH
+              </Pill>
+            ) : belumSetor > 0 ? (
+              <Pill className="border-amber-400/25 bg-amber-500/12 text-amber-300">
+                MENUNGGU BAYAR
+              </Pill>
+            ) : (
+              <Pill className="border-sky-400/25 bg-sky-500/12 text-sky-300">
+                TERBUKA
+              </Pill>
+            )}
           </div>
         </div>
 
@@ -560,22 +616,38 @@ function FundingPanel({
         </div>
       </div>
 
-      {/* Bar */}
-      <div className="mx-4 mt-3 h-[6px] overflow-hidden rounded-full bg-white/[0.06]">
+      {/* Bar: isi solid = uang masuk, bayangan = komitmen belum dibayar */}
+      <div className="relative mx-4 mt-3 h-[6px] overflow-hidden rounded-full bg-white/[0.06]">
+        {progressKomitmen > progress ? (
+          <div
+            className="absolute inset-y-0 left-0 rounded-full bg-[repeating-linear-gradient(115deg,rgba(251,191,36,0.35)_0px,rgba(251,191,36,0.35)_4px,transparent_4px,transparent_8px)] transition-all duration-700"
+            style={{ width: `${Math.max(1, progressKomitmen)}%` }}
+          />
+        ) : null}
         <div
-          className="h-full rounded-full bg-[linear-gradient(90deg,#059669_0%,#34d399_55%,#7dd3fc_100%)] shadow-[0_0_12px_rgba(52,211,153,0.5)] transition-all duration-700"
-          style={{ width: `${Math.max(1, progress)}%` }}
+          className="absolute inset-y-0 left-0 rounded-full bg-[linear-gradient(90deg,#059669_0%,#34d399_55%,#7dd3fc_100%)] shadow-[0_0_12px_rgba(52,211,153,0.5)] transition-all duration-700"
+          style={{ width: `${progress}%` }}
         />
       </div>
 
+      {belumSetor > 0 ? (
+        <p
+          className="mx-4 mt-2 text-[10px] leading-4 text-amber-300/80"
+          title={formatCurrency(belumSetor)}
+        >
+          {formatCompactIDR(belumSetor)} sudah dijanjikan investor, menunggu
+          pembayaran
+        </p>
+      ) : null}
+
       {/* Stats row */}
       <div className="mt-3 grid grid-cols-3 divide-x divide-white/[0.06] border-t border-white/[0.06] px-0">
-        <div className="px-4 py-3" title={formatCurrency(totalPendanaan)}>
+        <div className="px-4 py-3" title={formatCurrency(danaTerkumpul)}>
           <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500">
-            Raised
+            Terkumpul
           </p>
           <p className="mt-1 text-sm font-bold text-white">
-            {formatCompactIDR(totalPendanaan)}
+            {formatCompactIDR(danaTerkumpul)}
           </p>
         </div>
 
@@ -657,12 +729,21 @@ function SoldFundingPanel({ projectSelesai }: { projectSelesai: ProjectSelesai }
 }
 
 /* ─── User Investment Panel ─────────────────────────── */
+/** Modal awal investor = uang yang benar-benar disetor. Komitmen hanya dipakai
+ *  untuk data lama yang belum mengirim nominalTerbayar. */
+function getModalDisetor(investment: UserInvestment) {
+  if (!investment) return 0;
+  return investment.nominalTerbayar !== undefined
+    ? toNumber(investment.nominalTerbayar)
+    : toNumber(investment.nominalKomitmen);
+}
+
 function getActualInvestorProfit(
   investment: UserInvestment,
   projectSelesai?: ProjectSelesai | null
 ) {
   if (!investment || !projectSelesai) return 0;
-  const modal = toNumber(investment.nominalKomitmen);
+  const modal = getModalDisetor(investment);
   const roiAktual = toNumber(projectSelesai.roi_bersih);
   const porsi = toNumber(investment.persentaseKepemilikan);
   if (porsi > 0) {
@@ -706,7 +787,7 @@ function UserInvestmentPanel({
 
   /* ── SOLD MODE ───────────────────────────────────── */
   if (isSold && projectSelesai) {
-    const modalAwal = toNumber(investment.nominalKomitmen);
+    const modalAwal = getModalDisetor(investment);
     const profitInvestor = getActualInvestorProfit(investment, projectSelesai);
     const modalAkhir = modalAwal + profitInvestor;
     const growthPercent =
@@ -830,6 +911,17 @@ function UserInvestmentPanel({
           <p className="mt-1 text-[10px] text-slate-600">
             {formatCurrency(investment.nominalKomitmen)}
           </p>
+
+          {/* Komitmen ≠ modal disetor → porsi kepemilikan ikut modal yang
+              sudah masuk, jadi selisihnya wajib terlihat. */}
+          {investment.nominalKomitmen - getModalDisetor(investment) > 0 ? (
+            <p className="mt-1 text-[10px] font-medium text-amber-300/75">
+              {formatCompactIDR(
+                investment.nominalKomitmen - getModalDisetor(investment)
+              )}{" "}
+              belum disetor
+            </p>
+          ) : null}
         </div>
 
         {/* 1/4 — Share button */}
@@ -941,10 +1033,17 @@ export default function ProjectFundraisingCard({
   const progress = getProgress(project);
   const projectedRoi = getProjectedROI(project);
   const exitMonths = resolveEstimasiSelesaiBulan(project);
+  const danaTerkumpul = getDanaTerkumpul(project);
+  const progressKomitmen = getProgressKomitmen(project);
+  // Sisa target = uang yang masih ditunggu, dihitung dari yang sudah MASUK.
   const sisaPendanaan = Math.max(
     0,
-    toNumber(project.targetPendanaan) - toNumber(project.totalPendanaan)
+    toNumber(project.targetPendanaan) - danaTerkumpul
   );
+  const belumSetor =
+    project.danaBelumSetor !== undefined
+      ? toNumber(project.danaBelumSetor)
+      : Math.max(0, toNumber(project.totalPendanaan) - danaTerkumpul);
   const statusTone = getStatusTone(project.status, isSold);
 
   const detailHref = `/dashboard/project/detail_transaksi/${encodeURIComponent(project.id)}`;
@@ -1163,7 +1262,9 @@ export default function ProjectFundraisingCard({
             {/* 3. Funding progress */}
             <FundingPanel
               progress={progress}
-              totalPendanaan={toNumber(project.totalPendanaan)}
+              danaTerkumpul={danaTerkumpul}
+              belumSetor={belumSetor}
+              progressKomitmen={progressKomitmen}
               targetPendanaan={toNumber(project.targetPendanaan)}
               sisaPendanaan={sisaPendanaan}
               investor={project.investor}

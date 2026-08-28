@@ -696,7 +696,7 @@ export default function ProjectPage() {
           key={projectToEdit.id}
           open
           idProject={projectToEdit.id}
-          theme={getTierTheme(walletSummary.totalDana)}
+          theme={getTierTheme(walletSummary.totalDanaLunas)}
           createdById={currentAgentId ?? undefined}
           onClose={handleCloseEditModal}
           onSaved={handleProjectUpdated}

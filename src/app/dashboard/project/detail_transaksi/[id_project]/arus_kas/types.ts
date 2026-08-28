@@ -1,36 +1,21 @@
-export type WalletKey =
-  | "utama"
-  | "dokumen"
-  | "eksekusi"
-  | "renovasi"
-  | "cadangan";
+import type { FundState, PosState, WalletKey } from "@/lib/project-kas";
+
+export type { WalletKey, PosState, FundState };
 
 export type DbProject = {
   id_project: string;
   nama_project: string;
   dibuat_oleh: string;
   status?: string;
+  jenis_pendanaan?: string;
   target_pendanaan?: number;
   total_pendanaan?: number;
-  total_biaya_akuisisi?: number;
-  nilai_limit_lelang?: number;
-  spare_bidding?: number;
-  biaya_balik_nama?: number;
-  biaya_eksekusi?: number;
-  biaya_renov?: number;
-  dana_cadangan?: number;
-  estimasi_harga_jual?: number;
-  estimasi_profit_bersih?: number;
   dibuat_tanggal?: string | Date;
 };
 
-export type CurrentInvestorInfo = {
-  nama: string | null;
-  nominal_komitmen: number;
-  nominal_terbayar: number;
-  persentase_kepemilikan: number | null;
-  status: string;
-};
+/** Ringkasan satu pos/dompet siap tampil. Angkanya berasal dari mesin tunggal
+ *  `@/lib/project-kas` — jangan hitung ulang di komponen. */
+export type WalletSummary = PosState;
 
 export type DbCashflow = {
   id_project_arus_kas: bigint | number | string;
@@ -48,47 +33,43 @@ export type DbCashflow = {
   /** Investor yang menyetor/menalangi (untuk baris setoran_modal & talangan_investor). */
   id_project_investor?: string | null;
   investor_nama?: string | null;
+  /** Baris ini dibuat otomatis oleh sistem (talangan/setoran) → tak bisa diedit. */
+  dikunci?: boolean;
 };
 
-export type WalletSummary = {
-  walletKey: WalletKey;
-  title: string;
-  /** Anggaran rencana pos (dari kolom project). */
-  budget: number;
-  income: number;
-  expense: number;
-  /** Realisasi pengeluaran pos = expense. */
-  terpakai: number;
-  /** budget − terpakai (boleh negatif = over-budget). */
-  sisaAnggaran: number;
-  /** terpakai > budget. Penanda visual, BUKAN kas minus. */
-  overBudget: boolean;
-  /** Alias sisaAnggaran (kompat lama). */
-  balance: number;
-  usedBudget: number;
-  remainingBudget: number;
-  visible: boolean;
+/** Satu investor project, lengkap dengan porsi kepemilikannya. */
+export type InvestorSummary = {
+  id_project_investor: string;
+  id_agent: string;
+  nama: string;
+  foto_profil_url: string | null;
+  /** Nominal yang dijanjikan. */
+  komitmen: number;
+  /** Modal yang benar-benar sudah masuk — dasar kepemilikan. */
+  disetor: number;
+  /** max(0, komitmen − disetor). */
+  belumSetor: number;
+  status: string;
+  isCurrentUser: boolean;
+};
+
+export type CurrentInvestorInfo = {
+  nama: string | null;
+  nominal_komitmen: number;
+  nominal_terbayar: number;
+  persentase_kepemilikan: number | null;
+  status: string;
 };
 
 export type ManageFundData = {
   project: DbProject;
+  /** Seluruh angka kas & anggaran. Sumber tunggal. */
+  fund: FundState;
+  /** Alias `fund.pos` untuk komponen dompet. */
   wallets: WalletSummary[];
   transactions: DbCashflow[];
-  totalIncome: number;
-  totalExpense: number;
-  totalBalance: number;
-  totalRemainingBudget: number;
-  /** ── Kas riil (uang yang benar-benar ada) ── */
-  /** Σ modal disetor + pemasukan non-modal. */
-  danaMasuk: number;
-  /** Σ pengeluaran seluruh pos. */
-  danaKeluar: number;
-  /** danaMasuk − danaKeluar. Dijaga ≥ 0 oleh guard talangan. */
-  sisaKas: number;
-  /** Σ modal disetor (nominal_terbayar seluruh investor). */
-  totalSetor: number;
-  /** Denominator kepemilikan = max(target, totalSetor). */
-  denominator: number;
+  /** Dipakai form pencatatan & panel tutup kekurangan (memilih penanggung). */
+  investors: InvestorSummary[];
   currentInvestorInfo: CurrentInvestorInfo | null;
 };
 
@@ -109,4 +90,6 @@ export type ProjectInvestorOption = {
 export type ProjectInvestorResponse = {
   investors: ProjectInvestorOption[];
   project_total_pendanaan: number;
+  source_label?: string | null;
+  funding_mode?: string | null;
 };

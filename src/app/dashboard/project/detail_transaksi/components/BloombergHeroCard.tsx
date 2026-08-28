@@ -811,10 +811,12 @@ function InfoPanel({
 
 function FundingTerminal({
   totalFunded,
+  unpaidCommitment,
   fundingTarget,
   fundedFromInvestorBook,
 }: {
   totalFunded: number;
+  unpaidCommitment: number;
   fundingTarget: number;
   fundedFromInvestorBook: boolean;
 }) {
@@ -828,6 +830,15 @@ function FundingTerminal({
 
   const progressWidth =
     totalFunded > 0 ? Math.max(6, Math.min(100, fundingProgress * 100)) : 0;
+
+  // Bayangan bar: total yang sudah dijanjikan (dibayar + belum dibayar).
+  const pledgedWidth =
+    fundingTarget > 0
+      ? Math.min(
+          100,
+          ((totalFunded + unpaidCommitment) / fundingTarget) * 100
+        )
+      : 0;
 
   const headlineHelper =
     fundingTarget <= 0
@@ -859,9 +870,13 @@ function FundingTerminal({
               ) : null}
             </div>
             <p className="mt-1 text-[11px] text-slate-400">{headlineHelper}</p>
-            {fundedFromInvestorBook ? (
+            {unpaidCommitment > 0 ? (
+              <p className="mt-0.5 text-[10px] text-amber-300/75">
+                +{compactIDR(unpaidCommitment)} dijanjikan, menunggu pembayaran
+              </p>
+            ) : fundedFromInvestorBook ? (
               <p className="mt-0.5 text-[10px] text-slate-600">
-                Investor Book · lunas saja
+                Investor Book · modal disetor
               </p>
             ) : null}
           </div>
@@ -874,11 +889,17 @@ function FundingTerminal({
           </div>
         </div>
 
-        {/* ── Progress bar ── */}
+        {/* ── Progress bar: isi = modal masuk, arsiran = komitmen belum bayar ── */}
         <div className="mt-4 relative h-[7px] rounded-full bg-white/[0.08]">
+          {pledgedWidth > progressWidth ? (
+            <div
+              className="absolute inset-y-0 left-0 rounded-full bg-[repeating-linear-gradient(115deg,rgba(251,191,36,0.32)_0px,rgba(251,191,36,0.32)_4px,transparent_4px,transparent_8px)]"
+              style={{ width: `${pledgedWidth}%` }}
+            />
+          ) : null}
           {progressWidth > 0 ? (
             <div
-              className="relative h-full rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-indigo-300 shadow-[0_0_16px_rgba(56,189,248,0.28)]"
+              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-sky-400 via-cyan-300 to-indigo-300 shadow-[0_0_16px_rgba(56,189,248,0.28)]"
               style={{ width: `${progressWidth}%` }}
             >
               <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2">
@@ -893,7 +914,9 @@ function FundingTerminal({
         {/* ── Bottom stats: 2 cols ── */}
         <div className="mt-3 grid grid-cols-2 gap-2">
           <div className="rounded-[14px] border border-white/8 bg-white/[0.03] px-3 py-2.5">
-            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Sisa kebutuhan</p>
+            <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">
+              Modal belum masuk
+            </p>
             <p className="mt-1.5 text-sm font-semibold tracking-[-0.02em] text-white">
               {remainingFunding > 0 ? compactIDR(remainingFunding) : "Terpenuhi ✓"}
             </p>
@@ -1099,17 +1122,32 @@ export default function BloombergHeroCard({
 
   const fundedFromInvestorBook = investors.length > 0;
 
+  // Pendanaan yang TERCAPAI = modal yang benar-benar sudah disetor
+  // (`nominal_terbayar`), bukan komitmen dan bukan pula komitmen milik investor
+  // berstatus lunas — status bisa basi, angkanya tidak.
   const totalFunded = useMemo(() => {
     if (!fundedFromInvestorBook) {
       return toNumber(project.totalFunded);
     }
 
-    return investors.reduce((sum: number, item: any) => {
-      const status = normalizePaymentStatus(item?.status);
-      if (status !== "lunas") return sum;
-      return sum + getInvestorCommittedAmount(item);
-    }, 0);
+    return investors.reduce(
+      (sum: number, item: any) => sum + toNumber(item?.nominal_terbayar),
+      0
+    );
   }, [fundedFromInvestorBook, investors, project.totalFunded]);
+
+  /** Dijanjikan investor tapi belum masuk kas. */
+  const unpaidCommitment = useMemo(() => {
+    if (!fundedFromInvestorBook) {
+      return Math.max(0, toNumber(project.unpaidCommitment));
+    }
+
+    return investors.reduce((sum: number, item: any) => {
+      const committed = toNumber(item?.nominal_komitmen);
+      const paid = toNumber(item?.nominal_terbayar);
+      return sum + Math.max(0, committed - paid);
+    }, 0);
+  }, [fundedFromInvestorBook, investors, project.unpaidCommitment]);
 
   const fundingTarget = toNumber(project.fundingTarget);
   const estimatedNetProfit = toNumber(project.estimatedNetProfit);
@@ -1420,6 +1458,7 @@ export default function BloombergHeroCard({
               <div className="mt-4">
                 <FundingTerminal
                   totalFunded={totalFunded}
+                  unpaidCommitment={unpaidCommitment}
                   fundingTarget={fundingTarget}
                   fundedFromInvestorBook={fundedFromInvestorBook}
                 />

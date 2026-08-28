@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { summarizeFunding } from "@/lib/investor-ownership";
 
 import BloombergHeroCard from "../components/BloombergHeroCard";
 import ReturnFrameworkCard from "../components/ReturnFrameworkCard";
@@ -313,6 +314,16 @@ export default async function DetailTransaksiPage({
 
   const projectSelesai = projectSelesaiRows[0] ?? null;
 
+  // Ringkasan pendanaan dari mesin tunggal — dipakai kartu hero & panel detail.
+  const funding = summarizeFunding(
+    project.investorProject.map((item) => ({
+      committed: item.nominal_komitmen,
+      paid: item.nominal_terbayar,
+      status: item.status,
+    })),
+    project.target_pendanaan
+  );
+
   const viewModel = {
     id: project.id_project,
     listingId: project.id_listing != null ? Number(project.id_listing) : undefined,
@@ -331,7 +342,15 @@ export default async function DetailTransaksiPage({
     estimatedSellPrice: toNumeric(project.estimasi_harga_jual),
     estimatedNetProfit: toNumeric(project.estimasi_profit_bersih),
     fundingTarget: toNumeric(project.target_pendanaan),
-    totalFunded: toNumeric(project.total_pendanaan),
+    // Pendanaan yang TERCAPAI = modal yang sudah disetor, bukan komitmen.
+    // `project.total_pendanaan` (Σ komitmen) akan membuat progres langsung
+    // 100% begitu slot investor dialokasikan. Lihat summarizeFunding di
+    // src/lib/investor-ownership.ts.
+    totalFunded: funding.terkumpul,
+    /** Σ komitmen seluruh investor (dibayar maupun belum). */
+    totalCommitted: funding.komitmen,
+    /** Dijanjikan tapi belum disetor. */
+    unpaidCommitment: funding.belumSetor,
 
     fundingType: project.jenis_pendanaan,
     status: project.status,

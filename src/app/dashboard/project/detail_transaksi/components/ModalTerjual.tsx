@@ -974,6 +974,22 @@ export default function ModalTerjual({
     // gagal → modal kembali unit final tampil FULL, bukan sisa.
     const serverInvestors = unitsData?.investors;
 
+    // Basis distribusi = MODAL DISETOR, ditentukan PER PROJECT. Fallback ke
+    // komitmen hanya kalau SELURUH project belum punya data setoran (data
+    // lama). Kalau fallback dipakai per investor, yang belum bayar ikut
+    // dihitung penuh dan mengecilkan porsi yang sudah bayar.
+    // Aturan yang sama ditegakkan server di _lib/sale-units.ts.
+    const sumberInvestor =
+      serverInvestors && serverInvestors.length
+        ? serverInvestors
+        : (investors ?? []);
+    const totalTerbayarProject = sumberInvestor.reduce(
+      (sum: number, inv: any) =>
+        sum + Math.max(0, toSafeNumber(inv?.nominal_terbayar)),
+      0
+    );
+    const pakaiKomitmen = totalTerbayarProject <= 0;
+
     const investorBase = (
       serverInvestors && serverInvestors.length
         ? serverInvestors.map((inv) => {
@@ -983,20 +999,18 @@ export default function ModalTerjual({
               id_agent: inv.id_agent,
               nama: identity?.nama ?? inv.nama ?? inv.id_agent,
               avatar: identity?.avatar ?? resolveAvatarUrl(inv.avatar_url),
-              modal:
-                terbayar > 0
-                  ? terbayar
-                  : toSafeNumber(inv.nominal_komitmen),
+              modal: pakaiKomitmen
+                ? toSafeNumber(inv.nominal_komitmen)
+                : terbayar,
               percentRaw: 0,
             };
           })
         : investors
             .map((inv, index) => {
-              // Basis distribusi = modal DISETOR (nominal_terbayar). Fallback
-              // ke komitmen utk data lama.
               const terbayar = toSafeNumber(inv?.nominal_terbayar);
-              const modal =
-                terbayar > 0 ? terbayar : toSafeNumber(inv?.nominal_komitmen);
+              const modal = pakaiKomitmen
+                ? toSafeNumber(inv?.nominal_komitmen)
+                : terbayar;
               const percentRaw = normalizePercent(inv?.persentase_kepemilikan);
               const id_agent = String(inv?.id_agent ?? "").trim();
 
@@ -1009,7 +1023,10 @@ export default function ModalTerjual({
               };
             })
             .filter((item) => item.id_agent.length > 0)
-    );
+    )
+      // Investor tanpa modal masuk tidak ikut pembagian — sama seperti aturan
+      // server di _lib/sale-units.ts, supaya pratinjau & hasil tersimpan sama.
+      .filter((item) => toSafeNumber(item.modal) > 0);
 
     if (!investorBase.length) return [];
 

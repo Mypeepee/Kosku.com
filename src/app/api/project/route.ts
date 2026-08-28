@@ -4,7 +4,11 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
-import { ownershipDenominator, ownershipPercent } from "@/lib/investor-ownership";
+import {
+  ownershipDenominator,
+  ownershipPercent,
+  summarizeFunding,
+} from "@/lib/investor-ownership";
 
 type ProjectSelesaiItem = {
   id_project: string;
@@ -33,7 +37,16 @@ type ProjectListItem = {
   jenisPendanaan: "terbuka" | "tertutup";
   thumbnail: string;
   targetPendanaan: number;
+  /** Σ komitmen. BUKAN dasar progres pendanaan. */
   totalPendanaan: number;
+  /** Σ modal disetor — dasar progres pendanaan. */
+  danaTerkumpul: number;
+  /** Σ komitmen seluruh investor. */
+  danaKomitmen: number;
+  /** Dijanjikan tapi belum disetor. */
+  danaBelumSetor: number;
+  /** Jumlah investor yang modalnya sudah masuk penuh. */
+  investorLunas: number;
   estimasiHargaJual: number;
   estimasiProfit: number;
   hariTersisa: number;
@@ -44,6 +57,8 @@ type ProjectListItem = {
   projectSelesai?: ProjectSelesaiItem | null;
   userInvestment?: {
     nominalKomitmen: number;
+    /** Modal yang sudah disetor. */
+    nominalTerbayar: number;
     persentaseKepemilikan: number | null;
     status: string;
     updatedAt?: string | null;
@@ -334,10 +349,19 @@ export async function GET() {
       // Kepemilikan = modal DISETOR / max(target, Σ setor). Porsi stabil saat
       // underfunded; talangan (Σ>target) mendilusi proporsional. Dihitung live.
       // Lihat src/lib/investor-ownership.ts.
-      const totalSetorProject = project.investorProject.reduce(
-        (sum, item) => sum + toNumber(item.nominal_terbayar),
-        0
+      // Progres pendanaan = uang yang SUDAH masuk, bukan komitmen. Kolom
+      // `project.total_pendanaan` (Σ komitmen) sengaja tidak dipakai untuk
+      // progres — lihat summarizeFunding di src/lib/investor-ownership.ts.
+      const funding = summarizeFunding(
+        project.investorProject.map((item) => ({
+          committed: item.nominal_komitmen,
+          paid: item.nominal_terbayar,
+          status: item.status,
+        })),
+        project.target_pendanaan
       );
+
+      const totalSetorProject = funding.terkumpul;
       const ownershipDenomProject = ownershipDenominator(
         toNumber(project.target_pendanaan),
         totalSetorProject
@@ -367,7 +391,16 @@ export async function GET() {
           resolveDriveUrl(project.gambar_thumbnail, "w800") ||
           "https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1200&q=80",
         targetPendanaan: toNumber(project.target_pendanaan),
+        // Σ komitmen — dipertahankan untuk kompatibilitas, TAPI bukan dasar
+        // progres pendanaan.
         totalPendanaan: toNumber(project.total_pendanaan),
+        /** Modal yang benar-benar sudah masuk — dasar progres pendanaan. */
+        danaTerkumpul: funding.terkumpul,
+        /** Σ komitmen seluruh investor (termasuk yang belum bayar). */
+        danaKomitmen: funding.komitmen,
+        /** Dijanjikan tapi belum disetor. */
+        danaBelumSetor: funding.belumSetor,
+        investorLunas: funding.jumlahLunas,
         estimasiHargaJual: toNumber(project.estimasi_harga_jual),
         estimasiProfit: toNumber(project.estimasi_profit_bersih),
         hariTersisa: projectSelesai
@@ -381,6 +414,8 @@ export async function GET() {
         userInvestment: myInvestment
           ? {
               nominalKomitmen: toNumber(myInvestment.nominal_komitmen),
+              /** Modal yang benar-benar sudah disetor — dasar hitung profit. */
+              nominalTerbayar: toNumber(myInvestment.nominal_terbayar),
               persentaseKepemilikan: ownershipPercent(
                 myInvestment.nominal_terbayar,
                 ownershipDenomProject

@@ -5,6 +5,7 @@ import fs from "fs";
 import XlsxPopulate from "xlsx-populate";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { loadFundState } from "@/lib/project-kas-server";
 
 function n(v: Prisma.Decimal | number | null | undefined): number {
   const num = v instanceof Prisma.Decimal ? v.toNumber() : Number(v ?? 0);
@@ -43,7 +44,10 @@ export async function GET(
 ) {
   const { id_project } = params;
 
-  const [project, txRows] = await Promise.all([
+  // Angka anggaran & kas diambil dari mesin tunggal `@/lib/project-kas` supaya
+  // isi file Excel identik dengan yang tampil di dashboard.
+  const [fund, project, txRows] = await Promise.all([
+    loadFundState(prisma, id_project),
     prisma.project.findUnique({
       where: { id_project },
       select: {
@@ -115,23 +119,23 @@ export async function GET(
   }));
 
   // ── Budget & realisasi per dompet ───────────────────────────
-  const budget = {
-    utama:    p.nilai_limit_lelang + p.spare_bidding,
-    dokumen:  p.biaya_balik_nama,
-    eksekusi: p.biaya_eksekusi,
-    renovasi: p.biaya_renov,
-    cadangan: p.dana_cadangan,
-  };
+  // Anggaran pos = rencana + talangan investor + refund (lihat @/lib/project-kas),
+  // bukan sekadar kolom rencana — kalau tidak, pos yang ditalangi akan terlihat
+  // over budget padahal dananya sudah ditambah.
+  const budget: Record<WalletKey, number> = { utama:0, dokumen:0, eksekusi:0, renovasi:0, cadangan:0 };
+  const real:   Record<WalletKey, number> = { utama:0, dokumen:0, eksekusi:0, renovasi:0, cadangan:0 };
 
-  const real: Record<WalletKey, number> = { utama:0, dokumen:0, eksekusi:0, renovasi:0, cadangan:0 };
-  tx.filter(t => t.jenis_transaksi === "pengeluaran")
-    .forEach(t => { real[t.wallet_key] += t.nominal; });
+  for (const pos of fund?.pos ?? []) {
+    budget[pos.walletKey] = pos.anggaran;
+    real[pos.walletKey]   = pos.terpakai;
+  }
 
-  const totalBudget  = Object.values(budget).reduce((s, v) => s + v, 0);
-  const totalReal    = Object.values(real).reduce((s, v) => s + v, 0);
-  const totalIncome  = tx.filter(t => t.jenis_transaksi === "pemasukan").reduce((s,t) => s+t.nominal, 0);
-  const totalExpense = tx.filter(t => t.jenis_transaksi === "pengeluaran").reduce((s,t) => s+t.nominal, 0);
-  const totalBalance = totalIncome - totalExpense;
+  const totalBudget  = fund?.totalAnggaran ?? 0;
+  const totalReal    = fund?.totalTerpakai ?? 0;
+  // Kas riil: modal disetor investor + pemasukan non-modal − pengeluaran.
+  const totalIncome  = fund?.kasMasuk ?? 0;
+  const totalExpense = fund?.pengeluaran ?? 0;
+  const totalBalance = fund?.sisaKas ?? 0;
 
   // ── Buka template ────────────────────────────────────────────
   const templatePath = path.join(

@@ -56,33 +56,29 @@ export async function GET(request: NextRequest) {
           inv.pending_project_count,
           prof.realized_profit
         FROM (
+          -- Uang yang SUDAH masuk vs yang baru dijanjikan dibedakan dari
+          -- NOMINALNYA (komitmen vs terbayar), bukan dari kolom status —
+          -- status bisa basi kalau komitmen diubah setelah ditandai lunas.
           SELECT
             COALESCE(SUM(pi.nominal_komitmen), 0) AS total_dana,
+            COALESCE(SUM(pi.nominal_terbayar), 0) AS total_lunas,
             COALESCE(
-              SUM(
-                CASE
-                  WHEN pi.status = 'lunas' THEN pi.nominal_komitmen
-                  ELSE 0
-                END
-              ),
-              0
-            ) AS total_lunas,
-            COALESCE(
-              SUM(
-                CASE
-                  WHEN pi.status = 'menunggu_pembayaran' THEN pi.nominal_komitmen
-                  ELSE 0
-                END
-              ),
+              SUM(GREATEST(pi.nominal_komitmen - pi.nominal_terbayar, 0)),
               0
             ) AS total_pending,
-            COUNT(DISTINCT pi.id_project)::int AS project_aktif,
-            COUNT(DISTINCT pi.id_project)::int AS jumlah_property_didanai,
+            -- "Project aktif" = yang masih berjalan (bukan terjual/dibatalkan),
+            -- sedangkan "property didanai" dihitung per ASET (id_listing).
+            -- Sebelumnya keduanya COUNT(DISTINCT id_project) yang sama persis,
+            -- jadi dua label berbeda selalu menampilkan angka identik.
+            COUNT(DISTINCT pi.id_project) FILTER (
+              WHERE p.status NOT IN ('terjual', 'dibatalkan')
+            )::int AS project_aktif,
+            COUNT(DISTINCT p.id_listing)::int AS jumlah_property_didanai,
             COUNT(*) FILTER (
-              WHERE pi.status = 'menunggu_pembayaran'
+              WHERE pi.nominal_komitmen > pi.nominal_terbayar
             )::int AS pending_payment_count,
             COUNT(DISTINCT CASE
-              WHEN pi.status = 'menunggu_pembayaran' THEN pi.id_project
+              WHEN pi.nominal_komitmen > pi.nominal_terbayar THEN pi.id_project
               ELSE NULL
             END)::int AS pending_project_count
           FROM public.project_investor pi

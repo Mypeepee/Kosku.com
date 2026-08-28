@@ -402,6 +402,12 @@ export default function InvestorBookCard({
                 const status = normalizeStatus(item.status);
                 const isSaving = String(savingId) === String(item.id);
                 const committed = toCommitted(item.committed);
+                // Kepemilikan dihitung dari modal DISETOR. Kalau komitmen dan
+                // setoran berbeda, selisihnya wajib terlihat — kalau tidak,
+                // investor bingung kenapa porsinya kecil/0 padahal komitmennya
+                // besar.
+                const paid = toCommitted(item.paid);
+                const belumSetor = Math.max(0, committed - paid);
                 const ownershipDisplay =
                   ownershipDisplayMap.get(String(item.id)) ?? {
                     ratio: null,
@@ -428,6 +434,15 @@ export default function InvestorBookCard({
                       <div className="truncate font-mono text-white">
                         {formatIDR(committed)}
                       </div>
+                      {belumSetor > 0 ? (
+                        <div className="mt-1 truncate text-[11px] text-amber-300/75">
+                          belum disetor {formatIDR(belumSetor)}
+                        </div>
+                      ) : paid > 0 ? (
+                        <div className="mt-1 truncate text-[11px] text-emerald-300/70">
+                          modal masuk penuh
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="min-w-0">

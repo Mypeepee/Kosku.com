@@ -225,3 +225,94 @@ export function buildOwnershipDisplayMap<
 
   return result;
 }
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────
+ *  PROGRES PENDANAAN — SATU SUMBER KEBENARAN
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ *  Progres pendanaan = UANG YANG SUDAH MASUK, bukan yang baru dijanjikan.
+ *
+ *      progres = Σ modal_disetor / target_pendanaan
+ *
+ *  JANGAN pakai kolom `project.total_pendanaan` untuk progres: isinya Σ
+ *  KOMITMEN, jadi begitu slot investor dialokasikan progresnya langsung 100%
+ *  padahal belum ada satu rupiah pun yang dibayar. Komitmen tetap ditampilkan,
+ *  tapi sebagai angka terpisah ("dijanjikan"), bukan sebagai progres.
+ */
+export type FundingSummary = {
+  /** Σ modal disetor (nominal_terbayar) — uang yang benar-benar masuk. */
+  terkumpul: number;
+  /** Σ komitmen (nominal_komitmen) — termasuk yang belum dibayar. */
+  komitmen: number;
+  /** max(0, komitmen − terkumpul) — dijanjikan tapi belum masuk. */
+  belumSetor: number;
+  target: number;
+  /** terkumpul / target (0..1, dijepit). `null` bila target belum diatur. */
+  ratio: number | null;
+  /** Persentase siap tampil 0..100 (dijepit), 0 bila target belum diatur. */
+  persen: number;
+  /** komitmen / target (0..1, dijepit) — untuk bayangan bar "dijanjikan". */
+  ratioKomitmen: number | null;
+  /** Persentase komitmen 0..100 (dijepit). */
+  persenKomitmen: number;
+  /** max(0, target − terkumpul) — uang yang masih ditunggu. */
+  sisaTarget: number;
+  /** terkumpul ≥ target (dan target > 0). */
+  penuh: boolean;
+  /** Jumlah investor yang modalnya sudah masuk penuh. */
+  jumlahLunas: number;
+  /** Jumlah investor pada project. */
+  jumlahInvestor: number;
+};
+
+function clampRatio(value: number | null): number {
+  if (value === null || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Ringkasan pendanaan dari daftar investor. `committed` = komitmen,
+ * `paid` = modal disetor. Dipakai kartu project, halaman detail, dan halaman
+ * share supaya angkanya tidak pernah berbeda antar layar.
+ */
+export function summarizeFunding(
+  items: ReadonlyArray<{ committed?: unknown; paid?: unknown; status?: unknown }>,
+  target: unknown
+): FundingSummary {
+  const targetValue = toCommitted(target);
+
+  let komitmen = 0;
+  let terkumpul = 0;
+  let jumlahLunas = 0;
+
+  for (const item of items) {
+    const c = toCommitted(item.committed);
+    const p = toCommitted(item.paid);
+
+    komitmen += c;
+    terkumpul += p;
+
+    // "Lunas" diturunkan dari uangnya, bukan dari kolom status — status bisa
+    // basi, angka tidak.
+    if (p > 0 && p >= c) jumlahLunas += 1;
+  }
+
+  const ratio = targetValue > 0 ? terkumpul / targetValue : null;
+  const ratioKomitmen = targetValue > 0 ? komitmen / targetValue : null;
+
+  return {
+    terkumpul,
+    komitmen,
+    belumSetor: Math.max(0, komitmen - terkumpul),
+    target: targetValue,
+    ratio,
+    persen: clampRatio(ratio) * 100,
+    ratioKomitmen,
+    persenKomitmen: clampRatio(ratioKomitmen) * 100,
+    sisaTarget: Math.max(0, targetValue - terkumpul),
+    penuh: targetValue > 0 && terkumpul >= targetValue,
+    jumlahLunas,
+    jumlahInvestor: items.length,
+  };
+}

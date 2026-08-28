@@ -5,35 +5,51 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  Loader2,
-  Search,
-  Users,
-  X,
+  Info,
+  Minus,
+  NotebookPen,
+  Plus,
 } from "lucide-react";
+import {
+  planExpense,
+  stateWithoutRow,
+  type FundState,
+} from "@/lib/project-kas";
 import type {
   DbCashflow,
-  ProjectInvestorOption,
-  ProjectInvestorResponse,
+  InvestorSummary,
   WalletKey,
   WalletSummary,
 } from "../types";
+import { formatCurrency } from "../lib/format-currency";
+import WalletDropdown from "./wallet-dropdown";
+import DatePickerModal, {
+  formatDatePretty,
+  normalizeDateValue,
+  shiftIso,
+  todayIso,
+} from "./date-picker-modal";
+import {
+  defaultKategori,
+  kategoriLabel,
+  kategoriOptions,
+} from "./cashflow-categories";
+
+type Jenis = "pemasukan" | "pengeluaran";
 
 type FormErrors = Partial<
-  Record<
-    "wallet" | "nominal" | "judul" | "tanggal" | "investor_penanggung",
-    string
-  >
+  Record<"nominal" | "judul" | "tanggal" | "investor", string>
 >;
 
 type CashflowQuickFormProps = {
   idProject: string;
+  /** Seluruh angka kas & anggaran — dari mesin `@/lib/project-kas`. */
+  fund: FundState;
   wallets: WalletSummary[];
-  /** Kas riil proyek (Σ modal disetor + pemasukan non-modal − pengeluaran). */
-  sisaKas: number;
+  investors: InvestorSummary[];
   defaultWallet?: WalletKey;
   editingTransaction?: DbCashflow | null;
   onSubmitted?: () => void;
@@ -42,115 +58,13 @@ type CashflowQuickFormProps = {
   formId?: string;
 };
 
-const MONTH_LABELS = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
+const QUICK_AMOUNTS = [
+  { label: "+50rb", value: 50_000 },
+  { label: "+100rb", value: 100_000 },
+  { label: "+500rb", value: 500_000 },
+  { label: "+1jt", value: 1_000_000 },
+  { label: "+10jt", value: 10_000_000 },
 ];
-
-const WEEKDAY_LABELS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
-
-function pad2(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function todayIso() {
-  const now = new Date();
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
-    now.getDate()
-  )}`;
-}
-
-function safeNumber(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-
-  if (typeof value === "string") {
-    const cleaned = value.replace(/[^\d.-]/g, "");
-    const parsed = Number(cleaned);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  return 0;
-}
-
-function parseIsoDate(value?: string | null) {
-  if (!value) return null;
-
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return null;
-
-  const date = new Date(year, month - 1, day);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function toIsoDate(date: Date) {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(
-    date.getDate()
-  )}`;
-}
-
-function normalizeDateValue(value?: string | Date | null) {
-  if (!value) return todayIso();
-
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return todayIso();
-
-  // tanggal_transaksi dari DB adalah UTC midnight (@db.Date). Baca komponen
-  // tanggalnya dalam UTC supaya picker menampilkan hari yang benar.
-  return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(
-    date.getUTCDate()
-  )}`;
-}
-
-function normalizeJenisValue(value?: string | null) {
-  if (value === "masuk") return "pemasukan";
-  if (value === "keluar") return "pengeluaran";
-  if (value === "pemasukan") return "pemasukan";
-  return "pengeluaran";
-}
-
-function isExpenseTransaction(value?: string | null) {
-  return normalizeJenisValue(value) === "pengeluaran";
-}
-
-function formatDateDisplay(value?: string | null) {
-  const date = parseIsoDate(value);
-  if (!date) return "Pilih tanggal";
-
-  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`;
-}
-
-function formatDatePretty(value?: string | null) {
-  const date = parseIsoDate(value);
-  if (!date) return "-";
-
-  return `${date.getDate()} ${MONTH_LABELS[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-function isSameDate(a: Date | null, b: Date | null) {
-  if (!a || !b) return false;
-
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
 
 function onlyDigits(value: string) {
   return value.replace(/\D/g, "");
@@ -162,438 +76,54 @@ function formatDigitsId(value: string) {
   return new Intl.NumberFormat("id-ID").format(numeric);
 }
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(value) ? value : 0);
+function normalizeJenis(value?: string | null): Jenis {
+  if (value === "masuk" || value === "pemasukan") return "pemasukan";
+  return "pengeluaran";
 }
 
-function normalizeImageUrl(value?: string | null) {
-  if (!value) return null;
-  return value.trim() || null;
-}
-
-function getWalletHint(walletKey?: string) {
-  switch (walletKey) {
-    case "utama":
-      return "Biaya inti proyek";
-    case "dokumen":
-      return "Legal & administrasi";
-    case "eksekusi":
-      return "Operasional lapangan";
-    case "renovasi":
-      return "Perbaikan & finishing";
-    case "cadangan":
-      return "Buffer pengeluaran";
-    default:
-      return "Dompet proyek";
-  }
-}
-
-function getWalletTone(walletKey?: string) {
-  switch (walletKey) {
-    case "utama":
-      return "border-emerald-300/20 bg-emerald-400/10 text-emerald-200";
-    case "dokumen":
-      return "border-cyan-300/20 bg-cyan-400/10 text-cyan-200";
-    case "eksekusi":
-      return "border-amber-300/20 bg-amber-400/10 text-amber-200";
-    case "renovasi":
-      return "border-violet-300/20 bg-violet-400/10 text-violet-200";
-    case "cadangan":
-      return "border-rose-300/20 bg-rose-400/10 text-rose-200";
-    default:
-      return "border-white/10 bg-white/[0.05] text-white/70";
-  }
-}
-
-function getMonthMatrix(viewDate: Date) {
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-
-  const firstDayOfMonth = new Date(year, month, 1);
-  const startWeekDay = (firstDayOfMonth.getDay() + 6) % 7;
-  const gridStart = new Date(year, month, 1 - startWeekDay);
-
-  return Array.from({ length: 42 }).map((_, index) => {
-    const date = new Date(
-      gridStart.getFullYear(),
-      gridStart.getMonth(),
-      gridStart.getDate() + index
-    );
-
-    return {
-      date,
-      inCurrentMonth: date.getMonth() === month,
-    };
-  });
-}
-
-function buildErrors(params: {
-  wallet?: WalletKey;
-  nominal: number;
-  judul: string;
-  tanggal: string;
-  needCoverInvestor: boolean;
-  coverInvestorId?: string | null;
-}) {
-  const errors: FormErrors = {};
-
-  if (!params.wallet) {
-    errors.wallet = "Pilih dompet terlebih dahulu.";
-  }
-
-  if (!Number.isFinite(params.nominal) || params.nominal <= 0) {
-    errors.nominal = "Masukkan nominal yang valid.";
-  }
-
-  if (!params.judul.trim()) {
-    errors.judul = "Judul transaksi wajib diisi.";
-  }
-
-  if (!params.tanggal) {
-    errors.tanggal = "Tanggal transaksi wajib diisi.";
-  }
-
-  if (params.needCoverInvestor && !params.coverInvestorId) {
-    errors.investor_penanggung =
-      "Pilih investor penanggung untuk menutup kekurangan dana.";
-  }
-
-  return errors;
-}
-
-function CalendarPickerModal({
-  open,
+/** Dropdown ringkas untuk kategori. */
+function KategoriDropdown({
+  jenis,
   value,
-  disabled,
-  onClose,
   onChange,
-}: {
-  open: boolean;
-  value: string;
-  disabled?: boolean;
-  onClose: () => void;
-  onChange: (value: string) => void;
-}) {
-  const selectedDate = useMemo(() => parseIsoDate(value), [value]);
-  const today = useMemo(() => parseIsoDate(todayIso()) ?? new Date(), []);
-
-  const [viewDate, setViewDate] = useState<Date>(() => {
-    const baseDate = selectedDate ?? today;
-    return new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
-  });
-
-  useEffect(() => {
-    if (!open) return;
-
-    const baseDate = selectedDate ?? today;
-    setViewDate(new Date(baseDate.getFullYear(), baseDate.getMonth(), 1));
-  }, [open, selectedDate, today]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  const cells = getMonthMatrix(viewDate);
-
-  return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-[#020817]/80 px-4 backdrop-blur-md">
-      <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
-
-      <div className="relative z-[1] w-full max-w-md overflow-hidden rounded-[30px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top,rgba(8,145,178,0.12),transparent_42%),linear-gradient(180deg,rgba(10,18,30,0.98),rgba(3,8,18,0.98))] shadow-[0_30px_80px_rgba(0,0,0,0.65)]">
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-white/38">
-              Pilih tanggal
-            </div>
-            <div className="mt-1 text-sm text-white/78">
-              {formatDatePretty(value)}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/70 transition hover:bg-white/[0.07] hover:text-white"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() =>
-                setViewDate(
-                  (prev) =>
-                    new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
-                )
-              }
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/80 transition hover:border-cyan-300/30 hover:bg-cyan-400/[0.08]"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-
-            <div className="text-center">
-              <div className="text-base font-semibold text-white">
-                {MONTH_LABELS[viewDate.getMonth()]}
-              </div>
-              <div className="text-sm text-slate-400">
-                {viewDate.getFullYear()}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                setViewDate(
-                  (prev) =>
-                    new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
-                )
-              }
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/80 transition hover:border-cyan-300/30 hover:bg-cyan-400/[0.08]"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-7 gap-2">
-            {WEEKDAY_LABELS.map((label) => (
-              <div
-                key={label}
-                className="pb-1 text-center text-[11px] font-medium uppercase tracking-[0.18em] text-white/32"
-              >
-                {label}
-              </div>
-            ))}
-
-            {cells.map(({ date, inCurrentMonth }) => {
-              const isSelected = isSameDate(date, selectedDate);
-              const isToday = isSameDate(date, today);
-
-              return (
-                <button
-                  key={toIsoDate(date)}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    onChange(toIsoDate(date));
-                    onClose();
-                  }}
-                  className={[
-                    "relative aspect-square rounded-2xl border text-sm font-medium transition",
-                    "disabled:cursor-not-allowed disabled:opacity-50",
-                    isSelected
-                      ? "border-cyan-300/45 bg-cyan-400/[0.16] text-white shadow-[0_0_0_1px_rgba(34,211,238,0.12)_inset]"
-                      : isToday
-                        ? "border-violet-300/25 bg-violet-400/[0.10] text-white/92"
-                        : inCurrentMonth
-                          ? "border-white/8 bg-white/[0.03] text-white/80 hover:border-cyan-300/20 hover:bg-cyan-400/[0.06]"
-                          : "border-transparent bg-transparent text-white/22 hover:border-white/8 hover:bg-white/[0.02]",
-                  ].join(" ")}
-                >
-                  {date.getDate()}
-                  {isToday && !isSelected ? (
-                    <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-violet-300" />
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-5 flex items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                onChange(todayIso());
-                onClose();
-              }}
-              className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-white/78 transition hover:bg-white/[0.07] hover:text-white"
-            >
-              Hari ini
-            </button>
-
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-[0.18em] text-white/30">
-                Tanggal terpilih
-              </div>
-              <div className="mt-1 text-sm font-medium text-white/88">
-                {formatDatePretty(value)}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InvestorAvatar({
-  name,
-  src,
-}: {
-  name: string;
-  src?: string | null;
-}) {
-  const normalized = normalizeImageUrl(src);
-
-  if (normalized) {
-    return (
-      <img
-        src={normalized}
-        alt={name}
-        className="h-11 w-11 rounded-[16px] object-cover ring-1 ring-white/10"
-      />
-    );
-  }
-
-  return (
-    <div className="flex h-11 w-11 items-center justify-center rounded-[16px] border border-white/10 bg-white/[0.05] text-sm font-bold text-white">
-      {(name || "?").slice(0, 1).toUpperCase()}
-    </div>
-  );
-}
-
-function ProjectInvestorCombobox({
-  idProject,
-  value,
-  selected,
-  onSelect,
   disabled,
-  helperText,
 }: {
-  idProject: string;
-  value?: string | null;
-  selected?: ProjectInvestorOption | null;
-  onSelect: (option: ProjectInvestorOption) => void;
+  jenis: Jenis;
+  value: string;
+  onChange: (value: string) => void;
   disabled?: boolean;
-  helperText?: string;
 }) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [options, setOptions] = useState<ProjectInvestorOption[]>([]);
+  const ref = useRef<HTMLDivElement>(null);
+  const options = kategoriOptions(jenis);
 
   useEffect(() => {
-    function handleOutside(event: MouseEvent) {
-      if (!rootRef.current) return;
-      if (!rootRef.current.contains(event.target as Node)) {
+    function onClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
-
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (!open || !idProject) return;
-
-    const controller = new AbortController();
-
-    const timer = window.setTimeout(async () => {
-      setLoading(true);
-
-      try {
-        const params = new URLSearchParams({
-          id_project: idProject,
-          q: query,
-        });
-
-        const response = await fetch(
-          `/api/project/investor_options?${params.toString()}`,
-          {
-            method: "GET",
-            cache: "no-store",
-            signal: controller.signal,
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error("Gagal mengambil investor project.");
-        }
-
-        const payload: ProjectInvestorResponse = await response.json();
-        setOptions(Array.isArray(payload.investors) ? payload.investors : []);
-      } catch (error) {
-        if ((error as Error).name !== "AbortError") {
-          setOptions([]);
-        }
-      } finally {
-        setLoading(false);
-      }
-    }, 250);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [open, query, idProject]);
-
-  const displayLabel =
-    selected?.nama?.trim() ||
-    selected?.id_agent?.trim() ||
-    String(value || "").trim();
-
   return (
-    <div ref={rootRef} className="relative z-[90]">
+    <div ref={ref} className="relative">
       <button
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen((prev) => !prev)}
-        className={`flex h-16 w-full items-center justify-between rounded-[22px] border border-white/10 bg-white/[0.04] px-3 text-left transition hover:border-white/15 hover:bg-white/[0.055] ${
-          open ? "border-white/20 bg-white/[0.06]" : ""
-        } disabled:cursor-not-allowed disabled:opacity-60`}
+        className={[
+          "flex h-14 w-full items-center justify-between gap-3 rounded-[18px] border px-4 text-left transition",
+          "disabled:cursor-not-allowed disabled:opacity-60",
+          open
+            ? "border-cyan-300/40 bg-cyan-400/[0.07]"
+            : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]",
+        ].join(" ")}
       >
-        <div className="flex min-w-0 items-center gap-3">
-          {displayLabel ? (
-            <>
-              <InvestorAvatar
-                name={displayLabel}
-                src={selected?.foto_profil_url}
-              />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-white">
-                  {displayLabel}
-                </p>
-                <p className="truncate text-xs text-slate-400">
-                  {selected?.nama_kantor || selected?.id_agent || "Investor project"}
-                  {selected?.kota_area ? ` • ${selected.kota_area}` : ""}
-                </p>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex h-11 w-11 items-center justify-center rounded-[16px] border border-dashed border-white/10 bg-white/[0.03] text-slate-400">
-                <Users className="h-4 w-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-white">
-                  Pilih investor penanggung
-                </p>
-                <p className="text-xs text-slate-500">
-                  {helperText || "Investor project yang tersedia"}
-                </p>
-              </div>
-            </>
-          )}
-        </div>
-
+        <span className="truncate text-sm text-white">
+          {kategoriLabel(value)}
+        </span>
         <ChevronDown
           className={`h-4 w-4 shrink-0 text-slate-400 transition ${
             open ? "rotate-180" : ""
@@ -602,69 +132,28 @@ function ProjectInvestorCombobox({
       </button>
 
       {open ? (
-        <div className="absolute left-0 right-0 top-full z-[100] mt-2 rounded-[24px] border border-white/10 bg-[#09111d]/95 p-3 shadow-[0_32px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
-          <div className="flex items-center gap-2 rounded-[18px] border border-white/10 bg-white/[0.04] px-3">
-            <Search className="h-4 w-4 text-slate-400" />
-            <input
-              autoFocus
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Cari investor project..."
-              className="h-12 w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
-            />
-          </div>
-
-          <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
-            {loading ? (
-              <div className="flex h-24 items-center justify-center rounded-[18px] border border-white/8 bg-white/[0.02] text-slate-400">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Memuat investor...
-              </div>
-            ) : options.length ? (
-              options.map((option) => {
-                const optionName = option.nama || option.id_agent;
-
-                return (
-                  <button
-                    key={`${option.id_project_investor}-${option.id_agent}`}
-                    type="button"
-                    onClick={() => {
-                      onSelect(option);
-                      setOpen(false);
-                      setQuery("");
-                    }}
-                    className="flex w-full items-start gap-3 rounded-[18px] border border-white/8 bg-white/[0.03] px-3 py-3 text-left transition hover:border-white/15 hover:bg-white/[0.05]"
-                  >
-                    <InvestorAvatar
-                      name={optionName}
-                      src={option.foto_profil_url}
-                    />
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-semibold text-white">
-                          {optionName}
-                        </p>
-                        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-slate-400">
-                          {option.id_agent}
-                        </span>
-                      </div>
-
-                      <p className="mt-1 truncate text-xs text-slate-400">
-                        {option.nama_kantor || "Tanpa kantor"}
-                        {option.kota_area ? ` • ${option.kota_area}` : ""}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="rounded-[18px] border border-white/8 bg-white/[0.02] px-4 py-6 text-center text-sm text-slate-400">
-                Investor project tidak ditemukan.
-              </div>
-            )}
-          </div>
+        <div className="absolute inset-x-0 top-full z-[110] mt-2 overflow-hidden rounded-2xl border border-white/10 bg-[#0a1120] shadow-[0_24px_64px_rgba(0,0,0,0.6)]">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              className={[
+                "flex w-full items-center justify-between gap-3 px-4 py-3 text-sm transition",
+                option.value === value
+                  ? "bg-white/[0.07] text-white"
+                  : "text-slate-300 hover:bg-white/[0.04]",
+              ].join(" ")}
+            >
+              <span className="text-left">{option.label}</span>
+              {option.value === value ? (
+                <Check className="h-4 w-4 shrink-0 text-cyan-300" />
+              ) : null}
+            </button>
+          ))}
         </div>
       ) : null}
     </div>
@@ -673,8 +162,9 @@ function ProjectInvestorCombobox({
 
 export default function CashflowQuickForm({
   idProject,
+  fund,
   wallets,
-  sisaKas,
+  investors,
   defaultWallet,
   editingTransaction,
   onSubmitted,
@@ -686,182 +176,160 @@ export default function CashflowQuickForm({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [showCatatan, setShowCatatan] = useState(false);
 
+  const editingId = String(editingTransaction?.id_project_arus_kas ?? "").trim();
+  const isEditing = Boolean(editingId);
+
+  const [jenis, setJenis] = useState<Jenis>(() =>
+    normalizeJenis(editingTransaction?.jenis_transaksi)
+  );
   const [walletKey, setWalletKey] = useState<WalletKey>(
-    defaultWallet ?? wallets?.[0]?.walletKey ?? "utama"
+    () =>
+      (editingTransaction?.wallet_key as WalletKey) ??
+      defaultWallet ??
+      wallets?.[0]?.walletKey ??
+      "utama"
   );
-  const [nominalInput, setNominalInput] = useState("");
-  const [judulTransaksi, setJudulTransaksi] = useState("");
-  const [tanggalTransaksi, setTanggalTransaksi] = useState(todayIso());
-  const [catatan, setCatatan] = useState("");
+  const [kategori, setKategori] = useState(
+    () =>
+      editingTransaction?.kategori_transaksi ??
+      defaultKategori(
+        (editingTransaction?.wallet_key as WalletKey) ??
+          defaultWallet ??
+          "utama",
+        normalizeJenis(editingTransaction?.jenis_transaksi)
+      )
+  );
+  const [nominalInput, setNominalInput] = useState(() =>
+    editingTransaction ? onlyDigits(String(Number(editingTransaction.nominal ?? 0))) : ""
+  );
+  const [judulTransaksi, setJudulTransaksi] = useState(
+    () => editingTransaction?.judul_transaksi ?? ""
+  );
+  const [tanggalTransaksi, setTanggalTransaksi] = useState(() =>
+    editingTransaction
+      ? normalizeDateValue(editingTransaction.tanggal_transaksi)
+      : todayIso()
+  );
+  const [catatan, setCatatan] = useState(
+    () => editingTransaction?.catatan ?? ""
+  );
 
-  const [investorSourceLabel, setInvestorSourceLabel] = useState(
-    "Investor project yang tersedia"
+  const [selectedInvestorId, setSelectedInvestorId] = useState<string | null>(
+    () => (investors.length === 1 ? investors[0].id_project_investor : null)
   );
-  const [selectedCoverInvestor, setSelectedCoverInvestor] =
-    useState<ProjectInvestorOption | null>(null);
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [serverError, setServerError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  const editingId = String(editingTransaction?.id_project_arus_kas ?? "").trim();
-  const isEditing = Boolean(editingId);
-
-  const jenisTransaksi = normalizeJenisValue(editingTransaction?.jenis_transaksi);
-  const isExpense = isExpenseTransaction(jenisTransaksi);
-
   useEffect(() => {
     onPendingChange?.(isSubmitting);
   }, [isSubmitting, onPendingChange]);
 
+  // Sinkronkan form saat transaksi yang diedit berganti.
   useEffect(() => {
-    let ignore = false;
+    const nextJenis = normalizeJenis(editingTransaction?.jenis_transaksi);
+    const nextWallet =
+      (editingTransaction?.wallet_key as WalletKey) ??
+      defaultWallet ??
+      wallets?.[0]?.walletKey ??
+      "utama";
 
-    async function fetchInvestorSourceInfo() {
-      try {
-        const params = new URLSearchParams({
-          id_project: idProject,
-        });
-
-        const response = await fetch(
-          `/api/project/investor_options?${params.toString()}`,
-          {
-            method: "GET",
-            cache: "no-store",
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error("Gagal memuat investor project.");
-        }
-
-        const payload: ProjectInvestorResponse = await response.json();
-
-        if (ignore) return;
-
-        setInvestorSourceLabel(
-          payload.source_label?.trim() || "Investor project yang tersedia"
-        );
-      } catch {
-        if (ignore) return;
-        setInvestorSourceLabel("Investor project yang tersedia");
-      }
-    }
-
-    if (idProject) {
-      fetchInvestorSourceInfo();
-    }
-
-    return () => {
-      ignore = true;
-    };
-  }, [idProject]);
-
-  useEffect(() => {
-    if (editingTransaction) {
-      setWalletKey(
-        (editingTransaction.wallet_key as WalletKey) ??
-          defaultWallet ??
-          wallets?.[0]?.walletKey ??
-          "utama"
-      );
-      setNominalInput(
-        onlyDigits(String(Number(editingTransaction.nominal ?? 0)))
-      );
-      setJudulTransaksi(editingTransaction.judul_transaksi ?? "");
-      setTanggalTransaksi(
-        normalizeDateValue(editingTransaction.tanggal_transaksi)
-      );
-      setCatatan(editingTransaction.catatan ?? "");
-    } else {
-      setWalletKey(defaultWallet ?? wallets?.[0]?.walletKey ?? "utama");
-      setNominalInput("");
-      setJudulTransaksi("");
-      setTanggalTransaksi(todayIso());
-      setCatatan("");
-    }
-
+    setJenis(nextJenis);
+    setWalletKey(nextWallet);
+    setKategori(
+      editingTransaction?.kategori_transaksi ??
+        defaultKategori(nextWallet, nextJenis)
+    );
+    setNominalInput(
+      editingTransaction
+        ? onlyDigits(String(Number(editingTransaction.nominal ?? 0)))
+        : ""
+    );
+    setJudulTransaksi(editingTransaction?.judul_transaksi ?? "");
+    setTanggalTransaksi(
+      editingTransaction
+        ? normalizeDateValue(editingTransaction.tanggal_transaksi)
+        : todayIso()
+    );
+    setCatatan(editingTransaction?.catatan ?? "");
+    setShowCatatan(Boolean(editingTransaction?.catatan));
+    setSelectedInvestorId(
+      investors.length === 1 ? investors[0].id_project_investor : null
+    );
     setErrors({});
     setServerError("");
     setSuccessMessage("");
-    setSelectedCoverInvestor(null);
-  }, [editingTransaction, defaultWallet, wallets]);
+  }, [editingTransaction, defaultWallet, wallets, investors]);
 
   const nominalValue = useMemo(
     () => Number(onlyDigits(nominalInput) || 0),
     [nominalInput]
   );
 
+  const isExpense = jenis === "pengeluaran";
+
+  // Saat mengedit, efek baris lama dilepas dulu supaya pratinjau menghitung
+  // "seolah transaksi ini belum pernah ada" — sama seperti yang dilakukan
+  // server sebelum memvalidasi.
+  const baseState = useMemo(
+    () => (isEditing ? stateWithoutRow(fund, editingTransaction ?? null) : fund),
+    [fund, isEditing, editingTransaction]
+  );
+
   const selectedWallet =
-    wallets.find((item) => item.walletKey === walletKey) ?? wallets?.[0];
+    baseState.pos.find((item) => item.walletKey === walletKey) ??
+    baseState.pos[0];
 
-  // Defisit dihitung terhadap KAS RIIL proyek (bukan anggaran pos). Server
-  // menghitung ulang & menegakkan aturan ini; ini hanya UI hint.
-  const currentBalance = safeNumber(sisaKas);
+  // Rumus yang sama persis dipakai server (@/lib/project-kas).
+  const plan = useMemo(
+    () =>
+      planExpense({
+        state: baseState,
+        walletKey,
+        nominal: isExpense ? nominalValue : 0,
+      }),
+    [baseState, walletKey, nominalValue, isExpense]
+  );
 
-  const balanceAfterTransaction = isExpense
-    ? currentBalance - nominalValue
-    : currentBalance + nominalValue;
+  const needsCover = isExpense && plan.butuhTalangan && nominalValue > 0;
+  // Edit tidak menyediakan talangan otomatis — server menolaknya.
+  const coverBlockedByEdit = needsCover && isEditing;
 
-  const deficitAmount =
-    !isEditing && isExpense ? Math.max(0, 0 - balanceAfterTransaction) : 0;
+  const selectedInvestor =
+    investors.find(
+      (item) => item.id_project_investor === selectedInvestorId
+    ) ?? null;
 
-  const needsInvestorCover = !isEditing && deficitAmount > 0;
+  const sisaAnggaranSetelah = isExpense
+    ? plan.sisaAnggaranPosSetelah
+    : selectedWallet
+      ? selectedWallet.sisaAnggaran + (kategori === "refund" ? nominalValue : 0)
+      : 0;
 
-  const finalBalanceAfterCover = needsInvestorCover
-    ? balanceAfterTransaction + deficitAmount
-    : balanceAfterTransaction;
-
-  const sectionClass =
-    "rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(8,145,178,0.08),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.02))] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] sm:p-5";
-
-  function applyEditingValues() {
-    setWalletKey(
-      (editingTransaction?.wallet_key as WalletKey) ??
-        defaultWallet ??
-        wallets?.[0]?.walletKey ??
-        "utama"
-    );
-    setNominalInput(onlyDigits(String(Number(editingTransaction?.nominal ?? 0))));
-    setJudulTransaksi(editingTransaction?.judul_transaksi ?? "");
-    setTanggalTransaksi(
-      normalizeDateValue(editingTransaction?.tanggal_transaksi)
-    );
-    setCatatan(editingTransaction?.catatan ?? "");
-    setSelectedCoverInvestor(null);
-  }
-
-  function applyCreateValues() {
-    setWalletKey(defaultWallet ?? wallets?.[0]?.walletKey ?? "utama");
-    setNominalInput("");
-    setJudulTransaksi("");
-    setTanggalTransaksi(todayIso());
-    setCatatan("");
-    setSelectedCoverInvestor(null);
-  }
-
-  function resetForm() {
-    if (isSubmitting) return;
-
-    if (editingTransaction) {
-      applyEditingValues();
-    } else {
-      applyCreateValues();
-    }
-
+  function handleJenisChange(next: Jenis) {
+    if (isSubmitting || next === jenis) return;
+    setJenis(next);
+    setKategori(defaultKategori(walletKey, next));
     setErrors({});
     setServerError("");
-    setSuccessMessage("");
   }
 
-  function handleNominalChange(value: string) {
-    setNominalInput(onlyDigits(value));
-    setErrors((prev) => ({
-      ...prev,
-      nominal: undefined,
-      investor_penanggung: undefined,
-    }));
+  function handleWalletChange(next: WalletKey) {
+    if (isSubmitting) return;
+    setWalletKey(next);
+    // Kategori mengikuti pos supaya user tak perlu memilih dua kali.
+    setKategori(defaultKategori(next, jenis));
+    setErrors((prev) => ({ ...prev, investor: undefined }));
+    setServerError("");
+  }
+
+  function addAmount(amount: number) {
+    if (isSubmitting) return;
+    setNominalInput(String(nominalValue + amount));
+    setErrors((prev) => ({ ...prev, nominal: undefined }));
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -872,19 +340,33 @@ export default function CashflowQuickForm({
     setServerError("");
     setSuccessMessage("");
 
-    const nextErrors = buildErrors({
-      wallet: walletKey,
-      nominal: nominalValue,
-      judul: judulTransaksi,
-      tanggal: tanggalTransaksi,
-      needCoverInvestor: needsInvestorCover,
-      coverInvestorId: selectedCoverInvestor
-        ? String(selectedCoverInvestor.id_project_investor)
-        : null,
-    });
+    const nextErrors: FormErrors = {};
+
+    if (!Number.isFinite(nominalValue) || nominalValue <= 0) {
+      nextErrors.nominal = "Masukkan nominal transaksi.";
+    }
+
+    if (!judulTransaksi.trim()) {
+      nextErrors.judul = "Judul transaksi wajib diisi.";
+    }
+
+    if (!tanggalTransaksi) {
+      nextErrors.tanggal = "Tanggal transaksi wajib diisi.";
+    }
+
+    if (needsCover && !isEditing && !selectedInvestorId) {
+      nextErrors.investor = "Pilih investor yang menanggung kekurangan ini.";
+    }
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
+      return;
+    }
+
+    if (coverBlockedByEdit) {
+      setServerError(
+        "Nominal ini melebihi dana yang tersedia. Hapus transaksi ini lalu catat ulang supaya kekurangannya bisa ditalangi investor."
+      );
       return;
     }
 
@@ -893,32 +375,29 @@ export default function CashflowQuickForm({
       : submitUrl;
 
     if (!requestUrl) {
-      setServerError(
-        "Form sudah siap dipakai, tapi endpoint submit belum dihubungkan."
-      );
+      setServerError("Endpoint penyimpanan belum dihubungkan.");
       return;
     }
 
     const payload = {
       id_project: idProject,
       wallet_key: walletKey,
-      jenis_transaksi: jenisTransaksi,
-      kategori_transaksi: editingTransaction?.kategori_transaksi ?? undefined,
+      jenis_transaksi: jenis,
+      kategori_transaksi: kategori,
       nominal: nominalValue,
       judul_transaksi: judulTransaksi.trim(),
       tanggal_transaksi: tanggalTransaksi,
       catatan: catatan.trim() || null,
       status_transaksi: editingTransaction?.status_transaksi ?? "tercatat",
 
-      auto_cover_deficit: needsInvestorCover,
-      deficit_nominal: needsInvestorCover ? deficitAmount : 0,
-      investor_penanggung: needsInvestorCover
+      // Server menghitung ulang besaran talangannya; ini hanya menyatakan
+      // siapa penanggungnya.
+      auto_cover_deficit: needsCover && !isEditing,
+      investor_penanggung: selectedInvestor
         ? {
-            id_project_investor: String(
-              selectedCoverInvestor?.id_project_investor ?? ""
-            ),
-            id_agent: String(selectedCoverInvestor?.id_agent ?? ""),
-            nama: selectedCoverInvestor?.nama ?? null,
+            id_project_investor: selectedInvestor.id_project_investor,
+            id_agent: selectedInvestor.id_agent,
+            nama: selectedInvestor.nama,
           }
         : null,
     };
@@ -928,9 +407,7 @@ export default function CashflowQuickForm({
     try {
       const response = await fetch(requestUrl, {
         method: isEditing ? "PATCH" : "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
@@ -957,454 +434,442 @@ export default function CashflowQuickForm({
           : "Transaksi berhasil dicatat."
       );
       setErrors({});
-      setServerError("");
-
-      if (!isEditing) {
-        applyCreateValues();
-      }
-
       router.refresh();
       onSubmitted?.();
     } catch (error) {
       setServerError(
         error instanceof Error
           ? error.message
-          : isEditing
-            ? "Terjadi kesalahan saat memperbarui transaksi."
-            : "Terjadi kesalahan saat menyimpan transaksi."
+          : "Terjadi kesalahan saat menyimpan transaksi."
       );
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  const fieldLabel =
+    "text-[11px] font-medium uppercase tracking-[0.18em] text-white/40";
+
   return (
     <>
-      <form
-        id={formId}
-        onSubmit={handleSubmit}
-        onReset={(event) => {
-          event.preventDefault();
-          resetForm();
-        }}
-        className="space-y-5 overflow-visible"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-            {isEditing ? "Mode edit transaksi" : "Tambah transaksi baru"}
-          </div>
+      <form id={formId} onSubmit={handleSubmit} className="space-y-4">
+        {/* 1 ── Dompet: keputusan pertama, dropdown supaya hemat ruang */}
+        <div className="space-y-2">
+          <label className={fieldLabel}>Dompet</label>
+          <WalletDropdown
+            value={walletKey}
+            onChange={(next) => handleWalletChange(next as WalletKey)}
+            wallets={wallets}
+            includeAll={false}
+            variant="field"
+            disabled={isSubmitting}
+          />
+        </div>
+
+        {/* 2 ── Arah uang: keluar atau masuk */}
+        <div className="grid grid-cols-2 gap-2 rounded-[20px] border border-white/10 bg-white/[0.03] p-1.5">
+          {(
+            [
+              {
+                key: "pengeluaran" as const,
+                label: "Uang keluar",
+                Icon: Minus,
+                active:
+                  "border-rose-300/35 bg-rose-400/[0.12] text-rose-100",
+              },
+              {
+                key: "pemasukan" as const,
+                label: "Uang masuk",
+                Icon: Plus,
+                active:
+                  "border-emerald-300/35 bg-emerald-400/[0.12] text-emerald-100",
+              },
+            ] as const
+          ).map(({ key, label, Icon, active }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleJenisChange(key)}
+              disabled={isSubmitting}
+              className={[
+                "flex h-12 items-center justify-center gap-2 rounded-[15px] border text-sm font-medium transition",
+                "disabled:cursor-not-allowed disabled:opacity-60",
+                jenis === key
+                  ? active
+                  : "border-transparent text-slate-400 hover:bg-white/[0.04]",
+              ].join(" ")}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* 3 ── Nominal */}
+        <div className="space-y-2">
+          <label className={fieldLabel}>Nominal</label>
 
           <div
             className={[
-              "inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em]",
-              isEditing
-                ? "border-cyan-300/20 bg-cyan-400/10 text-cyan-100"
-                : "border-emerald-300/20 bg-emerald-400/10 text-emerald-100",
+              "rounded-[22px] border bg-[#07111d] p-4 transition sm:p-5",
+              errors.nominal ? "border-rose-400/40" : "border-white/10",
             ].join(" ")}
           >
-            {isEditing ? "Editing" : "Create"}
-          </div>
-        </div>
+            <div className="flex items-center gap-3">
+              <span
+                className={[
+                  "text-2xl font-semibold",
+                  isExpense ? "text-rose-300/80" : "text-emerald-300/80",
+                ].join(" ")}
+              >
+                {isExpense ? "−" : "+"}
+              </span>
+              <span className="text-xl font-semibold text-white/60 sm:text-2xl">
+                Rp
+              </span>
+              <input
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="0"
+                value={formatDigitsId(nominalInput)}
+                onChange={(event) => {
+                  setNominalInput(onlyDigits(event.target.value));
+                  setErrors((prev) => ({ ...prev, nominal: undefined }));
+                }}
+                disabled={isSubmitting}
+                className="w-full bg-transparent text-3xl font-semibold tabular-nums tracking-tight text-white outline-none placeholder:text-white/20 disabled:cursor-not-allowed disabled:opacity-60 sm:text-4xl"
+              />
+            </div>
 
-        <div className="grid gap-5 overflow-visible xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
-          <div className="space-y-5 overflow-visible">
-            <section className={sectionClass}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-                  {isExpense ? "Nominal pengeluaran" : "Nominal pemasukan"}
-                </div>
-
-                <div
-                  className={[
-                    "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em]",
-                    isExpense
-                      ? "border-rose-300/20 bg-rose-400/10 text-rose-200"
-                      : "border-emerald-300/20 bg-emerald-400/10 text-emerald-200",
-                  ].join(" ")}
-                >
-                  {isExpense ? "Keluar" : "Masuk"}
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-[24px] border border-white/10 bg-[#07111d] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] sm:p-5">
-                <label className="block">
-                  <div className="flex items-center gap-3">
-                    <div className="text-xl font-semibold text-white/90 sm:text-2xl">
-                      Rp
-                    </div>
-                    <input
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="0"
-                      value={formatDigitsId(nominalInput)}
-                      onChange={(e) => handleNominalChange(e.target.value)}
-                      disabled={isSubmitting}
-                      className="w-full bg-transparent text-3xl font-semibold tracking-tight text-white outline-none placeholder:text-white/20 disabled:cursor-not-allowed disabled:opacity-60 sm:text-4xl"
-                    />
-                  </div>
-                </label>
-
-                <div className="mt-3 text-sm leading-6 text-slate-400">
-                  {nominalValue > 0
-                    ? `${
-                        isExpense ? "Transaksi keluar" : "Transaksi masuk"
-                      } akan dicatat sebesar ${formatCurrency(nominalValue)}.`
-                    : "Masukkan nominal transaksi."}
-                </div>
-              </div>
-
-              {errors.nominal ? (
-                <div className="mt-3 text-sm text-rose-300">
-                  {errors.nominal}
-                </div>
-              ) : null}
-            </section>
-
-            {needsInvestorCover ? (
-              <section className="relative rounded-[30px] border border-amber-300/15 bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.12),transparent_34%),linear-gradient(180deg,rgba(251,191,36,0.08),rgba(255,255,255,0.02))] p-4 shadow-[0_24px_80px_rgba(245,158,11,0.08)] sm:p-5">
-                <div className="pointer-events-none absolute inset-0 rounded-[30px] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent_30%,transparent_74%,rgba(255,255,255,0.02))]" />
-
-                <div className="relative z-[1]">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] border border-amber-300/20 bg-amber-400/10 text-amber-200">
-                      <AlertTriangle className="h-5 w-5" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="text-[11px] uppercase tracking-[0.22em] text-amber-100/60">
-                        Saldo dompet perlu ditutup investor
-                      </div>
-
-                      <h3 className="mt-1 text-xl font-semibold text-white">
-                        Total cover dibutuhkan {formatCurrency(deficitAmount)}
-                      </h3>
-
-                      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                        Cover ini akan menutup saldo minus yang sudah ada
-                        ditambah transaksi baru pada dompet ini.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
-                    <div className="flex items-center justify-between gap-3 py-1">
-                      <span>Saldo dompet saat ini</span>
-                      <span className="font-medium text-white">
-                        {formatCurrency(currentBalance)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 py-1">
-                      <span>Setelah transaksi ini</span>
-                      <span
-                        className={[
-                          "font-medium",
-                          balanceAfterTransaction < 0
-                            ? "text-rose-200"
-                            : "text-white",
-                        ].join(" ")}
-                      >
-                        {formatCurrency(balanceAfterTransaction)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 py-1">
-                      <span>Cover investor yang dibutuhkan</span>
-                      <span className="font-medium text-amber-200">
-                        {formatCurrency(deficitAmount)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 space-y-3 overflow-visible">
-                    <div className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-                      Investor penanggung
-                    </div>
-
-                    <ProjectInvestorCombobox
-                      idProject={idProject}
-                      value={
-                        selectedCoverInvestor
-                          ? String(selectedCoverInvestor.id_project_investor)
-                          : null
-                      }
-                      selected={selectedCoverInvestor}
-                      onSelect={(option) => {
-                        setSelectedCoverInvestor(option);
-                        setErrors((prev) => ({
-                          ...prev,
-                          investor_penanggung: undefined,
-                        }));
-                      }}
-                      disabled={isSubmitting}
-                      helperText={investorSourceLabel}
-                    />
-
-                    {errors.investor_penanggung ? (
-                      <div className="text-sm text-rose-300">
-                        {errors.investor_penanggung}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-slate-400">
-                        {investorSourceLabel}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </section>
-            ) : null}
-
-            <section className="grid gap-5">
-              <div className={sectionClass}>
-                <label className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-                  Judul transaksi
-                </label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Bayar dokumen balik nama"
-                  value={judulTransaksi}
-                  onChange={(e) => {
-                    setJudulTransaksi(e.target.value);
-                    setErrors((prev) => ({ ...prev, judul: undefined }));
-                  }}
+            <div className="mt-4 flex flex-wrap gap-2">
+              {QUICK_AMOUNTS.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => addAmount(item.value)}
                   disabled={isSubmitting}
-                  className="mt-3 h-16 w-full rounded-[20px] border border-white/10 bg-white/[0.03] px-5 text-base text-white outline-none transition placeholder:text-white/25 focus:border-cyan-300/35 focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60 md:text-lg xl:text-[1.15rem]"
-                />
-                {errors.judul ? (
-                  <div className="mt-2 text-sm text-rose-300">
-                    {errors.judul}
-                  </div>
-                ) : null}
-              </div>
+                  className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] disabled:opacity-50"
+                >
+                  {item.label}
+                </button>
+              ))}
 
-              <div className={sectionClass}>
-                <label className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-                  Tanggal
-                </label>
-
+              {nominalValue > 0 ? (
                 <button
                   type="button"
-                  onClick={() => !isSubmitting && setIsCalendarOpen(true)}
+                  onClick={() => setNominalInput("")}
                   disabled={isSubmitting}
-                  className="mt-3 flex h-16 w-full items-center justify-between rounded-[20px] border border-cyan-300/30 bg-[linear-gradient(180deg,rgba(34,211,238,0.08),rgba(255,255,255,0.03))] px-4 text-left text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.09] disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-slate-400 transition hover:bg-white/[0.06] disabled:opacity-50"
                 >
-                  <span className="inline-flex items-center gap-3">
-                    <CalendarDays className="h-5 w-5 text-white/55" />
-                    <span className="text-base font-medium tracking-[0.02em] text-white md:text-lg">
-                      {formatDateDisplay(tanggalTransaksi)}
-                    </span>
-                  </span>
-
-                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-white/50">
-                    Ubah
-                  </span>
+                  Hapus
                 </button>
+              ) : null}
 
-                {errors.tanggal ? (
-                  <div className="mt-2 text-sm text-rose-300">
-                    {errors.tanggal}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-sm text-slate-400">
-                    Ketuk untuk memilih tanggal transaksi.
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className={sectionClass}>
-              <label className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-                Catatan
-              </label>
-              <textarea
-                rows={4}
-                value={catatan}
-                onChange={(e) => setCatatan(e.target.value)}
-                disabled={isSubmitting}
-                placeholder="Tambahkan konteks singkat agar histori transaksi lebih mudah dipahami."
-                className="mt-3 w-full rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 text-base text-white outline-none transition placeholder:text-white/25 focus:border-cyan-300/35 focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </section>
+              {isExpense &&
+              selectedWallet &&
+              selectedWallet.sisaAnggaran > 0 &&
+              nominalValue !== Math.round(selectedWallet.sisaAnggaran) ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNominalInput(
+                      String(Math.round(selectedWallet.sisaAnggaran))
+                    )
+                  }
+                  disabled={isSubmitting}
+                  className="rounded-full border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition hover:bg-cyan-400/15 disabled:opacity-50"
+                >
+                  Pakai seluruh saldo
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          <div className="space-y-5">
-            <section className={sectionClass}>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-                Pilih dompet
+          {errors.nominal ? (
+            <div className="text-sm text-rose-300">{errors.nominal}</div>
+          ) : null}
+        </div>
+
+        {/* 4 ── Dampak ke saldo dompet: satu baris, tak perlu buka layar lain */}
+        {nominalValue > 0 ? (
+          <div className="flex items-center justify-between gap-4 rounded-[20px] border border-white/[0.08] bg-white/[0.02] px-4 py-3">
+            <span className="text-sm text-slate-400">
+              Saldo {selectedWallet?.title ?? "dompet"} setelah ini
+            </span>
+            <span
+              className={[
+                "text-sm font-semibold tabular-nums",
+                sisaAnggaranSetelah < 0 ? "text-amber-300" : "text-white/85",
+              ].join(" ")}
+            >
+              {formatCurrency(sisaAnggaranSetelah)}
+            </span>
+          </div>
+        ) : null}
+
+        {/* 5 ── Talangan investor saat dana kurang */}
+        {needsCover ? (
+          <section className="rounded-[24px] border border-amber-300/20 bg-[linear-gradient(180deg,rgba(251,191,36,0.09),rgba(255,255,255,0.02))] p-4 sm:p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] border border-amber-300/20 bg-amber-400/10 text-amber-200">
+                <AlertTriangle className="h-5 w-5" />
               </div>
 
-              <div className="mt-3 grid gap-3">
-                {wallets.map((option) => {
-                  const active = walletKey === option.walletKey;
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-white">
+                  Dana kurang {formatCurrency(plan.totalDibebankan)}
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-slate-300">
+                  {plan.tambahanAnggaran > 0
+                    ? `Saldo ${selectedWallet?.title} tinggal ${formatCurrency(
+                        plan.sisaAnggaranPos
+                      )}.`
+                    : `Saldo ${selectedWallet?.title} masih cukup, tapi modal investor yang masuk baru ${formatCurrency(
+                        plan.sisaKas
+                      )}.`}{" "}
+                  Kekurangannya dibebankan ke investor dan otomatis menambah
+                  modal disetor serta porsi kepemilikannya.
+                </p>
 
-                  return (
-                    <button
-                      key={option.walletKey}
-                      type="button"
-                      onClick={() => {
-                        if (isSubmitting) return;
-                        setWalletKey(option.walletKey);
-                        setErrors((prev) => ({
-                          ...prev,
-                          wallet: undefined,
-                          investor_penanggung: undefined,
-                        }));
-                      }}
-                      disabled={isSubmitting}
-                      className={[
-                        "rounded-[22px] border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-60",
-                        active
-                          ? "border-cyan-300/35 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(255,255,255,0.03))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
-                          : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]",
-                      ].join(" ")}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div
-                            className={[
-                              "inline-flex items-center rounded-full border px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em]",
-                              getWalletTone(option.walletKey),
-                            ].join(" ")}
-                          >
-                            {option.title}
-                          </div>
-
-                          <div className="mt-2 text-base text-slate-300">
-                            {getWalletHint(option.walletKey)}
-                          </div>
-                        </div>
-
-                        <div className="shrink-0 text-right">
-                          <div className="text-[10px] uppercase tracking-[0.18em] text-white/35">
-                            Saldo
-                          </div>
-                          <div className="mt-2 text-sm font-semibold text-white/90">
-                            {formatCurrency(safeNumber(option.balance))}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {errors.wallet ? (
-                <div className="mt-3 text-sm text-rose-300">{errors.wallet}</div>
-              ) : null}
-            </section>
-
-            <section className={sectionClass}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-white/38">
-                    Proyeksi saldo dompet
-                  </div>
-                  <div className="mt-1 text-sm text-slate-400">
-                    Minus lama dan transaksi baru akan dihitung penuh
-                  </div>
-                </div>
-
-                <div
-                  className={[
-                    "inline-flex items-center rounded-full border px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.18em]",
-                    getWalletTone(selectedWallet?.walletKey),
-                  ].join(" ")}
-                >
-                  {selectedWallet?.title ?? "Dompet"}
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-                <div className="flex items-center justify-between gap-4 py-2">
-                  <span className="text-sm text-slate-400">Saldo saat ini</span>
-                  <span
-                    className={[
-                      "text-sm font-medium",
-                      currentBalance < 0 ? "text-rose-200" : "text-white/90",
-                    ].join(" ")}
-                  >
-                    {formatCurrency(currentBalance)}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-4 border-t border-white/8 py-2">
-                  <span className="text-sm text-slate-400">Transaksi ini</span>
-                  <span
-                    className={[
-                      "text-sm font-medium",
-                      isExpense ? "text-rose-200" : "text-emerald-200",
-                    ].join(" ")}
-                  >
-                    {nominalValue > 0
-                      ? `${isExpense ? "-" : "+"}${formatCurrency(nominalValue)}`
-                      : "-"}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-4 border-t border-white/8 py-2">
-                  <span className="text-sm text-slate-400">
-                    Saldo setelah transaksi
-                  </span>
-                  <span
-                    className={[
-                      "text-sm font-medium",
-                      balanceAfterTransaction < 0
-                        ? "text-rose-200"
-                        : "text-white/90",
-                    ].join(" ")}
-                  >
-                    {formatCurrency(balanceAfterTransaction)}
-                  </span>
-                </div>
-
-                {needsInvestorCover ? (
-                  <>
-                    <div className="flex items-center justify-between gap-4 border-t border-white/8 py-2">
-                      <span className="text-sm text-slate-400">
-                        Cover investor
-                      </span>
-                      <span className="text-sm font-medium text-amber-200">
-                        +{formatCurrency(deficitAmount)}
+                {plan.tambahanAnggaran > 0 && plan.tambahanKas > 0 ? (
+                  <div className="mt-3 space-y-1 rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Tambah saldo {selectedWallet?.title}</span>
+                      <span className="tabular-nums text-amber-200">
+                        {formatCurrency(plan.tambahanAnggaran)}
                       </span>
                     </div>
-
-                    <div className="flex items-center justify-between gap-4 border-t border-white/8 py-2">
-                      <span className="text-sm text-slate-300">
-                        Saldo akhir setelah cover
-                      </span>
-                      <span className="text-sm font-semibold text-white">
-                        {formatCurrency(finalBalanceAfterCover)}
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Setoran modal investor</span>
+                      <span className="tabular-nums text-amber-200">
+                        {formatCurrency(plan.tambahanKas)}
                       </span>
                     </div>
-                  </>
+                  </div>
                 ) : null}
               </div>
+            </div>
 
-              {needsInvestorCover ? (
-                <div className="mt-3 rounded-[20px] border border-amber-300/15 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-100">
-                  Investor penanggung akan menutup seluruh minus dompet setelah
-                  transaksi ini disimpan.
+            {coverBlockedByEdit ? (
+              <div className="mt-4 rounded-[16px] border border-rose-300/20 bg-rose-400/10 px-4 py-3 text-sm leading-6 text-rose-100">
+                Talangan tidak bisa dibuat lewat edit. Hapus transaksi ini lalu
+                catat ulang.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                <div className={fieldLabel}>
+                  {investors.length === 1
+                    ? "Ditanggung oleh"
+                    : "Pilih investor penanggung"}
                 </div>
-              ) : null}
-            </section>
+
+                {investors.length === 0 ? (
+                  <div className="rounded-[16px] border border-rose-300/20 bg-rose-400/10 px-4 py-3 text-sm leading-6 text-rose-100">
+                    Project ini belum punya investor, jadi kekurangan dana belum
+                    bisa ditalangi.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {investors.map((investor) => {
+                      const active =
+                        investor.id_project_investor === selectedInvestorId;
+                      const modalSetelah =
+                        investor.disetor + plan.totalDibebankan;
+
+                      return (
+                        <button
+                          key={investor.id_project_investor}
+                          type="button"
+                          onClick={() => {
+                            setSelectedInvestorId(
+                              investor.id_project_investor
+                            );
+                            setErrors((prev) => ({
+                              ...prev,
+                              investor: undefined,
+                            }));
+                          }}
+                          disabled={isSubmitting}
+                          className={[
+                            "flex w-full items-center gap-3 rounded-[18px] border p-3 text-left transition",
+                            "disabled:cursor-not-allowed disabled:opacity-60",
+                            active
+                              ? "border-amber-300/40 bg-amber-400/[0.10]"
+                              : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]",
+                          ].join(" ")}
+                        >
+                          {investor.foto_profil_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={investor.foto_profil_url}
+                              alt={investor.nama}
+                              className="h-10 w-10 shrink-0 rounded-[14px] object-cover ring-1 ring-white/10"
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-white/10 bg-white/[0.05] text-sm font-bold text-white">
+                              {investor.nama.slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-white">
+                              {investor.nama}
+                            </div>
+                            <div className="mt-0.5 truncate text-xs text-slate-400">
+                              Modal {formatCurrency(investor.disetor)} →{" "}
+                              <span className="text-amber-200">
+                                {formatCurrency(modalSetelah)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {active ? (
+                            <Check className="h-4 w-4 shrink-0 text-amber-300" />
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {errors.investor ? (
+                  <div className="text-sm text-rose-300">{errors.investor}</div>
+                ) : null}
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {/* 6 ── Detail transaksi */}
+        <div className="space-y-2">
+          <label className={fieldLabel}>Judul transaksi</label>
+          <input
+            type="text"
+            placeholder={
+              isExpense ? "Contoh: Bayar balik nama" : "Contoh: Refund notaris"
+            }
+            value={judulTransaksi}
+            onChange={(event) => {
+              setJudulTransaksi(event.target.value);
+              setErrors((prev) => ({ ...prev, judul: undefined }));
+            }}
+            disabled={isSubmitting}
+            className={[
+              "h-14 w-full rounded-[18px] border bg-white/[0.03] px-4 text-base text-white outline-none transition",
+              "placeholder:text-white/25 focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60",
+              errors.judul
+                ? "border-rose-400/40"
+                : "border-white/10 focus:border-cyan-300/35",
+            ].join(" ")}
+          />
+          {errors.judul ? (
+            <div className="text-sm text-rose-300">{errors.judul}</div>
+          ) : null}
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <label className={fieldLabel}>Kategori</label>
+            <KategoriDropdown
+              jenis={jenis}
+              value={kategori}
+              onChange={setKategori}
+              disabled={isSubmitting}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className={fieldLabel}>Tanggal</label>
+            <button
+              type="button"
+              onClick={() => !isSubmitting && setIsCalendarOpen(true)}
+              disabled={isSubmitting}
+              className="flex h-14 w-full items-center justify-between gap-3 rounded-[18px] border border-white/10 bg-white/[0.03] px-4 text-left transition hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
+                <span className="truncate text-sm text-white">
+                  {formatDatePretty(tanggalTransaksi)}
+                </span>
+              </span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+            </button>
+
+            <div className="flex gap-2">
+              {[
+                { label: "Hari ini", value: todayIso() },
+                { label: "Kemarin", value: shiftIso(-1) },
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => setTanggalTransaksi(item.value)}
+                  disabled={isSubmitting}
+                  className={[
+                    "rounded-full border px-3 py-1 text-xs transition disabled:opacity-50",
+                    tanggalTransaksi === item.value
+                      ? "border-cyan-300/30 bg-cyan-400/10 text-cyan-200"
+                      : "border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]",
+                  ].join(" ")}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
+        {/* 7 ── Catatan: disembunyikan supaya form tidak terasa panjang */}
+        {showCatatan ? (
+          <div className="space-y-2">
+            <label className={fieldLabel}>Catatan</label>
+            <textarea
+              rows={3}
+              value={catatan}
+              onChange={(event) => setCatatan(event.target.value)}
+              disabled={isSubmitting}
+              autoFocus
+              placeholder="Konteks singkat supaya riwayat mudah dipahami."
+              className="w-full rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-cyan-300/35 focus:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-60"
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowCatatan(true)}
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/[0.06] disabled:opacity-50"
+          >
+            <NotebookPen className="h-3.5 w-3.5 shrink-0" />
+            Tambah catatan
+          </button>
+        )}
+
+        {jenis === "pemasukan" && kategori === "refund" ? (
+          <div className="flex items-start gap-2 rounded-[18px] border border-white/[0.08] bg-white/[0.02] px-4 py-3 text-xs leading-5 text-slate-400">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Refund mengembalikan saldo {selectedWallet?.title}, jadi dompet
+              ini bisa dipakai belanja lagi.
+            </span>
+          </div>
+        ) : null}
+
         {serverError ? (
-          <div className="rounded-[18px] border border-rose-300/15 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+          <div className="rounded-[18px] border border-rose-300/20 bg-rose-400/10 px-4 py-3 text-sm leading-6 text-rose-100">
             {serverError}
           </div>
         ) : null}
 
         {successMessage ? (
-          <div className="rounded-[18px] border border-emerald-300/15 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
-            <div className="inline-flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4" />
-              {successMessage}
-            </div>
+          <div className="inline-flex items-center gap-2 rounded-[18px] border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            {successMessage}
           </div>
         ) : null}
       </form>
 
-      <CalendarPickerModal
+      <DatePickerModal
         open={isCalendarOpen}
         value={tanggalTransaksi}
         disabled={isSubmitting}

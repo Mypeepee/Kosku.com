@@ -71,6 +71,7 @@ function StatCard({
 
 export default function ProjectWalletCard({
   totalDana,
+  totalDanaLunas,
   totalDanaPending = 0,
   jumlahPropertyDidanai,
   pendingPaymentCount = 0,
@@ -82,7 +83,11 @@ export default function ProjectWalletCard({
   onCreateProject,
 }: Props) {
   const isOwner = jabatan === "OWNER";
-  const theme = getTierTheme(totalDana);
+  // "Telah diinvestasikan" = uang yang BENAR-BENAR sudah disetor. Komitmen yang
+  // belum dibayar bukan investasi, jadi tidak boleh masuk angka utama maupun
+  // menentukan tier. `totalDanaLunas` undefined = data lama → jatuh ke komitmen.
+  const danaDisetor = totalDanaLunas ?? totalDana;
+  const theme = getTierTheme(danaDisetor);
   const TierIcon = theme.icon;
   const [openAddModal, setOpenAddModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -159,8 +164,15 @@ export default function ProjectWalletCard({
               </p>
 
               <h1 className="mt-2 text-[26px] font-black tracking-tight text-white sm:mt-3 sm:text-5xl">
-                {formatCurrency(totalDana)}
+                {formatCurrency(danaDisetor)}
               </h1>
+
+              {totalDanaPending > 0 ? (
+                <p className="mt-1.5 text-[11px] font-medium text-amber-200/80 sm:text-xs">
+                  + {formatCurrency(totalDanaPending)} sudah dikomitmenkan,
+                  menunggu pembayaran
+                </p>
+              ) : null}
 
               <div
                 className={`mt-2.5 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold backdrop-blur-md sm:mt-4 sm:gap-3 sm:px-4 sm:py-2 sm:text-sm ${theme.badge}`}

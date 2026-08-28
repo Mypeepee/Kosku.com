@@ -2,15 +2,22 @@
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { Loader2, Pencil, Plus, X } from "lucide-react";
-import type { DbCashflow, WalletKey, WalletSummary } from "../types";
+import type { FundState } from "@/lib/project-kas";
+import type {
+  DbCashflow,
+  InvestorSummary,
+  WalletKey,
+  WalletSummary,
+} from "../types";
 import CashflowQuickForm from "./cashflow-quick-form";
 
 type CashflowEntrySheetProps = {
   open: boolean;
   onClose: () => void;
   idProject: string;
+  fund: FundState;
   wallets: WalletSummary[];
-  sisaKas: number;
+  investors: InvestorSummary[];
   defaultWallet?: WalletKey;
   editingTransaction?: DbCashflow | null;
   onSubmitted?: () => void;
@@ -21,8 +28,9 @@ export default function CashflowEntrySheet({
   open,
   onClose,
   idProject,
+  fund,
   wallets,
-  sisaKas,
+  investors,
   defaultWallet,
   editingTransaction = null,
   onSubmitted,
@@ -43,7 +51,7 @@ export default function CashflowEntrySheet({
         : "Perbarui data transaksi yang sudah tercatat.";
     }
 
-    return "Tambahkan transaksi baru ke arus kas proyek.";
+    return "Catat uang keluar atau masuk pada dompet proyek.";
   }, [isEditing, editingTransaction]);
 
   useEffect(() => {
@@ -143,8 +151,9 @@ export default function CashflowEntrySheet({
             <CashflowQuickForm
               formId={formId}
               idProject={idProject}
+              fund={fund}
               wallets={wallets}
-              sisaKas={sisaKas}
+              investors={investors}
               defaultWallet={defaultWallet}
               editingTransaction={editingTransaction}
               onSubmitted={onSubmitted ?? onClose}

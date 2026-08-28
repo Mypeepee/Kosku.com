@@ -2,12 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  FileSpreadsheet,
-  Plus,
-} from "lucide-react";
+import { ArrowLeft, FileSpreadsheet, Plus } from "lucide-react";
 import type { DbCashflow, ManageFundData, WalletKey } from "../types";
 import WalletGrid from "./wallet-grid";
+import ShortfallBanner from "./shortfall-banner";
 import CashflowTable from "./cashflow-table";
 import CashflowEntrySheet from "./cashflow-entry-sheet";
 import WalletDropdown from "./wallet-dropdown";
@@ -171,14 +169,49 @@ export default function ManageFundScreen({
   return (
     <>
       <div className="space-y-8">
+        <header className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-slate-200 transition hover:bg-white/[0.08]"
+            aria-label="Kembali"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] uppercase tracking-[0.24em] text-white/38">
+              Arus kas
+            </div>
+            <h1 className="mt-1 truncate text-lg font-semibold text-white">
+              {data.project.nama_project}
+            </h1>
+          </div>
+
+          {/* Reset filter — hanya perlu saat satu dompet sedang dipilih. */}
+          {selectedWallet !== "all" ? (
+            <button
+              type="button"
+              onClick={() => setSelectedWallet("all")}
+              className="mt-1 shrink-0 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1.5 text-xs font-medium text-cyan-200 transition hover:bg-cyan-400/15"
+            >
+              Semua dompet
+            </button>
+          ) : null}
+        </header>
+
+        {isCreator ? (
+          <ShortfallBanner
+            idProject={idProject}
+            fund={data.fund}
+            investors={data.investors}
+          />
+        ) : null}
+
         <WalletGrid
           wallets={data.wallets}
           selectedWallet={selectedWallet}
           onSelectWallet={setSelectedWallet}
-          onBack={() => router.back()}
-          danaMasuk={data.danaMasuk}
-          danaKeluar={data.danaKeluar}
-          sisaKas={data.sisaKas}
         />
 
         <section className="space-y-5 rounded-[30px] border border-white/10 bg-white/[0.03] p-5 sm:p-6">
@@ -201,7 +234,11 @@ export default function ManageFundScreen({
 
             {/* Controls */}
             <div className="flex items-center gap-2 flex-wrap xl:flex-nowrap xl:justify-end">
-              <WalletDropdown value={selectedWallet} onChange={setSelectedWallet} />
+              <WalletDropdown
+                value={selectedWallet}
+                onChange={setSelectedWallet}
+                wallets={data.wallets}
+              />
 
               <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-400 whitespace-nowrap">
                 {latestRows.length} transaksi
@@ -263,8 +300,9 @@ export default function ManageFundScreen({
           open={isComposerOpen}
           onClose={handleCloseComposer}
           idProject={data.project.id_project}
+          fund={data.fund}
           wallets={data.wallets}
-          sisaKas={data.sisaKas}
+          investors={data.investors}
           defaultWallet={defaultWallet}
           editingTransaction={editingTransaction}
           onSubmitted={handleSubmitted}

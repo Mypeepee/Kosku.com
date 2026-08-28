@@ -8,6 +8,7 @@ import {
   FileCheck2,
   FileText,
   Hammer,
+  Lock,
   Pencil,
   PiggyBank,
   Plus,
@@ -16,74 +17,21 @@ import {
   UserRound,
   Wallet2,
 } from "lucide-react";
+import { WALLET_LABELS } from "@/lib/project-kas";
 import { formatCurrency } from "../lib/format-currency";
 import type { DbCashflow } from "../types";
+import { walletTheme } from "./wallet-theme";
+import { kategoriLabel } from "./cashflow-categories";
 
 const SWIPE_ACTION_WIDTH = 108;
 const SWIPE_OPEN_THRESHOLD = 46;
 
-const WALLET_THEME: Record<
-  string,
-  {
-    icon: LucideIcon;
-    shell: string;
-    glow: string;
-    border: string;
-    badgeClass: string;
-    iconWrap: string;
-    amountClass: string;
-  }
-> = {
-  utama: {
-    icon: Wallet2,
-    shell:
-      "bg-[radial-gradient(circle_at_top_left,rgba(74,222,128,0.14),transparent_34%),linear-gradient(135deg,rgba(10,18,18,0.98),rgba(8,26,20,0.96))]",
-    glow: "shadow-[0_18px_60px_rgba(16,185,129,0.10)]",
-    border: "border-emerald-400/20",
-    badgeClass: "border-emerald-300/15 bg-emerald-400/10 text-emerald-200",
-    iconWrap: "border-emerald-300/20 bg-emerald-400/12 text-emerald-200",
-    amountClass: "text-emerald-100",
-  },
-  dokumen: {
-    icon: FileCheck2,
-    shell:
-      "bg-[radial-gradient(circle_at_top_left,rgba(103,232,249,0.14),transparent_34%),linear-gradient(135deg,rgba(7,18,33,0.98),rgba(7,28,46,0.96))]",
-    glow: "shadow-[0_18px_60px_rgba(34,211,238,0.10)]",
-    border: "border-cyan-400/20",
-    badgeClass: "border-cyan-300/15 bg-cyan-400/10 text-cyan-200",
-    iconWrap: "border-cyan-300/20 bg-cyan-400/12 text-cyan-200",
-    amountClass: "text-cyan-100",
-  },
-  eksekusi: {
-    icon: ShieldCheck,
-    shell:
-      "bg-[radial-gradient(circle_at_top_left,rgba(253,224,71,0.13),transparent_34%),linear-gradient(135deg,rgba(24,18,7,0.98),rgba(36,24,7,0.96))]",
-    glow: "shadow-[0_18px_60px_rgba(245,158,11,0.10)]",
-    border: "border-amber-300/20",
-    badgeClass: "border-amber-300/15 bg-amber-400/10 text-amber-200",
-    iconWrap: "border-amber-300/20 bg-amber-400/12 text-amber-200",
-    amountClass: "text-amber-100",
-  },
-  renovasi: {
-    icon: Hammer,
-    shell:
-      "bg-[radial-gradient(circle_at_top_left,rgba(196,181,253,0.14),transparent_34%),linear-gradient(135deg,rgba(16,12,28,0.98),rgba(24,14,42,0.96))]",
-    glow: "shadow-[0_18px_60px_rgba(139,92,246,0.10)]",
-    border: "border-violet-300/20",
-    badgeClass: "border-violet-300/15 bg-violet-400/10 text-violet-200",
-    iconWrap: "border-violet-300/20 bg-violet-400/12 text-violet-200",
-    amountClass: "text-violet-100",
-  },
-  cadangan: {
-    icon: PiggyBank,
-    shell:
-      "bg-[radial-gradient(circle_at_top_left,rgba(251,113,133,0.14),transparent_34%),linear-gradient(135deg,rgba(28,12,18,0.98),rgba(40,12,22,0.96))]",
-    glow: "shadow-[0_18px_60px_rgba(244,63,94,0.10)]",
-    border: "border-rose-300/20",
-    badgeClass: "border-rose-300/15 bg-rose-400/10 text-rose-200",
-    iconWrap: "border-rose-300/20 bg-rose-400/12 text-rose-200",
-    amountClass: "text-rose-100",
-  },
+const AMOUNT_TONE: Record<string, string> = {
+  utama: "text-emerald-100",
+  dokumen: "text-cyan-100",
+  eksekusi: "text-amber-100",
+  renovasi: "text-violet-100",
+  cadangan: "text-rose-100",
 };
 
 function formatDate(value?: string | Date | null) {
@@ -116,23 +64,6 @@ function formatLabel(value?: string | null) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function getWalletLabel(walletKey?: string | null) {
-  switch (walletKey) {
-    case "utama":
-      return "Dompet Utama";
-    case "dokumen":
-      return "Dokumen";
-    case "eksekusi":
-      return "Eksekusi";
-    case "renovasi":
-      return "Renovasi";
-    case "cadangan":
-      return "Cadangan";
-    default:
-      return "Dompet Utama";
-  }
-}
-
 function getStatusTone(status?: string | null) {
   switch (status) {
     case "berhasil":
@@ -161,7 +92,7 @@ function getEmptyCopy() {
   return {
     title: "Belum ada transaksi",
     description:
-      "Belum ada riwayat transaksi pada dompet atau filter yang sedang dipilih. Tambahkan transaksi pertama untuk mulai mencatat arus kas proyek.",
+      "Belum ada riwayat transaksi pada dompet atau filter yang sedang dipilih. Tambahkan transaksi pertama untuk mulai mencatat arus kas.",
   };
 }
 
@@ -195,15 +126,19 @@ function SwipeableCashflowCard({
   const pointerIdRef = useRef<number | null>(null);
   const movedRef = useRef(false);
 
-  const canEdit = Boolean(onEditTransaction);
-  const canDelete = Boolean(onDeleteTransaction);
+  // Baris talangan/setoran dibuat otomatis sistem: mengeditnya akan membuat
+  // modal disetor & porsi kepemilikan investor tidak sinkron.
+  const locked = Boolean(item.dikunci);
+  const canEdit = Boolean(onEditTransaction) && !locked;
+  const canDelete = Boolean(onDeleteTransaction) && !locked;
 
   const minOffset = canDelete ? -SWIPE_ACTION_WIDTH : 0;
   const maxOffset = canEdit ? SWIPE_ACTION_WIDTH : 0;
 
-  const theme = WALLET_THEME[item.wallet_key ?? "utama"] ?? WALLET_THEME.utama;
+  const theme = walletTheme(item.wallet_key);
   const Icon = theme.icon;
   const expense = isExpense(item.jenis_transaksi);
+  const amountTone = AMOUNT_TONE[item.wallet_key] ?? AMOUNT_TONE.utama;
 
   function closeActions() {
     setOffsetX(0);
@@ -352,12 +287,15 @@ function SwipeableCashflowCard({
                       ].join(" ")}
                     >
                       <Icon className="mr-1.5 h-3.5 w-3.5" />
-                      {getWalletLabel(item.wallet_key)}
+                      {WALLET_LABELS[item.wallet_key] ?? "Dompet Utama"}
                     </span>
 
-                    {item.kategori_transaksi === "talangan_investor" ? (
-                      <span className="inline-flex items-center rounded-full border border-amber-300/25 bg-amber-400/10 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-amber-200">
-                        Talangan
+                    {locked ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/25 bg-amber-400/10 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-amber-200">
+                        <Lock className="h-3 w-3" />
+                        {item.kategori_transaksi === "talangan_investor"
+                          ? "Talangan"
+                          : "Setoran"}
                       </span>
                     ) : null}
                   </div>
@@ -369,7 +307,7 @@ function SwipeableCashflowCard({
                     </div>
                   ) : (
                     <p className="mt-2 text-sm text-white/45">
-                      {formatLabel(item.kategori_transaksi)}
+                      {kategoriLabel(item.kategori_transaksi)}
                     </p>
                   )}
 
@@ -381,7 +319,7 @@ function SwipeableCashflowCard({
 
                     <div className="inline-flex items-center gap-1.5">
                       <CircleDollarSign className="h-3.5 w-3.5" />
-                      <span>{formatLabel(item.kategori_transaksi)}</span>
+                      <span>{kategoriLabel(item.kategori_transaksi)}</span>
                     </div>
 
                     {item.investor_nama ? (
@@ -392,9 +330,16 @@ function SwipeableCashflowCard({
                     ) : null}
                   </div>
 
-                  <div className="mt-3 text-[11px] text-white/30 sm:hidden">
-                    Geser kanan untuk edit • geser kiri untuk hapus
-                  </div>
+                  {locked ? (
+                    <div className="mt-3 text-[11px] leading-5 text-amber-200/60">
+                      Dicatat otomatis sistem — ikut terhapus kalau transaksi
+                      yang ditalangi dihapus.
+                    </div>
+                  ) : canEdit || canDelete ? (
+                    <div className="mt-3 text-[11px] text-white/30 sm:hidden">
+                      Geser kanan untuk edit • geser kiri untuk hapus
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -413,7 +358,7 @@ function SwipeableCashflowCard({
                 <div
                   className={[
                     "text-lg font-semibold sm:text-[28px] sm:leading-none",
-                    expense ? "text-rose-100" : theme.amountClass,
+                    expense ? "text-rose-100" : amountTone,
                   ].join(" ")}
                 >
                   {expense ? "-" : "+"}

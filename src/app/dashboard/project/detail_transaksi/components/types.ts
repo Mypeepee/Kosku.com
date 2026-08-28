@@ -56,7 +56,12 @@ export type ProjectDetailViewModel = {
   estimatedSellPrice: number | string;
   estimatedNetProfit: number | string;
   fundingTarget: number | string;
+  /** Modal yang SUDAH disetor — dasar progres pendanaan. */
   totalFunded: number | string;
+  /** Σ komitmen seluruh investor (dibayar maupun belum). */
+  totalCommitted?: number | string;
+  /** Dijanjikan tapi belum disetor. */
+  unpaidCommitment?: number | string;
 
   fundingType: FundingType;
   status: ProjectStatus;

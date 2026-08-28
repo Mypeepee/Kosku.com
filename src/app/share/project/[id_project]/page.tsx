@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { summarizeFunding } from "@/lib/investor-ownership";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -78,7 +79,13 @@ async function getProject(id: string) {
       alamat_property: true,
       kota: true,
       estimasi_bulan: true,
-      investorProject: { select: { id_project_investor: true } },
+      investorProject: {
+        select: {
+          id_project_investor: true,
+          nominal_komitmen: true,
+          nominal_terbayar: true,
+        },
+      },
     },
   });
 }
@@ -136,11 +143,22 @@ export default async function ShareProjectPage({ params }: { params: Params }) {
   if (!project) notFound();
 
   const target = Number(project.target_pendanaan);
-  const raised = Number(project.total_pendanaan);
+  // Progres pendanaan = modal yang SUDAH disetor. `total_pendanaan` (Σ komitmen)
+  // akan menampilkan 100% padahal belum ada pembayaran masuk.
+  // Lihat summarizeFunding di src/lib/investor-ownership.ts.
+  const funding = summarizeFunding(
+    project.investorProject.map((item) => ({
+      committed: item.nominal_komitmen,
+      paid: item.nominal_terbayar,
+    })),
+    project.target_pendanaan
+  );
+  const raised = funding.terkumpul;
   const profit = Number(project.estimasi_profit_bersih);
   const hargaJual = Number(project.estimasi_harga_jual);
   const roi = target > 0 ? ((profit / target) * 100).toFixed(1) : null;
-  const progress = target > 0 ? Math.min(100, Math.round((raised / target) * 100)) : 0;
+  const progress = Math.round(funding.persen);
+  const progressKomitmen = Math.round(funding.persenKomitmen);
   const investor = project.investorProject.length;
   const isSold = project.status === "terjual";
   const img400 = thumbPath(project.gambar_thumbnail, "w800");
@@ -256,10 +274,16 @@ export default async function ShareProjectPage({ params }: { params: Params }) {
                   {progress}%
                 </span>
               </div>
-              <div className="h-[5px] overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="relative h-[5px] overflow-hidden rounded-full bg-white/[0.06]">
+                {progressKomitmen > progress ? (
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full bg-[repeating-linear-gradient(115deg,rgba(251,191,36,0.32)_0px,rgba(251,191,36,0.32)_4px,transparent_4px,transparent_8px)]"
+                    style={{ width: `${progressKomitmen}%` }}
+                  />
+                ) : null}
                 <div
-                  className="h-full rounded-full bg-[linear-gradient(90deg,#059669_0%,#34d399_55%,#7dd3fc_100%)] shadow-[0_0_10px_rgba(52,211,153,0.45)] transition-all duration-700"
-                  style={{ width: `${Math.max(2, progress)}%` }}
+                  className="absolute inset-y-0 left-0 rounded-full bg-[linear-gradient(90deg,#059669_0%,#34d399_55%,#7dd3fc_100%)] shadow-[0_0_10px_rgba(52,211,153,0.45)] transition-all duration-700"
+                  style={{ width: `${progress}%` }}
                 />
               </div>
               <div className="mt-2 flex justify-between">
@@ -270,6 +294,12 @@ export default async function ShareProjectPage({ params }: { params: Params }) {
                   dari {formatCompact(target)}
                 </span>
               </div>
+              {funding.belumSetor > 0 ? (
+                <p className="mt-1 text-[10px] text-amber-300/70">
+                  {formatCompact(funding.belumSetor)} dijanjikan investor,
+                  menunggu pembayaran
+                </p>
+              ) : null}
             </div>
           )}
 

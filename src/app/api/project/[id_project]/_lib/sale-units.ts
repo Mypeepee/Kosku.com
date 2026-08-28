@@ -259,14 +259,28 @@ export function buildDistribution(options: {
   const { investors, profitBersih, bobotPersen, isFinal, priorReturnedByAgent } =
     options;
 
+  // ── Basis pembagian: MODAL DISETOR, dan basisnya ditentukan PER PROJECT ──
+  // Fallback ke komitmen hanya boleh dipakai kalau SELURUH project belum punya
+  // data setoran sama sekali (data lama sebelum kolom nominal_terbayar diisi).
+  //
+  // Kalau fallback diterapkan per investor, investor yang belum bayar sepeser
+  // pun akan ikut dihitung penuh memakai komitmennya — ia dapat porsi profit
+  // DAN "modal kembali" atas uang yang tak pernah ia setor, sekaligus
+  // mengecilkan porsi investor yang benar-benar membayar.
+  const totalTerbayar = investors.reduce(
+    (sum, inv) => sum + Math.max(0, toNum(inv.nominal_terbayar)),
+    0
+  );
+  const pakaiKomitmen = totalTerbayar <= 0;
+
   const base = investors
     .map((inv) => {
-      const terbayar = round2(Math.max(0, toNum(inv.nominal_terbayar)));
-      const modalBasis =
-        terbayar > 0 ? terbayar : round2(Math.max(0, toNum(inv.nominal_komitmen)));
+      const modalBasis = pakaiKomitmen
+        ? round2(Math.max(0, toNum(inv.nominal_komitmen)))
+        : round2(Math.max(0, toNum(inv.nominal_terbayar)));
       return { id_agent: String(inv.id_agent || "").trim(), modalBasis };
     })
-    .filter((item) => item.id_agent.length > 0);
+    .filter((item) => item.id_agent.length > 0 && item.modalBasis > 0);
 
   const totalModal = base.reduce((sum, item) => sum + item.modalBasis, 0);
   if (!base.length || totalModal <= 0) return [];
@@ -301,10 +315,24 @@ export function buildDistribution(options: {
     largest.profit = round2(largest.profit + residual);
   }
 
-  return rows.map((row) => ({
+  // Residual persentase (akibat round6) juga dibebankan ke porsi terbesar,
+  // supaya Σ porsi_percent yang TERSIMPAN tepat 100 — bukan 99,999999.
+  const persen = rows.map((row) => round6(row.weight * 100));
+  const persenSum = round6(persen.reduce((sum, value) => sum + value, 0));
+  const persenResidual = round6(100 - persenSum);
+
+  if (persenResidual !== 0 && rows.length > 0) {
+    let largestIndex = 0;
+    rows.forEach((row, index) => {
+      if (row.weight > rows[largestIndex].weight) largestIndex = index;
+    });
+    persen[largestIndex] = round6(persen[largestIndex] + persenResidual);
+  }
+
+  return rows.map((row, index) => ({
     id_agent: row.id_agent,
     modal: row.modal,
-    porsi_percent: round6(row.weight * 100),
+    porsi_percent: persen[index],
     profit: row.profit,
     total_diterima: round2(row.modal + row.profit),
   }));

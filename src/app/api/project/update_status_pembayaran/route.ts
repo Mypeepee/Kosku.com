@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { pusherServer } from "@/lib/pusher-server";
+import { loadFundState } from "@/lib/project-kas-server";
 
 const ALLOWED_STATUSES = new Set(["menunggu_pembayaran", "lunas"]);
 
@@ -130,6 +131,7 @@ export async function PATCH(request: NextRequest) {
         id_agent: true,
         status: true,
         nominal_komitmen: true,
+        nominal_terbayar: true,
         project: {
           select: {
             id_project: true,
@@ -167,6 +169,61 @@ export async function PATCH(request: NextRequest) {
       nextStatus === "lunas"
         ? toDecimal(investor.nominal_komitmen)
         : new Prisma.Decimal(0);
+
+    // ── Anti-minus: menarik kembali modal yang SUDAH terpakai itu mustahil ──
+    // Membatalkan status lunas menghapus modal disetor investor dari kas. Kalau
+    // uangnya sudah dibelanjakan, kas jadi minus → tolak, bukan diam-diam
+    // membuat pembukuan bohong.
+    if (nextStatus !== "lunas") {
+      const terbayarSekarang = toDecimal(investor.nominal_terbayar);
+
+      if (terbayarSekarang.gt(0)) {
+        const fundState = await loadFundState(
+          prisma,
+          investor.project.id_project
+        );
+
+        const kasSetelah = fundState
+          ? fundState.sisaKas - Number(terbayarSekarang.toString())
+          : 0;
+
+        if (kasSetelah < 0) {
+          const kurang = `Rp ${Math.round(Math.abs(kasSetelah)).toLocaleString(
+            "id-ID"
+          )}`;
+
+          return NextResponse.json(
+            {
+              success: false,
+              message: `Modal investor ini sudah terpakai untuk pengeluaran project. Membatalkan status lunas akan membuat kas proyek minus ${kurang}. Hapus atau sesuaikan pengeluarannya lebih dulu.`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+
+      // Talangan & setoran penutup kekurangan menaikkan modal disetor lewat
+      // alur arus kas. Mereset status pembayaran akan membuat baris-baris itu
+      // menggantung (modal hilang, tapi transaksinya masih tercatat).
+      const penutupCount = await prisma.projectArusKas.count({
+        where: {
+          id_project_investor: investorId,
+          kategori_transaksi: { in: ["talangan_investor", "setoran_modal"] },
+          status_transaksi: { not: "dibatalkan" },
+        },
+      });
+
+      if (penutupCount > 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "Investor ini pernah menutup kekurangan dana project, jadi status lunasnya tidak bisa dibatalkan. Hapus transaksi yang ditanggungnya lebih dulu.",
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       const row = await tx.projectInvestor.update({
