@@ -13,7 +13,29 @@
  *
  * Maka nama kota dinormalisasi (buang prefix administratif) sebelum dipakai
  * untuk membangun URL maupun query, supaya pencocokan ke DB konsisten.
+ *
+ * ── WILAYAH MEMBAWA INDUKNYA ────────────────────────────────────────────────
+ * Sebuah nama kecamatan tidak unik se-Indonesia. Ada "Taman" di Sidoarjo, di
+ * Madiun, dan di Pemalang. Selama URL hanya menyimpan `kecamatan=Taman`,
+ * pertanyaan "kecamatan Taman yang mana" TIDAK PERNAH terjawab — dan halaman
+ * hasil terpaksa menampilkan ketiganya sekaligus, padahal pemakainya barusan
+ * menelusuri Kabupaten Sidoarjo untuk sampai ke sana.
+ *
+ * Maka setiap wilayah terpilih membawa rantai induknya (`ancestors`, dari yang
+ * terdekat), dan rantai itu ikut tertulis ke URL:
+ *
+ *     kecamatan=Taman*Sidoarjo
+ *     kelurahan=Bringinbendo*Taman*Sidoarjo
+ *
+ * Tanda `*` dipilih karena tidak pernah muncul di nama wilayah Indonesia DAN
+ * tidak ikut di-escape oleh URLSearchParams — tautan yang dibagikan lewat
+ * WhatsApp tetap terbaca sebagai teks, bukan deretan %2A.
+ *
+ * Nilai TANPA `*` tetap sah dan diartikan "tanpa batas induk", jadi seluruh
+ * tautan lama yang sudah beredar tetap berfungsi apa adanya.
  */
+
+import { intiNamaKota } from "./regionMatch";
 
 export type RegionLevel = "provinsi" | "kota" | "kecamatan" | "kelurahan";
 
@@ -24,7 +46,18 @@ export interface SelectedRegion {
   level: RegionLevel;
   /** opsional: konteks induk untuk tampilan, mis. provinsi dari sebuah kota. */
   parent?: string;
+  /**
+   * Rantai induk yang MEMBATASI wilayah ini, dari yang terdekat ke yang
+   * terjauh, nama sudah dinormalisasi per levelnya. Untuk sebuah kecamatan
+   * isinya `["Sidoarjo"]` (kota); untuk kelurahan `["Taman", "Sidoarjo"]`.
+   *
+   * Kosong = tidak dibatasi (dipakai provinsi/kota, dan tautan lama).
+   */
+  ancestors?: string[];
 }
+
+/** Pemisah antara nama wilayah dan rantai induknya di dalam satu nilai URL. */
+export const REGION_SCOPE_SEP = "*";
 
 export const REGION_LEVELS: RegionLevel[] = [
   "provinsi",
@@ -33,22 +66,33 @@ export const REGION_LEVELS: RegionLevel[] = [
   "kelurahan",
 ];
 
-/** Prefix administratif yang membedakan format ibnux dari format DB (level kota). */
-const KOTA_PREFIX_RE =
-  /^(kota administrasi|kabupaten administrasi|kota adm\.?|kab\.? adm\.?|kabupaten|kota|kab\.?)\s+/i;
-
 /**
  * Normalisasi nama wilayah ke "nama inti" yang cocok dengan nilai tersimpan di
  * DB. Untuk kota, prefix "Kota/Kabupaten/…" dibuang; level lain cukup di-trim
  * karena formatnya sudah selaras dengan data geocoder.
+ *
+ * Daftar prefiksnya tinggal di regionMatch.ts, satu-satunya tempat yang tahu
+ * bentuk-bentuk penulisannya. Dua salinan daftar itu adalah cara terpasti
+ * membuat nama yang ditulis ke URL berbeda dari nama yang dicari di DB.
  */
 export function normalizeRegionName(name: string, level: RegionLevel): string {
   const trimmed = (name || "").trim();
-  if (level === "kota") {
-    return trimmed.replace(KOTA_PREFIX_RE, "").trim();
-  }
-  return trimmed;
+  return level === "kota" ? intiNamaKota(trimmed) : trimmed;
 }
+
+/**
+ * Level induk sebuah wilayah, dari yang terdekat ke yang terjauh.
+ * kecamatan → ["kota", "provinsi"]. Dipakai untuk memasangkan tiap nama di
+ * `ancestors` dengan kolom DB yang benar.
+ */
+export function ancestorLevels(level: RegionLevel): RegionLevel[] {
+  const i = REGION_LEVELS.indexOf(level);
+  return i <= 0 ? [] : REGION_LEVELS.slice(0, i).reverse();
+}
+
+/** Bersihkan nama dari karakter yang dipakai sebagai pemisah di URL. */
+const bersihkanNama = (name: string) =>
+  (name || "").split(REGION_SCOPE_SEP).join(" ").replace(/,/g, " ").trim();
 
 /**
  * Identitas pemilihan di picker — pakai nama LENGKAP (dengan prefix) agar
@@ -56,17 +100,56 @@ export function normalizeRegionName(name: string, level: RegionLevel): string {
  * ibnux berbeda). Jangan dinormalisasi di sini: normalizeRegionName khusus
  * untuk serialisasi URL / pencocokan DB (di mana data memang sudah strip
  * prefix sehingga tak bisa dibedakan).
+ *
+ * Rantai induk ikut masuk kunci: "Taman di Sidoarjo" dan "Taman di Madiun"
+ * adalah dua pilihan berbeda, dan tanpa ini mencentang yang satu akan terlihat
+ * seolah mencentang yang lain.
  */
-export function regionKey(r: { name: string; level: RegionLevel }): string {
-  return `${r.level}|${r.name.trim().toLowerCase()}`;
+export function regionKey(r: {
+  name: string;
+  level: RegionLevel;
+  ancestors?: string[];
+}): string {
+  const induk = (r.ancestors ?? [])
+    .map((a) => a.trim().toLowerCase())
+    .filter(Boolean)
+    .join(REGION_SCOPE_SEP);
+  return `${r.level}|${r.name.trim().toLowerCase()}${induk ? `@${induk}` : ""}`;
 }
 
 /** Apakah dua wilayah merujuk lokasi yang sama (berdasarkan level + nama inti). */
 export function isSameRegion(
-  a: { name: string; level: RegionLevel },
-  b: { name: string; level: RegionLevel }
+  a: { name: string; level: RegionLevel; ancestors?: string[] },
+  b: { name: string; level: RegionLevel; ancestors?: string[] }
 ): boolean {
   return regionKey(a) === regionKey(b);
+}
+
+/**
+ * Satu wilayah terpilih → satu nilai URL, lengkap dengan rantai induknya.
+ * "Taman" di Kabupaten Sidoarjo → `Taman*Sidoarjo`.
+ */
+export function serializeRegionValue(r: SelectedRegion): string {
+  const name = bersihkanNama(normalizeRegionName(r.name, r.level));
+  if (!name) return "";
+  const levels = ancestorLevels(r.level);
+  const induk = (r.ancestors ?? [])
+    .slice(0, levels.length)
+    .map((a, i) => bersihkanNama(normalizeRegionName(a, levels[i])))
+    .filter(Boolean);
+  return [name, ...induk].join(REGION_SCOPE_SEP);
+}
+
+/** Kebalikan `serializeRegionValue` — juga menerima nilai lama tanpa induk. */
+export function parseRegionValue(raw: string): {
+  name: string;
+  ancestors: string[];
+} {
+  const bagian = (raw || "")
+    .split(REGION_SCOPE_SEP)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return { name: bagian[0] ?? "", ancestors: bagian.slice(1) };
 }
 
 /**
@@ -84,11 +167,11 @@ export function serializeLocations(
   };
 
   for (const r of regions) {
-    const name = normalizeRegionName(r.name, r.level);
-    if (!name) continue;
+    const value = serializeRegionValue(r);
+    if (!value) continue;
     const bucket = byLevel[r.level];
-    if (!bucket.some((n) => n.toLowerCase() === name.toLowerCase())) {
-      bucket.push(name);
+    if (!bucket.some((n) => n.toLowerCase() === value.toLowerCase())) {
+      bucket.push(value);
     }
   }
 
@@ -158,18 +241,45 @@ export function parseLocationsFromSearchParams(searchParams: {
 
 /**
  * Ubah hasil parse menjadi SelectedRegion[] untuk menghidrasi UI picker dari
- * URL. Memakai id sintetis "level:name" (stabil & unik untuk key React/toggle).
+ * URL. Memakai id sintetis "level:nilai" — nilai UTUH beserta rantai induknya,
+ * supaya dua kecamatan senama dari kota berbeda tidak berbagi id React.
  */
 export function locationsToSelectedRegions(
   parsed: ParsedLocations
 ): SelectedRegion[] {
   const out: SelectedRegion[] = [];
   for (const level of REGION_LEVELS) {
-    for (const name of parsed[level]) {
-      out.push({ id: `${level}:${name}`, name, level });
+    for (const raw of parsed[level]) {
+      const { name, ancestors } = parseRegionValue(raw);
+      if (!name) continue;
+      out.push({
+        id: `${level}:${raw}`,
+        name,
+        level,
+        ancestors,
+        // Induk terdekat dipakai sebagai baris keterangan di daftar & chip.
+        parent: ancestors[0],
+      });
     }
   }
   return out;
+}
+
+/**
+ * Label yang dibaca manusia: "Taman, Sidoarjo".
+ *
+ * Chip filter yang hanya bertuliskan "Taman" menyembunyikan justru bagian yang
+ * baru saja dipilih pemakainya lewat penelusuran, dan membuat dua chip dari
+ * kota berbeda terlihat kembar.
+ */
+export function regionLabel(r: {
+  name: string;
+  ancestors?: string[];
+}): string {
+  const induk = (r.ancestors ?? []).filter(Boolean);
+  // Cukup induk terdekat: "Bringinbendo, Taman" sudah menjawab "yang mana",
+  // sementara menambah kota lagi membuat chip terpotong di layar 320px.
+  return induk.length ? `${r.name}, ${induk[0]}` : r.name;
 }
 
 /** True bila ada minimal satu wilayah terpilih di URL. */

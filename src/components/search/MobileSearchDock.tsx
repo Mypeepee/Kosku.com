@@ -216,6 +216,8 @@ export default function MobileSearchDock({
   const [mounted, setMounted] = useState(false);
   const keywordRef = useRef<HTMLInputElement>(null);
   const kotakKeywordRef = useRef<HTMLDivElement>(null);
+  /** Area isi sheet yang bisa di-scroll — lihat efek "naikkan ke atas" di bawah. */
+  const isiSheetRef = useRef<HTMLDivElement>(null);
 
   // ── Saran tempat ("deket unesa") ─────────────────────────────────────────
   const [fokusKeyword, setFokusKeyword] = useState(false);
@@ -334,6 +336,25 @@ export default function MobileSearchDock({
       !isNumericOnly(keyword) &&
       (daftarSaran.length > 0 || adaAlamat || memuatSaran)) ||
       modePopuler);
+
+  /**
+   * Begitu daftar saran muncul, isi sheet dinaikkan ke posisi paling atas.
+   *
+   * Panelnya menyatu dengan alur (bukan melayang), jadi ia mendorong kolom di
+   * bawahnya alih-alih menutupinya — dan kolom kata kunci memang seksi pertama.
+   * Menggeser ke atas memberi daftar itu ruang penuh yang tersisa di atas
+   * keyboard, sekaligus menjaga kotak yang sedang diketik tetap terlihat.
+   *
+   * Hanya dijalankan saat panel BARU terbuka: memanggilnya pada tiap ketikan
+   * akan merebut kembali gulir yang barusan dilakukan pemakai untuk membaca
+   * saran ke-tujuh.
+   */
+  useEffect(() => {
+    if (!panelSaranTerbuka) return;
+    const el = isiSheetRef.current;
+    if (!el || el.scrollTop === 0) return;
+    el.scrollTo({ top: 0, behavior: "smooth" });
+  }, [panelSaranTerbuka]);
 
 
   // Kunci scroll body selama sheet terbuka — tanpa ini konten di belakang ikut
@@ -563,7 +584,11 @@ export default function MobileSearchDock({
         <AnimatePresence>
           {open && (
             <div
-              className="fixed inset-x-0 top-0 z-[9000] h-[100dvh] lg:hidden"
+              /* `zoom-safe`: sheet ini di-portal ke <body>, jadi ia BERADA DI
+                 LUAR pembungkus .zoom-safe milik hero — dan tanpa kelas ini
+                 setiap ketukan pada kolom teks di dalamnya membuat iOS
+                 melompat-zoom. Aturannya ada di globals.css. */
+              className="zoom-safe fixed inset-x-0 top-0 z-[9000] h-[100dvh] lg:hidden"
               style={
                 viewport
                   ? { height: viewport.height, top: viewport.top }
@@ -653,7 +678,10 @@ export default function MobileSearchDock({
                 </div>
 
                 {/* --- BODY --- */}
-                <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-5 pb-5">
+                <div
+                  ref={isiSheetRef}
+                  className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain px-5 pb-5"
+                >
                   {/* Kata kunci — sekaligus pencarian TEMPAT ("deket unesa").
                       Sarannya wajib ada di sini, bukan cuma di desktop: yang
                       mengetik "deket kampus" hampir selalu sedang di jalan,
@@ -732,7 +760,7 @@ export default function MobileSearchDock({
                         >
                           <ContohKetikan
                             onJenis={setJenisContoh}
-                            className="truncate text-sm font-medium leading-none"
+                            className="ketikan-hantu truncate text-sm font-medium leading-none"
                             kelasAwal={
                               theme === "dark" ? "text-white/30" : "text-gray-400"
                             }
@@ -795,6 +823,7 @@ export default function MobileSearchDock({
 
                       <TempatSaranPanel
                         anchorRef={kotakKeywordRef}
+                        inline
                         open={panelSaranTerbuka}
                         items={daftarSaran}
                         memuat={memuatSaran}

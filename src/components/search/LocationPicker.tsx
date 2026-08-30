@@ -24,7 +24,9 @@ import toast from "react-hot-toast";
 import {
   type RegionLevel,
   type SelectedRegion,
+  normalizeRegionName,
   regionKey,
+  regionLabel,
 } from "@/lib/regionSearch";
 
 type Theme = "light" | "dark";
@@ -312,7 +314,7 @@ export default function LocationPicker({
       }
       next.push(region);
       onChange(next);
-      toast.success(`${region.name} ditambahkan`, {
+      toast.success(`${regionLabel(region)} ditambahkan`, {
         icon: "📍",
         style: {
           borderRadius: "10px",
@@ -339,6 +341,23 @@ export default function LocationPicker({
         `/api/regions/wilayah?level=${lvl}&parentId=${encodeURIComponent(parent.id)}`
       );
       const json = await res.json().catch(() => ({}));
+      /**
+       * Rantai induk yang akan dibawa anak-anak ini sampai ke URL.
+       *
+       * Hanya dipasang mulai KECAMATAN ke bawah, dan itu disengaja: nama
+       * kecamatan tidak unik se-Indonesia ("Taman" ada di Sidoarjo, Madiun,
+       * dan Pemalang) sehingga tanpa induk hasilnya selalu tercampur, sementara
+       * nilai param `kota` dibaca juga oleh judul halaman & saran tempat —
+       * menempelkan provinsi di sana hanya akan mengotori teks yang tampil
+       * tanpa menambah ketepatan apa pun.
+       */
+      const rantai =
+        lvl === "kecamatan" || lvl === "kelurahan"
+          ? [
+              normalizeRegionName(parent.name, parent.level),
+              ...(parent.ancestors ?? []),
+            ].filter(Boolean)
+          : [];
       setChildList(
         sortByName(
           (json.items ?? []).map((it: { id: string; name: string }) => ({
@@ -346,6 +365,7 @@ export default function LocationPicker({
             name: it.name,
             level: lvl,
             parent: parent.name,
+            ancestors: rantai,
           }))
         )
       );
@@ -600,7 +620,7 @@ export default function LocationPicker({
               onClick={() => toggle(loc)}
               className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[11px] font-bold whitespace-nowrap transition-colors ${t.triggerChip}`}
             >
-              {loc.name}
+              {regionLabel(loc)}
               <Icon icon="solar:close-circle-bold" className="text-xs" />
             </button>
           ))}
@@ -771,7 +791,7 @@ export default function LocationPicker({
                   }}
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold whitespace-nowrap transition-colors cursor-pointer ${t.triggerChip}`}
                 >
-                  {loc.name}
+                  {regionLabel(loc)}
                   <Icon icon="solar:close-circle-bold" className="text-xs" />
                 </span>
               ))

@@ -197,14 +197,27 @@ body {
 }
 
 /* Cegah iOS Safari auto-zoom saat fokus ke input pencarian.
-   iOS hanya zoom kalau font-size < 16px, jadi paksa 16px di layar kecil.
+   iOS hanya zoom kalau font-size < 16px, jadi paksa 16px di layar sentuh.
    Discope ke `.zoom-safe` agar tidak mengubah input rapat di dashboard.
    !important wajib karena Tailwind utility (.text-sm) bisa tabrakan order
-   di CSS chunks Next.js App Router. */
-@media (max-width: 640px) {
+   di CSS chunks Next.js App Router.
+
+   AMBANGNYA BUKAN LAGI 640px. Search bar versi mobile tampil sampai <1024px,
+   dan satu ponsel dimiringkan saja sudah melewati 640 (iPhone Pro Max lanskap
+   = 932px) — di lebar itu aturannya dulu mati dan halaman kembali melompat
+   zoom setiap kali kolomnya disentuh. `pointer: coarse` menutup sisanya:
+   layar sentuh berapa pun lebarnya ikut aman, sementara desktop bermouse tidak
+   pernah kena.
+
+   `.ketikan-hantu` ikut disebut karena ia teks bayangan yang ditumpuk PERSIS
+   di atas kolom teks (contoh yang mengetik sendiri). Kalau hanya inputnya yang
+   naik ke 16px, bayangannya tertinggal di 14px dan huruf-hurufnya terlihat
+   bergeser saat orang mulai mengetik. */
+@media (max-width: 1023.98px), (pointer: coarse) {
   .zoom-safe input:not([type="checkbox"]):not([type="radio"]),
   .zoom-safe select,
-  .zoom-safe textarea {
+  .zoom-safe textarea,
+  .zoom-safe .ketikan-hantu {
     font-size: 16px !important;
   }
 }

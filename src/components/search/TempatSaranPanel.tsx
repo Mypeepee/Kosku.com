@@ -4,12 +4,22 @@
  * Panel saran tempat — daftar yang muncul di bawah kotak pencarian saat orang
  * mengetik "deket unesa".
  *
- * KENAPA DI-PORTAL KE BODY. Search bar dibungkus kartu ber-`overflow-hidden`
- * dan berlapis-lapis `rounded`; panel yang dirender di dalamnya akan terpotong
- * persis di tepi kartu — dan di mobile, terpotong berarti tidak terlihat sama
- * sekali. Polanya sama dengan LocationPicker & TypePicker (`data-search-portal`
- * dikenali penutup-dropdown di useSearchForm, supaya mengklik panel tidak
- * dianggap "klik di luar").
+ * ── DUA MODE, DUA MASALAH YANG BERBEDA ─────────────────────────────────────
+ *
+ * MELAYANG (bawaan, dipakai search bar desktop). Search bar dibungkus kartu
+ * ber-`overflow-hidden` dan berlapis-lapis `rounded`; panel yang dirender di
+ * dalamnya akan terpotong persis di tepi kartu. Maka ia di-portal ke body dan
+ * diposisikan `fixed` di bawah kotaknya. Polanya sama dengan LocationPicker &
+ * TypePicker (`data-search-portal` dikenali penutup-dropdown di useSearchForm,
+ * supaya mengklik panel tidak dianggap "klik di luar").
+ *
+ * MENYATU (`inline`, dipakai bottom sheet di layar kecil). Di dalam sheet,
+ * panel melayang justru MERUSAK: kotak kata kunci ada di paling atas, jadi
+ * daftar saran menimpa Lokasi, Tipe, dan Harga sekaligus. Yang terlihat oleh
+ * pemakai bukan "ada saran", melainkan "filter saya hilang" — dan yang belum
+ * hafal isinya tidak punya cara tahu bahwa di balik daftar itu ada kolom lain.
+ * Dalam mode ini panel dirender di dalam alur dokumen: ia MENDORONG kolom di
+ * bawahnya, tidak menutupinya, jadi tidak ada yang pernah tersembunyi.
  *
  * SETIAP SARAN MEMBAWA JUMLAH ASETNYA. Itu bukan hiasan: kamus tempat hanya
  * memuat tempat yang memang punya aset di dekatnya, dan menuliskan angkanya
@@ -90,6 +100,11 @@ interface Props {
   onHover: (i: number) => void;
   onPilih: (t: SaranTempatUi) => void;
   theme?: Theme;
+  /**
+   * Render menyatu dengan alur dokumen alih-alih melayang di atasnya.
+   * Dipakai di bottom sheet mobile — lihat catatan di kepala berkas.
+   */
+  inline?: boolean;
 }
 
 export default function TempatSaranPanel({
@@ -106,6 +121,7 @@ export default function TempatSaranPanel({
   onHover,
   onPilih,
   theme = "dark",
+  inline = false,
 }: Props) {
   const t = THEMES[theme];
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -137,21 +153,40 @@ export default function TempatSaranPanel({
     el?.scrollIntoView({ block: "nearest" });
   }, [aktif]);
 
-  if (!mounted || !open || !rect) return null;
+  if (!mounted || !open) return null;
+  // Mode melayang butuh ukuran kotak jangkarnya lebih dulu; mode menyatu tidak
+  // pernah menghitung koordinat apa pun.
+  if (!inline && !rect) return null;
 
   /**
-   * Lebar dijepit ke viewport SEBELUM dipakai menghitung posisi kiri.
+   * Geometri panel melayang.
    *
-   * Dihitung sesudahnya, panel yang lebih lebar dari layar membuat `left`
-   * jadi negatif lalu dijepit ke 8 — dan sisi kanannya menggantung di luar
-   * layar. Di ponsel sempit itu berarti kolom "12 properti" tidak pernah
-   * terlihat, dan panelnya menyeret halaman ke samping.
+   * Lebar dijepit ke viewport SEBELUM dipakai menghitung posisi kiri. Dihitung
+   * sesudahnya, panel yang lebih lebar dari layar membuat `left` jadi negatif
+   * lalu dijepit ke 8 — dan sisi kanannya menggantung di luar layar. Di ponsel
+   * sempit itu berarti kolom "12 properti" tidak pernah terlihat, dan panelnya
+   * menyeret halaman ke samping.
    */
-  const lebarMaks = window.innerWidth - 16;
-  const lebar = Math.min(Math.max(rect.width, 300), lebarMaks);
-  const ruangBawah = window.innerHeight - rect.bottom - 12;
-  const keAtas = ruangBawah < 220 && rect.top > ruangBawah;
-  const tinggiMaks = Math.max(180, Math.min(400, keAtas ? rect.top - 16 : ruangBawah));
+  const geo =
+    !inline && rect
+      ? (() => {
+          const lebarMaks = window.innerWidth - 16;
+          const lebar = Math.min(Math.max(rect.width, 300), lebarMaks);
+          const ruangBawah = window.innerHeight - rect.bottom - 12;
+          const keAtas = ruangBawah < 220 && rect.top > ruangBawah;
+          return {
+            lebar,
+            keAtas,
+            kiri: Math.max(8, Math.min(rect.left, window.innerWidth - lebar - 8)),
+            atas: rect.bottom + 8,
+            bawah: window.innerHeight - rect.top + 8,
+            tinggiMaks: Math.max(
+              180,
+              Math.min(400, keAtas ? rect.top - 16 : ruangBawah)
+            ),
+          };
+        })()
+      : null;
 
   /**
    * Batas antara saran JENIS dan saran NAMA. Keduanya menjawab pertanyaan yang
@@ -161,26 +196,8 @@ export default function TempatSaranPanel({
    */
   const jumlahKelas = items.filter((i) => i.kelasSemua).length;
 
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        data-search-portal="true"
-        initial={{ opacity: 0, y: keAtas ? 6 : -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: keAtas ? 6 : -6 }}
-        transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-        onMouseDown={(e) => e.preventDefault()}
-        style={{
-          position: "fixed",
-          top: keAtas ? undefined : rect.bottom + 8,
-          bottom: keAtas ? window.innerHeight - rect.top + 8 : undefined,
-          left: Math.max(8, Math.min(rect.left, window.innerWidth - lebar - 8)),
-          width: lebar,
-          maxHeight: tinggiMaks,
-          zIndex: 99999,
-        }}
-        className={`rounded-2xl shadow-2xl border overflow-hidden flex flex-col ${t.panel}`}
-      >
+  const isi = (
+    <>
         {populer && items.length > 0 && (
           <p
             className={`border-b px-3.5 py-2.5 text-[11px] font-semibold leading-snug ${
@@ -195,7 +212,10 @@ export default function TempatSaranPanel({
           </p>
         )}
 
-        <div ref={daftarRef} className="overflow-y-auto overscroll-contain">
+        {/* `min-h-0` wajib: tanpa itu anak flex tidak boleh menyusut di bawah
+            tinggi isinya, jadi daftar panjang menembus batas panel alih-alih
+            menggulir di dalamnya. */}
+        <div ref={daftarRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {memuat && items.length === 0 && (
             <div className={`px-4 py-5 text-xs ${t.kosong}`}>Mencari tempat…</div>
           )}
@@ -367,7 +387,10 @@ export default function TempatSaranPanel({
           )}
         </div>
 
-        {(items.length > 0 || alamat) && (
+        {/* Petunjuk papan ketik — hanya di mode melayang. Di layar sentuh
+            tidak ada tombol panah, jadi baris ini cuma memakan tinggi yang
+            justru sedang diperebutkan dengan keyboard virtual. */}
+        {!inline && (items.length > 0 || alamat) && (
           <div
             className={`px-3.5 py-2 border-t text-[10px] flex items-center gap-2 ${t.panel} ${t.sub}`}
           >
@@ -384,6 +407,51 @@ export default function TempatSaranPanel({
                 : "cari di sekitarnya"}
           </div>
         )}
+    </>
+  );
+
+  /**
+   * MENYATU. Tidak di-portal, tidak `fixed`, tidak ber-z-index: panel ini
+   * memang harus ikut mengalir supaya kolom di bawahnya bergeser turun, bukan
+   * tertutup. Tingginya tetap dibatasi — daftar sepanjang layar akan mendorong
+   * tombol "Cari Sekarang" sejauh dua kali gulir dari tempatnya.
+   */
+  if (inline) {
+    return (
+      <motion.div
+        data-search-portal="true"
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+        onMouseDown={(e) => e.preventDefault()}
+        className={`mt-2 flex max-h-[min(46vh,320px)] flex-col overflow-hidden rounded-2xl border ${t.panel}`}
+      >
+        {isi}
+      </motion.div>
+    );
+  }
+
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        data-search-portal="true"
+        initial={{ opacity: 0, y: geo!.keAtas ? 6 : -6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: geo!.keAtas ? 6 : -6 }}
+        transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+        onMouseDown={(e) => e.preventDefault()}
+        style={{
+          position: "fixed",
+          top: geo!.keAtas ? undefined : geo!.atas,
+          bottom: geo!.keAtas ? geo!.bawah : undefined,
+          left: geo!.kiri,
+          width: geo!.lebar,
+          maxHeight: geo!.tinggiMaks,
+          zIndex: 99999,
+        }}
+        className={`rounded-2xl shadow-2xl border overflow-hidden flex flex-col ${t.panel}`}
+      >
+        {isi}
       </motion.div>
     </AnimatePresence>,
     document.body,
