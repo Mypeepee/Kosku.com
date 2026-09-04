@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { readFileSync, existsSync } from "fs";
-import { writeFile, readFile, unlink } from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { tmpdir } from "os";
-import { join } from "path";
+import { readFileSync } from "fs";
 import path from "path";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
+import { docxToPdf } from "@/lib/server/docxToPdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const execFileAsync = promisify(execFile);
 
 // ── Terbilang ────────────────────────────────────────────────────────────────
 
@@ -105,27 +99,6 @@ function toDateOnly(iso: string | undefined): Date | null {
 
 // ── LibreOffice ──────────────────────────────────────────────────────────────
 
-function findSoffice(): string {
-  const candidates = [
-    process.env.SOFFICE_PATH,
-    // Windows (lokasi default installer) — pakai soffice.com dulu agar konversi
-    // headless berjalan sinkron (soffice.exe bisa detach & PDF belum siap).
-    "C:/Program Files/LibreOffice/program/soffice.com",
-    "C:/Program Files (x86)/LibreOffice/program/soffice.com",
-    "C:/Program Files/LibreOffice/program/soffice.exe",
-    "C:/Program Files (x86)/LibreOffice/program/soffice.exe",
-    // macOS / Linux
-    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-    "/usr/bin/soffice",
-    "/usr/local/bin/soffice",
-    "/opt/libreoffice/program/soffice",
-  ].filter(Boolean) as string[];
-  for (const p of candidates) {
-    try { if (existsSync(p)) return p; } catch { /* try next */ }
-  }
-  throw new Error("LibreOffice (soffice) tidak ditemukan. Install LibreOffice atau set SOFFICE_PATH di .env");
-}
-
 async function fillDocxTemplate(templatePath: string, data: Record<string, string>): Promise<Buffer> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const PizZip = require("pizzip");
@@ -141,26 +114,6 @@ async function fillDocxTemplate(templatePath: string, data: Record<string, strin
   });
   doc.render(data);
   return doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" }) as Buffer;
-}
-
-async function docxToPdf(docxBuffer: Buffer): Promise<Buffer> {
-  const id = `akb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const docxPath = join(tmpdir(), `${id}.docx`);
-  const pdfPath  = join(tmpdir(), `${id}.pdf`);
-  const soffice  = findSoffice();
-  try {
-    await writeFile(docxPath, docxBuffer);
-    await execFileAsync(soffice, [
-      "--headless", "--norestore",
-      "--convert-to", "pdf",
-      "--outdir", tmpdir(),
-      docxPath,
-    ]);
-    return await readFile(pdfPath);
-  } finally {
-    await unlink(docxPath).catch(() => {});
-    await unlink(pdfPath).catch(() => {});
-  }
 }
 
 // ── Route ────────────────────────────────────────────────────────────────────

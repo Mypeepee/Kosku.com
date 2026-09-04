@@ -6,6 +6,19 @@ import dynamic from "next/dynamic";
 import { Icon } from "@iconify/react";
 import { suratTemplates, type SuratTemplate } from "./components/data";
 
+/**
+ * Template yang punya modalnya sendiri. Wizard generik `SuratTemplateModal`
+ * harus melewatkan semuanya — kalau satu id lupa didaftarkan di sini, DUA
+ * modal terbuka bertumpuk untuk template yang sama.
+ */
+const MODAL_KHUSUS = [
+  "invoice-solusindo",
+  "kuitansi-solusindo",
+  "tanda-terima-dokumen",
+  "akta-kesepakatan-bersama",
+  "debitur-care",
+];
+
 const SuratTemplateModal = dynamic(
   () => import("./components/SuratTemplateModal").then(m => ({ default: m.SuratTemplateModal })),
   { ssr: false }
@@ -21,6 +34,10 @@ const KuitansiModal = dynamic(
 const TandaTerimaModal = dynamic(
   () => import("./components/TandaTerimaModal").then(m => ({ default: m.TandaTerimaModal })),
   { ssr: false }
+);
+const DebiturCareModal = dynamic(
+  () => import("./components/DebiturCareModal").then(m => ({ default: m.DebiturCareModal })),
+  { ssr: false },
 );
 const AktaKesepakatanModal = dynamic(
   () => import("./components/AktaKesepakatanModal").then(m => ({ default: m.AktaKesepakatanModal })),
@@ -718,10 +735,17 @@ function SuratContent() {
         onClose={() => setSelectedTemplate(null)}
       />
 
+      {/* ── Debitur Care modal ─────────────────────────────────────────────── */}
+      <DebiturCareModal
+        open={selectedTemplate?.id === "debitur-care"}
+        template={selectedTemplate?.id === "debitur-care" ? selectedTemplate : null}
+        onClose={() => setSelectedTemplate(null)}
+      />
+
       {/* ── Template wizard modal ─────────────────────────────────────────── */}
       <SuratTemplateModal
-        open={Boolean(selectedTemplate) && !["invoice-solusindo", "kuitansi-solusindo", "tanda-terima-dokumen", "akta-kesepakatan-bersama"].includes(selectedTemplate?.id ?? "")}
-        template={!["invoice-solusindo", "kuitansi-solusindo", "tanda-terima-dokumen", "akta-kesepakatan-bersama"].includes(selectedTemplate?.id ?? "") ? selectedTemplate : null}
+        open={Boolean(selectedTemplate) && !MODAL_KHUSUS.includes(selectedTemplate?.id ?? "")}
+        template={!MODAL_KHUSUS.includes(selectedTemplate?.id ?? "") ? selectedTemplate : null}
         onClose={() => setSelectedTemplate(null)}
         onSubmit={async ({ template, values }) => {
           // Saat ini hanya template Akte Grosse yang punya generate PDF

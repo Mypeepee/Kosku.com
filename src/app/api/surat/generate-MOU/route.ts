@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { readFileSync } from "fs";
-import { writeFile, readFile, unlink } from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { tmpdir } from "os";
-import { join } from "path";
 import path from "path";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
+import { docxToPdf } from "@/lib/server/docxToPdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const execFileAsync = promisify(execFile);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -62,19 +56,6 @@ function fmtRp(n: number): string {
   return n.toLocaleString("id-ID");
 }
 
-function findSoffice(): string {
-  const candidates = [
-    process.env.SOFFICE_PATH,
-    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-    "/usr/bin/soffice",
-    "/usr/local/bin/soffice",
-  ].filter(Boolean) as string[];
-  for (const p of candidates) {
-    try { readFileSync(p); return p; } catch { /* next */ }
-  }
-  throw new Error("LibreOffice tidak ditemukan. Set SOFFICE_PATH di .env");
-}
-
 async function fillDocx(templatePath: string, data: Record<string, string>): Promise<Buffer> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const PizZip = require("pizzip");
@@ -91,27 +72,6 @@ async function fillDocx(templatePath: string, data: Record<string, string>): Pro
   });
   doc.render(data);
   return doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" }) as Buffer;
-}
-
-async function docxToPdf(docxBuffer: Buffer, prefix: string): Promise<Buffer> {
-  const id = `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const docxPath = join(tmpdir(), `${id}.docx`);
-  const pdfPath  = join(tmpdir(), `${id}.pdf`);
-  const soffice  = findSoffice();
-
-  try {
-    await writeFile(docxPath, docxBuffer);
-    await execFileAsync(soffice, [
-      "--headless", "--norestore",
-      "--convert-to", "pdf",
-      "--outdir", tmpdir(),
-      docxPath,
-    ]);
-    return await readFile(pdfPath);
-  } finally {
-    await unlink(docxPath).catch(() => {});
-    await unlink(pdfPath).catch(() => {});
-  }
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────

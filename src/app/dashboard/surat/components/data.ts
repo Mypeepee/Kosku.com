@@ -926,4 +926,18 @@ export const suratTemplates: SuratTemplate[] = [
     templateFileName: "Akta_kesepakatan_bersama_TemplateSolusindo.docx",
     fields: [],
   },
+  {
+    id: "debitur-care",
+    code: "EKS-002",
+    title: "Debitur Care",
+    category: "Eksekusi Pengosongan",
+    description:
+      "Surat Kuasa + Perjanjian Jasa Hukum untuk debitur yang asetnya menghadapi lelang/pengosongan, tergabung dalam satu PDF. Scan KTP debitur — nama, NIK, tempat/tanggal lahir, pekerjaan, status, dan alamat sampai provinsi terisi otomatis; tinggal lengkapi jenis & nomor sertifikat. Nomor surat (NNN/PJH-INISIAL/BULAN/TAHUN) dipesan server dan tercatat di register.",
+    status: "Baru",
+    updatedAt: "04 Sep 2026",
+    usedCount: 0,
+    icon: FileText,
+    templateFileName: "TEMPLATE_DEBITURCARE.docx",
+    fields: [],
+  },
 ];

@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { readFileSync } from "fs";
-import { writeFile, readFile, unlink } from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { tmpdir } from "os";
-import { join } from "path";
 import path from "path";
 import { authOptions } from "@/app/api/auth/[...nextauth]/authOptions";
 import { prisma } from "@/lib/prisma";
+import { docxToPdf } from "@/lib/server/docxToPdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const execFileAsync = promisify(execFile);
 
 const BULAN_ID = [
   "JANUARI","FEBRUARI","MARET","APRIL","MEI","JUNI",
@@ -23,20 +17,6 @@ const BULAN_PANJANG = [
   "Januari","Februari","Maret","April","Mei","Juni",
   "Juli","Agustus","September","Oktober","November","Desember",
 ];
-
-function findSoffice(): string {
-  const candidates = [
-    process.env.SOFFICE_PATH,
-    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-    "/usr/bin/soffice",
-    "/usr/local/bin/soffice",
-  ].filter(Boolean) as string[];
-
-  for (const p of candidates) {
-    try { readFileSync(p); return p; } catch { /* try next */ }
-  }
-  throw new Error("LibreOffice (soffice) tidak ditemukan. Set SOFFICE_PATH di .env");
-}
 
 function formatTanggal(d: Date): string {
   return `${d.getDate()} ${BULAN_PANJANG[d.getMonth()]} ${d.getFullYear()}`;
@@ -103,28 +83,6 @@ async function fillDocx(templatePath: string, data: Record<string, string>): Pro
   });
   doc.render(data);
   return doc.getZip().generate({ type: "nodebuffer", compression: "DEFLATE" }) as Buffer;
-}
-
-async function docxToPdf(docxBuffer: Buffer): Promise<Buffer> {
-  const id = `kwt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const docxPath = join(tmpdir(), `${id}.docx`);
-  const pdfPath  = join(tmpdir(), `${id}.pdf`);
-  const soffice  = findSoffice();
-
-  try {
-    await writeFile(docxPath, docxBuffer);
-    await execFileAsync(soffice, [
-      "--headless",
-      "--norestore",
-      "--convert-to", "pdf",
-      "--outdir", tmpdir(),
-      docxPath,
-    ]);
-    return await readFile(pdfPath);
-  } finally {
-    await unlink(docxPath).catch(() => {});
-    await unlink(pdfPath).catch(() => {});
-  }
 }
 
 export async function POST(req: Request) {

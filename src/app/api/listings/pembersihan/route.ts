@@ -44,12 +44,14 @@ import {
   type RingkasanPembersihan,
 } from '@/lib/pembersihanListing';
 import {
+  PESAN_ARSIP_KURANG,
   PESAN_MIGRASI_KURANG,
   SELECT_KANDIDAT,
   alasanTerkunci,
   kolomBukanPropertiAda,
   pastikanOwner,
   pesanErrorPembersihan,
+  tabelArsipAda,
   whereAturan,
   type BarisKandidat,
 } from './_lib/query';
@@ -74,6 +76,13 @@ export async function GET() {
 
   try {
     const totalListing = await prisma.listing.count();
+    // Kesiapan arsip dilaporkan ke layar, bukan disimpan untuk nanti: Owner
+    // harus tahu tombol Hapus mati SEBELUM menekannya, bukan sesudah.
+    const arsipSiap = await tabelArsipAda();
+    const kesiapanArsip = {
+      arsipSiap,
+      ...(arsipSiap ? {} : { pesanArsip: PESAN_ARSIP_KURANG }),
+    };
 
     if (!(await kolomBukanPropertiAda())) {
       const kosong: RingkasanPembersihan = {
@@ -83,6 +92,7 @@ export async function GET() {
         totalListing,
         siap: false,
         pesan: PESAN_MIGRASI_KURANG,
+        ...kesiapanArsip,
       };
       return NextResponse.json(kosong);
     }
@@ -109,6 +119,7 @@ export async function GET() {
       ),
       totalListing,
       siap: true,
+      ...kesiapanArsip,
     };
 
     return NextResponse.json(ringkasan);
@@ -147,6 +158,15 @@ export async function POST(request: NextRequest) {
         { error: `Ketik "${KATA_KONFIRMASI}" untuk mengonfirmasi penghapusan.` },
         { status: 400 },
       );
+    }
+
+    // Tanpa tabel arsip, penghapusan ditolak DI SINI — bukan dibiarkan gagal
+    // sendiri di dalam transaksi. Transaksinya memang batal utuh sehingga tidak
+    // ada baris yang hilang, tapi galat yang muncul adalah galat query mentah
+    // (P2010) yang tidak menyebut satu pun berkas SQL, dan penekannya hanya
+    // melihat satu kalimat umum yang berulang setiap kali dicoba.
+    if (aksi === 'HAPUS' && !(await tabelArsipAda())) {
+      return NextResponse.json({ error: PESAN_ARSIP_KURANG }, { status: 409 });
     }
 
     const batas = Math.min(

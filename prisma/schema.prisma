@@ -100,18 +100,18 @@ model Agent {
 }
 
 model Listing {
-  id_property        BigInt                 @id @default(autoincrement())
-  id_agent           String                 @db.VarChar(20)
-  judul              String                 @db.VarChar(255)
-  slug               String                 @unique(map: "listing_slug_unique") @db.VarChar(300)
+  id_property        BigInt                    @id @default(autoincrement())
+  id_agent           String                    @db.VarChar(20)
+  judul              String                    @db.VarChar(255)
+  slug               String                    @unique(map: "listing_slug_unique") @db.VarChar(300)
   deskripsi          String?
   jenis_transaksi    jenis_transaksi_enum
   kategori           kategori_properti_enum
-  vendor             String?                @db.VarChar(200)
-  status_tayang      status_properti_enum   @default(TERSEDIA)
-  harga              Decimal                @db.Decimal(20, 2)
-  harga_per_meter    Decimal?               @db.Decimal(20, 2)
-  harga_promo        Decimal?               @db.Decimal(20, 2)
+  vendor             String?                   @db.VarChar(200)
+  status_tayang      status_properti_enum      @default(TERSEDIA)
+  harga              Decimal                   @db.Decimal(20, 2)
+  harga_per_meter    Decimal?                  @db.Decimal(20, 2)
+  harga_promo        Decimal?                  @db.Decimal(20, 2)
   /// TURUNAN — JANGAN DITULIS DARI APLIKASI. Harga yang benar-benar tampil di
   /// kartu: harga_promo bila diskonnya sah, kalau tidak harga. Diisi otomatis
   /// oleh trigger `trg_listing_harga_efektif` (prisma/migration_harga_efektif.sql)
@@ -119,26 +119,26 @@ model Listing {
   /// Ada sebagai kolom nyata semata-mata supaya bisa di-ORDER BY & di-index —
   /// "urutkan termurah" harus memakai angka yang dibaca pemakai. Lihat
   /// src/lib/listingSort.ts.
-  harga_efektif      Decimal?               @db.Decimal(20, 2)
-  tanggal_lelang     DateTime?              @db.Timestamptz(6)
-  uang_jaminan       Decimal?               @db.Decimal(20, 2)
-  nilai_limit_lelang Decimal?               @db.Decimal(20, 2)
-  link               String?                @db.VarChar(500)
-  alamat_lengkap     String?                @db.VarChar(500)
-  provinsi           String?                @db.VarChar(355)
-  kota               String                 @db.VarChar(355)
-  kecamatan          String?                @db.VarChar(355)
-  kelurahan          String?                @db.VarChar(355)
-  latitude           Decimal?               @db.Decimal(10, 8)
-  longitude          Decimal?               @db.Decimal(11, 8)
+  harga_efektif      Decimal?                  @db.Decimal(20, 2)
+  tanggal_lelang     DateTime?                 @db.Timestamptz(6)
+  uang_jaminan       Decimal?                  @db.Decimal(20, 2)
+  nilai_limit_lelang Decimal?                  @db.Decimal(20, 2)
+  link               String?                   @db.VarChar(500)
+  alamat_lengkap     String?                   @db.VarChar(500)
+  provinsi           String?                   @db.VarChar(355)
+  kota               String                    @db.VarChar(355)
+  kecamatan          String?                   @db.VarChar(355)
+  kelurahan          String?                   @db.VarChar(355)
+  latitude           Decimal?                  @db.Decimal(10, 8)
+  longitude          Decimal?                  @db.Decimal(11, 8)
   /// Patokan/akses terdekat, mis. [{tipe:"KAMPUS",nama:"UNAIR",jarak:5,satuan:"MENIT"}].
   /// Faktor keputusan utama penyewa kos ("5 menit ke kampus"). Disimpan
   /// terstruktur (bukan teks bebas) supaya bisa dirender seragam & nanti
   /// dipakai untuk filter "dekat kampus X". Berlaku untuk semua jenis
   /// transaksi — rumah dijual juga relevan ("dekat tol/sekolah").
   akses_terdekat     Json?
-  luas_tanah         Decimal?               @db.Decimal(12, 2)
-  luas_bangunan      Decimal?               @db.Decimal(12, 2)
+  luas_tanah         Decimal?                  @db.Decimal(12, 2)
+  luas_bangunan      Decimal?                  @db.Decimal(12, 2)
   /// TRUE = lot ini bukan properti (kendaraan, mesin, barang bergerak, hewan,
   /// komoditas) atau datanya tidak layak direkomendasikan. Ada karena
   /// `kategori` pada data hasil scraping lelang adalah EMBER TEMPAT LOT ITU
@@ -146,7 +146,7 @@ model Listing {
   /// seluruh lot di putaran itu jadi RUMAH, termasuk sepeda motor dan sapi.
   /// Diisi trigger `trg_listing_bukan_properti`, JANGAN ditulis dari aplikasi;
   /// hakimnya luas, bukan kata di judul (lihat prisma/migration_listing_bukan_properti.sql).
-  bukan_properti     Boolean                @default(false)
+  bukan_properti     Boolean                   @default(false)
   /// TRUE = di atas tanahnya ada bangunan, FALSE = tanah kosong, NULL = tidak
   /// bisa disimpulkan. Lapis kedua atas masalah yang sama dengan
   /// `bukan_properti`: barisnya memang properti, tapi BENTUKNYA bukan yang
@@ -156,24 +156,24 @@ model Listing {
   /// Diisi trigger `trg_listing_ada_bangunan`, JANGAN ditulis dari aplikasi
   /// (lihat prisma/migration_listing_ada_bangunan.sql).
   ada_bangunan       Boolean?
-  jumlah_lantai      Int                    @default(1)
+  jumlah_lantai      Int                       @default(1)
   kamar_tidur        Int?
   kamar_mandi        Int?
   daya_listrik       Int?
-  sumber_air         String?                @db.VarChar(50)
-  hadap_bangunan     String?                @db.VarChar(20)
-  kondisi_interior   String?                @db.VarChar(50)
+  sumber_air         String?                   @db.VarChar(50)
+  hadap_bangunan     String?                   @db.VarChar(20)
+  kondisi_interior   String?                   @db.VarChar(50)
   legalitas          sertifikat_enum?
-  nomor_legalitas    String?                @db.VarChar(250)
+  nomor_legalitas    String?                   @db.VarChar(250)
   gambar             String?
   lampiran           String?
-  dilihat            Int                    @default(0)
-  wa_click_count     Int                    @default(0)
-  is_hot_deal        Boolean                @default(false)
-  tanggal_dibuat     DateTime?              @default(now()) @db.Timestamptz(6)
-  tanggal_diupdate   DateTime?              @default(now()) @db.Timestamptz(6)
+  dilihat            Int                       @default(0)
+  wa_click_count     Int                       @default(0)
+  is_hot_deal        Boolean                   @default(false)
+  tanggal_dibuat     DateTime?                 @default(now()) @db.Timestamptz(6)
+  tanggal_diupdate   DateTime?                 @default(now()) @db.Timestamptz(6)
   acara              Acara[]
-  agent              Agent                  @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
+  agent              Agent                     @relation(fields: [id_agent], references: [id_agent], onDelete: Cascade)
   listingBoosts      ListingBoost[]
   pilihanPemilu      PilihanPemilu[]
   project            Project[]
@@ -1509,12 +1509,12 @@ model Klien {
   dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
   diperbarui_pada DateTime @default(now()) @db.Timestamptz(6)
 
-  agent         Agent                @relation(fields: [id_agent], references: [id_agent], onDelete: Restrict, map: "klien_agent_fk")
-  pengguna      Pengguna?            @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: SetNull, map: "klien_pengguna_fk")
-  leadAsal      Lead?                @relation(fields: [id_lead_asal], references: [id_lead], onDelete: SetNull, map: "klien_lead_fk")
-  propertiAsal  Listing?             @relation(fields: [id_properti_asal], references: [id_property], onDelete: SetNull, map: "klien_properti_fk")
+  agent         Agent                     @relation(fields: [id_agent], references: [id_agent], onDelete: Restrict, map: "klien_agent_fk")
+  pengguna      Pengguna?                 @relation(fields: [id_pengguna], references: [id_pengguna], onDelete: SetNull, map: "klien_pengguna_fk")
+  leadAsal      Lead?                     @relation(fields: [id_lead_asal], references: [id_lead], onDelete: SetNull, map: "klien_lead_fk")
+  propertiAsal  Listing?                  @relation(fields: [id_properti_asal], references: [id_property], onDelete: SetNull, map: "klien_properti_fk")
   preferensi    PreferensiKlien[]
-  followUpAcara Acara[]              @relation("KlienFollowUpAcara")
+  followUpAcara Acara[]                   @relation("KlienFollowUpAcara")
   kiriman       KirimanRekomendasi[]
   disingkirkan  RekomendasiDisingkirkan[]
   tugas         Tugas[]
@@ -2380,4 +2380,64 @@ model AktaKesepakatanBersama {
   @@index([tahun, bulan], map: "idx_akb_periode")
   @@index([p2_nama], map: "idx_akb_p2_nama")
   @@map("akta_kesepakatan_bersama")
+}
+
+// ── Debitur Care (Surat Kuasa + Perjanjian Jasa Hukum) ────────────────────────
+//    Register nomor surat + arsip seluruh input generate.
+//    Nomor auto-urut server: NNN/PJH-[inisial debitur]/[romawi bulan]/[tahun],
+//    urutnya di-reset tiap ganti bulan. Inisial ikut nama debitur, jadi DUA
+//    debitur berbeda di bulan yang sama tetap dapat urut berbeda (001, 002).
+//    Menyimpan snapshot hasil OCR KTP persis seperti yang tercetak di PDF —
+//    kalau kelak KTP-nya hilang, isi suratnya masih bisa dipertanggungjawabkan.
+model SuratDebiturCare {
+  id         BigInt @id @default(autoincrement())
+  nomor      String @unique @db.VarChar(60)
+  nomor_urut Int
+  inisial    String @db.VarChar(10)
+  bulan      Int
+  tahun      Int
+
+  tanggal_surat DateTime @db.Date
+
+  // ── Debitur (PIHAK KESATU / PEMBERI KUASA) — dari OCR KTP ──
+  nama                 String  @db.VarChar(200)
+  nik                  String? @db.VarChar(20)
+  tempat_lahir         String? @db.VarChar(100)
+  tanggal_lahir        String? @db.VarChar(30)
+  tempat_tanggal_lahir String? @db.VarChar(140)
+  jenis_kelamin        String? @db.VarChar(20)
+  gol_darah            String? @db.VarChar(5)
+  agama                String? @db.VarChar(40)
+  status_kawin         String? @db.VarChar(40)
+  pekerjaan            String? @db.VarChar(120)
+  warga_negara         String? @db.VarChar(50)
+
+  // ── Alamat lengkap sampai provinsi ──
+  alamat         String?
+  rt_rw          String? @db.VarChar(20)
+  kelurahan      String? @db.VarChar(100)
+  kecamatan      String? @db.VarChar(100)
+  kota           String? @db.VarChar(100)
+  jenis_kota     String? @db.VarChar(20)
+  provinsi       String? @db.VarChar(100)
+  alamat_lengkap String?
+
+  // ── Objek yang dikosongkan ──
+  jenis_sertifikat String? @db.VarChar(120)
+  nomor_sertifikat String? @db.VarChar(120)
+
+  // ── Jejak pembacaan KTP: dipakai menilai baris mana yang layak dicurigai ──
+  sumber_ocr String? @db.VarChar(20)
+  skor_ocr   Int?
+
+  id_agent String? @db.VarChar(20)
+
+  dibuat_pada     DateTime @default(now()) @db.Timestamptz(6)
+  diperbarui_pada DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@unique([tahun, bulan, nomor_urut], map: "sdc_periode_urut_unique")
+  @@index([tahun, bulan], map: "idx_sdc_periode")
+  @@index([nama], map: "idx_sdc_nama")
+  @@index([nik], map: "idx_sdc_nik")
+  @@map("surat_debitur_care")
 }

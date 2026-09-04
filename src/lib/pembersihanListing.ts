@@ -241,6 +241,16 @@ export interface RingkasanPembersihan {
   /** FALSE = migrasi bukan_properti belum jalan di database ini. */
   siap: boolean;
   pesan?: string;
+  /**
+   * FALSE = tabel arsip `listing_dibersihkan` belum ada, jadi HAPUS dimatikan.
+   *
+   * Terpisah dari `siap` karena akibatnya terpisah: tanpa kolom bukan_properti
+   * tidak ada yang bisa dihitung sama sekali, sedangkan tanpa tabel arsip
+   * seluruh panel tetap berguna — menghitung, meninjau, dan menarik dari
+   * tayang semuanya jalan; yang mustahil hanya penghapusan permanen.
+   */
+  arsipSiap: boolean;
+  pesanArsip?: string;
 }
 
 export interface KandidatListing {

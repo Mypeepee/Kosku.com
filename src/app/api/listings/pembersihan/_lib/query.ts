@@ -9,7 +9,7 @@
 
 import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
-import prisma from '@/lib/prisma';
+import prisma, { petunjukClientBasi } from '@/lib/prisma';
 import {
   KATA_BARANG_BERGERAK,
   KATA_PELINDUNG_PROPERTI,
@@ -240,28 +240,66 @@ export function keKandidat(row: BarisKandidat): KandidatListing {
  * melempar error Prisma mentah, dan tidak ada yang tahu perintah apa yang
  * harus dijalankan.
  */
-let cacheKolom: { ada: boolean; sampai: number } | null = null;
+const cacheSehat = new Map<string, { ada: boolean; sampai: number }>();
 
-export async function kolomBukanPropertiAda(): Promise<boolean> {
-  if (cacheKolom && cacheKolom.sampai > Date.now()) return cacheKolom.ada;
+/**
+ * Bungkus satu pemeriksaan kesehatan berikut cache-nya.
+ *
+ * Sehat 30 menit; rusak 1 menit, supaya begitu migrasinya dijalankan fiturnya
+ * langsung hidup tanpa restart proses.
+ */
+async function periksaSekali(
+  kunci: string,
+  tanya: () => Promise<boolean>,
+): Promise<boolean> {
+  const tersimpan = cacheSehat.get(kunci);
+  if (tersimpan && tersimpan.sampai > Date.now()) return tersimpan.ada;
 
   let ada = false;
   try {
-    const baris = await prisma.$queryRaw<{ n: bigint }[]>`
-      SELECT count(*)::bigint AS n
-        FROM information_schema.columns
-       WHERE table_name = 'listing' AND column_name = 'bukan_properti'`;
-    ada = Number(baris?.[0]?.n ?? 0) > 0;
+    ada = await tanya();
   } catch {
     // Pemeriksaan kesehatan yang gagal tidak boleh mematikan halamannya —
     // anggap ada, biarkan query aslinya yang bicara kalau memang tidak.
     ada = true;
   }
 
-  // Sehat 30 menit; rusak 1 menit, supaya begitu migrasinya dijalankan
-  // fiturnya langsung hidup tanpa restart proses.
-  cacheKolom = { ada, sampai: Date.now() + (ada ? 30 * 60_000 : 60_000) };
+  cacheSehat.set(kunci, { ada, sampai: Date.now() + (ada ? 30 * 60_000 : 60_000) });
   return ada;
+}
+
+export function kolomBukanPropertiAda(): Promise<boolean> {
+  return periksaSekali('kolom_bukan_properti', async () => {
+    const baris = await prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT count(*)::bigint AS n
+        FROM information_schema.columns
+       WHERE table_name = 'listing' AND column_name = 'bukan_properti'`;
+    return Number(baris?.[0]?.n ?? 0) > 0;
+  });
+}
+
+/**
+ * Apakah tabel arsip `listing_dibersihkan` ada di database INI?
+ *
+ * Pemeriksaan terpisah dari kolom `bukan_properti` karena keduanya datang dari
+ * migrasi yang berbeda, dan kekurangannya berakibat berbeda pula: tanpa kolom,
+ * TIDAK ADA yang bisa dihitung; tanpa tabel arsip, menghitung dan MENARIK
+ * masih jalan sempurna — yang mustahil hanya HAPUS.
+ *
+ * Ini bukan kemungkinan teoretis. INSERT ke tabel arsip ditulis sebagai query
+ * MENTAH (supaya `to_jsonb(l)` menyalin seluruh kolom apa adanya), dan Prisma
+ * membungkus kegagalan query mentah sebagai P2010 — bukan P2021 "tabel tidak
+ * ada" yang punya kalimat penjelasnya sendiri. Jadi di database yang belum
+ * dimigrasikan, gejalanya adalah tombol Hapus yang gagal terus dengan kalimat
+ * umum "Gagal menjalankan pembersihan data", tanpa satu pun petunjuk bahwa
+ * yang kurang hanyalah satu berkas SQL yang belum dijalankan.
+ */
+export function tabelArsipAda(): Promise<boolean> {
+  return periksaSekali('tabel_listing_dibersihkan', async () => {
+    const baris = await prisma.$queryRaw<{ ada: boolean }[]>`
+      SELECT to_regclass('public.listing_dibersihkan') IS NOT NULL AS ada`;
+    return baris?.[0]?.ada === true;
+  });
 }
 
 export const PESAN_MIGRASI_KURANG =
@@ -269,8 +307,32 @@ export const PESAN_MIGRASI_KURANG =
   'npx prisma db execute --file prisma/migration_listing_bukan_properti.sql ' +
   '--schema prisma/schema.prisma';
 
+export const PESAN_ARSIP_KURANG =
+  'Tabel arsip listing_dibersihkan belum ada di database ini, jadi penghapusan ' +
+  'permanen dimatikan — tanpa arsipnya, DELETE tidak punya jalan pulang. ' +
+  'Jalankan dulu: npx prisma db execute --file ' +
+  'prisma/migration_listing_pembersihan.sql --schema prisma/schema.prisma ' +
+  '(aksi "Tarik dari tayang" tetap bisa dipakai sekarang).';
+
+/** Kode SQLSTATE Postgres yang tersembunyi di dalam pesan galat query mentah. */
+const sqlstate = (pesan: string, kode: string) =>
+  pesan.includes(`Code: \`${kode}\``);
+
 export function pesanErrorPembersihan(error: unknown): string {
   const kode = (error as { code?: string })?.code;
+  const asli = String((error as { message?: string })?.message ?? '');
+
+  // P2010 = query MENTAH yang gagal, dan kode sebenarnya ada di dalam teks
+  // pesannya, bukan di `error.code`. Cabang ini penting justru karena satu-
+  // satunya query mentah di fitur ini adalah INSERT ke tabel arsip: di
+  // database yang belum dimigrasikan, tanpa cabang ini gejalanya adalah
+  // "Gagal menjalankan pembersihan data" yang berulang tanpa menyebut satu
+  // pun berkas SQL yang harus dijalankan.
+  if (kode === 'P2010') {
+    if (sqlstate(asli, '42P01')) return PESAN_ARSIP_KURANG; // tabel tak ada
+    if (sqlstate(asli, '42703')) return PESAN_MIGRASI_KURANG; // kolom tak ada
+  }
+
   if (kode === 'P2021' || kode === 'P2022') {
     return (
       'Tabel/kolom yang dibutuhkan belum ada di database ini. Jalankan ' +
@@ -284,5 +346,26 @@ export function pesanErrorPembersihan(error: unknown): string {
       'bisa dihapus. Coba lagi — baris seperti itu akan dilewati.'
     );
   }
-  return 'Gagal menjalankan pembersihan data.';
+  // Kehabisan koneksi / transaksi kelewat lama. Aman diulang: kerjanya
+  // bertahap dan tiap potongan punya transaksinya sendiri, jadi yang sudah
+  // terhapus tetap terhapus beserta arsipnya.
+  if (kode === 'P2024' || kode === 'P2028') {
+    return (
+      'Database terlalu lama merespons dan potongan ini dibatalkan utuh. ' +
+      'Coba jalankan lagi — yang sudah selesai tidak diulang.'
+    );
+  }
+
+  // Client Prisma yang lebih tua dari proses yang sedang berjalan melempar
+  // galat biasa tanpa `code`; kalimatnya sudah disiapkan di lib/prisma.
+  const basi = petunjukClientBasi();
+  if (basi && !kode) return basi;
+
+  // Kodenya ikut disebut. Sebaris "(P2010)" di layar Owner adalah selisih
+  // antara galat yang bisa dicari penyebabnya dan galat yang hanya bisa
+  // dicoba ulang — dan ini satu-satunya layar tempat galatnya muncul.
+  return (
+    `Gagal menjalankan pembersihan data${kode ? ` (${kode})` : ''}. ` +
+    'Galat lengkapnya ada di log server.'
+  );
 }

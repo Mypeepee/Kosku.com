@@ -177,6 +177,12 @@ export default function DialogPembersihan({
   const perluKonfirmasi = aksi === "HAPUS";
   const konfirmasiSah = !perluKonfirmasi || konfirmasi.trim() === KATA_KONFIRMASI;
 
+  // Tanpa tabel arsip, HAPUS dimatikan di layar — dan ditolak lagi di server.
+  // Yang dimatikan hanya HAPUS: menghitung, meninjau, dan TARIK tidak
+  // menyentuh arsip sama sekali dan tetap berguna di database seperti itu.
+  const hapusMati = ringkasan?.arsipSiap === false;
+  const aksiTerkunci = aksi === "HAPUS" && hapusMati;
+
   const kirim = async (payload: Record<string, unknown>) => {
     const res = await fetch("/api/listings/pembersihan", {
       method: "POST",
@@ -381,6 +387,13 @@ export default function DialogPembersihan({
                 <PitaGalat
                   judul="Database ini belum siap"
                   pesan={ringkasan.pesan ?? ""}
+                />
+              )}
+
+              {hapusMati && (
+                <PitaGalat
+                  judul="Hapus permanen dimatikan di database ini"
+                  pesan={ringkasan?.pesanArsip ?? ""}
                 />
               )}
 
@@ -699,7 +712,12 @@ export default function DialogPembersihan({
                     <button
                       key={id}
                       type="button"
-                      disabled={sedangJalan}
+                      disabled={sedangJalan || (id === "HAPUS" && hapusMati)}
+                      title={
+                        id === "HAPUS" && hapusMati
+                          ? "Tabel arsip belum ada di database ini."
+                          : undefined
+                      }
                       onClick={() => setAksi(id)}
                       className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors disabled:opacity-40 ${
                         aksi === id
@@ -731,7 +749,12 @@ export default function DialogPembersihan({
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    disabled={sedangJalan || pilih.size === 0 || !konfirmasiSah}
+                    disabled={
+                      sedangJalan ||
+                      pilih.size === 0 ||
+                      !konfirmasiSah ||
+                      aksiTerkunci
+                    }
                     onClick={jalankanPilihan}
                     className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[11px] font-bold text-zinc-200 transition-all hover:bg-white/10 disabled:opacity-30"
                   >
@@ -764,7 +787,8 @@ export default function DialogPembersihan({
                         sedangJalan ||
                         !konfirmasiSah ||
                         !halaman ||
-                        halaman.total === 0
+                        halaman.total === 0 ||
+                        aksiTerkunci
                       }
                       onClick={jalankanAturan}
                       className={`inline-flex items-center gap-1.5 rounded-xl border px-4 py-2 text-[11px] font-black transition-all disabled:opacity-30 ${
