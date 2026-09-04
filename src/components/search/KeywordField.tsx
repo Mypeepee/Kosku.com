@@ -408,7 +408,7 @@ export default function KeywordField({
             >
               <ContohKetikan
                 onJenis={setJenisContoh}
-                className="truncate text-sm font-medium leading-none"
+                className="ketikan-hantu truncate text-sm font-medium leading-none"
                 // Bagian yang diam sengaja lebih redup daripada bagian yang
                 // diketik: itu yang membuat kata yang berubah menonjol tanpa
                 // perlu gerakan tambahan.

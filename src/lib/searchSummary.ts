@@ -9,6 +9,7 @@
  * hitungan.
  */
 
+import { regionLabel } from "@/lib/regionSearch";
 import {
   durasiLabelFor,
   durasiUnitFor,
@@ -72,7 +73,10 @@ export function buildFilterChips(state: SearchFormState, tab: TxTab): FilterChip
   for (const loc of state.locations) {
     chips.push({
       key: `loc-${loc.level}-${loc.id}`,
-      label: loc.name,
+      // Nama saja menyembunyikan justru yang membedakan: ada tiga kecamatan
+      // "Taman" di Jawa Timur–Tengah. `regionLabel` menambahkan induk
+      // terdekatnya jadi "Taman, Sidoarjo".
+      label: regionLabel(loc),
       icon: "solar:map-point-bold-duotone",
       clear: {
         locations: state.locations.filter(

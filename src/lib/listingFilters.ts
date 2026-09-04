@@ -35,6 +35,8 @@ import { buildLocationWhere } from "./listingLocationFilter";
 import { parseCategoryDbList, TYPE_DB_TO_DISPLAY } from "./propertyType";
 import {
   parseLocationParams,
+  parseRegionValue,
+  regionLabel,
   REGION_LEVELS,
   type ParsedLocations,
   type RegionLevel,
@@ -707,7 +709,9 @@ export function chipAktif(
         chips.push({
           id: `lokasi:${level}:${nama}`,
           bidang: "lokasi",
-          label: nama,
+          // `nama` masih berbentuk nilai URL ("Taman*Sidoarjo"); chip harus
+          // membacanya sebagai kalimat manusia, bukan sintaksnya.
+          label: regionLabel(parseRegionValue(nama)),
           hapus: [
             {
               param: level,
